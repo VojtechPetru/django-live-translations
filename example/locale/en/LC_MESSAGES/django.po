@@ -1,0 +1,66 @@
+# English translations for django-live-translations example app.
+# Copyright (C) 2024
+# This file is distributed under the MIT license.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: django-live-translations-example 0.1.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2024-01-01 00:00+0000\n"
+"PO-Revision-Date: 2024-01-01 00:00+0000\n"
+"Last-Translator: \n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Live Translations Demo"
+msgstr "Live Translations Demo"
+
+#. Greeting shown on the homepage
+msgid "Welcome to the demo application!"
+msgstr "Welcome to the demo application!"
+
+msgid "About this page"
+msgstr "About this page"
+
+msgid "This page demonstrates the live translations widget. Log in as a superuser and press Shift+T to activate edit mode."
+msgstr "This page demonstrates the live translations widget. Log in as a superuser and press Shift+T to activate edit mode."
+
+msgid "How it works"
+msgstr "How it works"
+
+msgid "Press %(key)s to toggle edit mode. Translated strings will be highlighted — click any one to open the editor."
+msgstr "Press %(key)s to toggle edit mode. Translated strings will be highlighted — click any one to open the editor."
+
+msgid "Features"
+msgstr "Features"
+
+msgid "Edit translations directly in the browser"
+msgstr "Edit translations directly in the browser"
+
+msgid "Changes are saved instantly without restarting the server"
+msgstr "Changes are saved instantly without restarting the server"
+
+msgid "A minimal example app for testing django-live-translations."
+msgstr "A minimal example app for testing django-live-translations."
+
+msgid "Language"
+msgstr "Language"
+
+msgid "HTML attributes"
+msgstr "HTML attributes"
+
+msgid "This tooltip was translated with the trans tag"
+msgstr "This tooltip was translated with the trans tag"
+
+msgid "Hover over this paragraph to see a translated tooltip."
+msgstr "Hover over this paragraph to see a translated tooltip."
+
+msgid "This paragraph has a tooltip from a context variable."
+msgstr "This paragraph has a tooltip from a context variable."
+
+msgid "This tooltip was translated with gettext()"
+msgstr "This tooltip was translated with gettext()"

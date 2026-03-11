@@ -1,0 +1,66 @@
+# Czech translations for django-live-translations example app.
+# Copyright (C) 2024
+# This file is distributed under the MIT license.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: django-live-translations-example 0.1.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2024-01-01 00:00+0000\n"
+"PO-Revision-Date: 2024-01-01 00:00+0000\n"
+"Last-Translator: \n"
+"Language-Team: Czech\n"
+"Language: cs\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=4; plural=(n == 1 && n % 1 == 0) ? 0 : (n >= 2 && n <= 4 && n % 1 == 0) ? 1: (n % 1 != 0 ) ? 2 : 3;\n"
+
+msgid "Live Translations Demo"
+msgstr "Demo živých překladů"
+
+#. Greeting shown on the homepage
+msgid "Welcome to the demo application!"
+msgstr "Vítejte v demo aplikaci!"
+
+msgid "About this page"
+msgstr "O této stránce"
+
+msgid "This page demonstrates the live translations widget. Log in as a superuser and press Shift+T to activate edit mode."
+msgstr "Tato stránka demonstruje widget pro živé překlady. Přihlaste se jako superuživatel a stiskněte Shift+T pro aktivaci režimu úprav."
+
+msgid "How it works"
+msgstr "Jak to funguje"
+
+msgid "Press %(key)s to toggle edit mode. Translated strings will be highlighted — click any one to open the editor."
+msgstr "Stiskněte %(key)s pro přepnutí režimu úprav. Přeložené řetězce budou zvýrazněny — klikněte na libovolný pro otevření editoru."
+
+msgid "Features"
+msgstr "Funkce"
+
+msgid "Edit translations directly in the browser"
+msgstr "Upravujte překlady přímo v prohlížeči"
+
+msgid "Changes are saved instantly without restarting the server"
+msgstr "Změny se uloží okamžitě bez nutnosti restartu serveru"
+
+msgid "A minimal example app for testing django-live-translations."
+msgstr "Minimální ukázková aplikace pro testování django-live-translations."
+
+msgid "Language"
+msgstr "Jazyk"
+
+msgid "HTML attributes"
+msgstr "HTML atributy"
+
+msgid "This tooltip was translated with the trans tag"
+msgstr "Tento tooltip byl přeložen pomocí šablonového tagu trans"
+
+msgid "Hover over this paragraph to see a translated tooltip."
+msgstr "Najeďte myší na tento odstavec pro zobrazení přeloženého tooltipu."
+
+msgid "This paragraph has a tooltip from a context variable."
+msgstr "Tento odstavec má tooltip z kontextové proměnné."
+
+msgid "This tooltip was translated with gettext()"
+msgstr "Tento tooltip byl přeložen pomocí gettext()"

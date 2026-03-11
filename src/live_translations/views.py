@@ -2,27 +2,67 @@
 
 import json
 import logging
+import re
 import typing as t
 
-from django.http import HttpRequest, JsonResponse
-from django.views.decorators.csrf import csrf_protect
-from django.views.decorators.http import require_GET, require_POST
+import django.http
+import django.views.decorators.csrf
+import django.views.decorators.http
 
-from .conf import get_backend_instance, get_conf, get_permission_checker
+from live_translations import conf
 
 logger = logging.getLogger(__name__)
 
 
-def _check_permission(request: HttpRequest) -> JsonResponse | None:
+_PLACEHOLDER_RE = re.compile(
+    r"%(?:\([a-zA-Z_]\w*\))?[diouxXeEfFgGcrsab%]|\{[a-zA-Z_]\w*\}"
+)
+
+
+def _extract_placeholders(text: str) -> set[str]:
+    """Extract printf-style %(name)s and {name} placeholders from text."""
+    return set(_PLACEHOLDER_RE.findall(text))
+
+
+def _validate_placeholders(
+    msgid: str,
+    translations: dict[str, str],
+) -> dict[str, list[str]] | None:
+    """Return per-language error details if any translation has mismatched placeholders, else None."""
+    expected = _extract_placeholders(msgid)
+    if not expected:
+        return None
+
+    errors: dict[str, list[str]] = {}
+    for lang, msgstr in translations.items():
+        if not msgstr:
+            continue
+        actual = _extract_placeholders(msgstr)
+        missing = expected - actual
+        extra = actual - expected
+        if missing or extra:
+            parts: list[str] = []
+            if missing:
+                parts.append(f"missing {', '.join(sorted(missing))}")
+            if extra:
+                parts.append(f"unexpected {', '.join(sorted(extra))}")
+            errors[lang] = parts
+
+    return errors or None
+
+
+def _check_permission(
+    request: django.http.HttpRequest,
+) -> django.http.JsonResponse | None:
     """Return a 403 JsonResponse if the user lacks permission, else None."""
-    checker = get_permission_checker()
+    checker = conf.get_permission_checker()
     if not checker(request):
-        return JsonResponse({"error": "Forbidden"}, status=403)
+        return django.http.JsonResponse({"error": "Forbidden"}, status=403)
     return None
 
 
-@require_GET
-def get_translations(request: HttpRequest) -> JsonResponse:
+@django.views.decorators.http.require_GET
+def get_translations(request: django.http.HttpRequest) -> django.http.JsonResponse:
     """Fetch translations for a msgid across all configured languages.
 
     GET /__live-translations__/translations/?msgid=hero-title&context=
@@ -35,42 +75,49 @@ def get_translations(request: HttpRequest) -> JsonResponse:
     context = request.GET.get("context", "")
 
     if not msgid:
-        return JsonResponse({"error": "msgid is required"}, status=400)
+        return django.http.JsonResponse({"error": "msgid is required"}, status=400)
 
-    conf = get_conf()
-    backend = get_backend_instance()
+    settings = conf.get_settings()
+    backend = conf.get_backend_instance()
 
     try:
         entries = backend.get_translations(
             msgid=msgid,
-            languages=conf.languages,
+            languages=settings.languages,
             context=context,
         )
     except Exception:
         logger.exception("Failed to fetch translations for msgid='%s'", msgid)
-        return JsonResponse({"error": "Backend error"}, status=500)
+        return django.http.JsonResponse({"error": "Backend error"}, status=500)
 
     hint = backend.get_hint(msgid=msgid, context=context)
 
-    return JsonResponse(
+    return django.http.JsonResponse(
         {
             "msgid": msgid,
             "context": context,
-            "translations": {lang: {"msgstr": entry.msgstr, "fuzzy": entry.fuzzy} for lang, entry in entries.items()},
-            "defaults": backend.get_defaults(msgid=msgid, languages=conf.languages, context=context),
+            "translations": {
+                lang: {"msgstr": entry.msgstr, "fuzzy": entry.fuzzy}
+                for lang, entry in entries.items()
+            },
+            "defaults": backend.get_defaults(
+                msgid=msgid, languages=settings.languages, context=context
+            ),
             "hint": hint,
         }
     )
 
 
-@csrf_protect
-@require_POST
-def save_translations(request: HttpRequest) -> JsonResponse:
+@django.views.decorators.csrf.csrf_protect
+@django.views.decorators.http.require_POST
+def save_translations(request: django.http.HttpRequest) -> django.http.JsonResponse:
     """Save translations for a msgid.
 
     POST /__live-translations__/translations/save/
     Body: {"msgid": "...", "context": "", "translations": {"cs": "...", "en": "..."}}
     """
+    import django.utils.translation
+
     forbidden = _check_permission(request)
     if forbidden:
         return forbidden
@@ -78,28 +125,36 @@ def save_translations(request: HttpRequest) -> JsonResponse:
     try:
         body: dict[str, t.Any] = json.loads(request.body)
     except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON"}, status=400)
+        return django.http.JsonResponse({"error": "Invalid JSON"}, status=400)
 
     msgid: str = body.get("msgid", "")
     context: str = body.get("context", "")
     translations: dict[str, str] = body.get("translations", {})
 
     if not msgid:
-        return JsonResponse({"error": "msgid is required"}, status=400)
+        return django.http.JsonResponse({"error": "msgid is required"}, status=400)
     if not translations:
-        return JsonResponse({"error": "translations dict is required"}, status=400)
+        return django.http.JsonResponse(
+            {"error": "translations dict is required"}, status=400
+        )
 
     # Validate language codes
-    conf = get_conf()
-    allowed = set(conf.languages)
+    settings = conf.get_settings()
+    allowed = set(settings.languages)
     invalid = set(translations.keys()) - allowed
     if invalid:
-        return JsonResponse(
+        return django.http.JsonResponse(
             {"error": f"Invalid language codes: {', '.join(sorted(invalid))}"},
             status=400,
         )
 
-    backend = get_backend_instance()
+    placeholder_errors = _validate_placeholders(msgid, translations)
+    if placeholder_errors:
+        return django.http.JsonResponse(
+            {"error": "Placeholder mismatch", "details": placeholder_errors}, status=400
+        )
+
+    backend = conf.get_backend_instance()
 
     try:
         backend.save_translations(
@@ -108,18 +163,16 @@ def save_translations(request: HttpRequest) -> JsonResponse:
             context=context,
         )
     except FileNotFoundError as e:
-        return JsonResponse({"error": str(e)}, status=404)
+        return django.http.JsonResponse({"error": str(e)}, status=404)
     except Exception:
         logger.exception("Failed to save translations for msgid='%s'", msgid)
-        return JsonResponse({"error": "Backend error"}, status=500)
+        return django.http.JsonResponse({"error": "Backend error"}, status=500)
 
     # Return the current language's translation for in-place update
-    from django.utils.translation import get_language
-
-    current_lang = get_language() or conf.languages[0]
+    current_lang = django.utils.translation.get_language() or settings.languages[0]
     current_msgstr = translations.get(current_lang, "")
 
-    return JsonResponse(
+    return django.http.JsonResponse(
         {
             "ok": True,
             "current_language_msgstr": current_msgstr,

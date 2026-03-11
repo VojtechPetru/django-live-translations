@@ -47,6 +47,7 @@
   var state = "inactive"; // "inactive" | "active" | "editing"
   var dialog = null;
   var currentSpan = null;
+  var currentAttrName = null; // Set when editing an attribute translation
 
   // ─── API Client ──────────────────────────────────────
 
@@ -82,7 +83,9 @@
               return {};
             })
             .then(function (err) {
-              throw new Error(err.error || "POST failed: " + resp.status);
+              var e = new Error(err.error || "POST failed: " + resp.status);
+              e.details = err.details || null;
+              throw e;
             });
         }
         return resp.json();
@@ -130,6 +133,7 @@
       '<div class="lt-dialog__msgid"></div>' +
       '<div class="lt-dialog__hint"></div>' +
       '<div class="lt-dialog__fields"></div>' +
+      '<div class="lt-dialog__error"></div>' +
       '<div class="lt-dialog__actions">' +
       '<button type="button" class="lt-btn lt-btn--cancel">Cancel</button>' +
       '<button type="button" class="lt-btn lt-btn--save">Save</button>' +
@@ -164,19 +168,25 @@
     });
   }
 
-  function openModal(span) {
+  function openModal(element, attrInfo) {
     createDialog();
-    currentSpan = span;
+    currentSpan = element;
+    currentAttrName = attrInfo ? attrInfo.a : null;
     state = "editing";
 
-    var msgid = span.dataset.ltMsgid;
-    var context = span.dataset.ltContext || "";
+    var msgid = attrInfo ? attrInfo.m : element.dataset.ltMsgid;
+    var context = attrInfo ? attrInfo.c : (element.dataset.ltContext || "");
 
     // Show loading state
     dialog.querySelector(".lt-dialog__fields").innerHTML = "";
     dialog.querySelector(".lt-dialog__loading").style.display = "block";
-    dialog.querySelector(".lt-dialog__msgid").textContent = "msgid: " + msgid;
+    var label = "msgid: " + msgid;
+    if (currentAttrName) {
+      label += "  (attr: " + currentAttrName + ")";
+    }
+    dialog.querySelector(".lt-dialog__msgid").textContent = label;
     dialog.querySelector(".lt-btn--save").disabled = true;
+    showDialogError(null);
 
     dialog.showModal();
 
@@ -278,13 +288,39 @@
     if (first) first.focus();
   }
 
+  function showDialogError(message, details) {
+    var errorEl = dialog.querySelector(".lt-dialog__error");
+    if (!message) {
+      errorEl.innerHTML = "";
+      errorEl.style.display = "none";
+      return;
+    }
+    errorEl.innerHTML = "";
+    if (details) {
+      // Structured per-language errors: {lang: ["missing %(key)s", ...]}
+      for (var lang in details) {
+        var line = document.createElement("div");
+        var meta = LANG_META[lang];
+        var label = meta ? meta.flag + " " + meta.name : lang.toUpperCase();
+        line.textContent = label + ": " + details[lang].join(", ");
+        errorEl.appendChild(line);
+      }
+    } else {
+      errorEl.textContent = message;
+    }
+    errorEl.style.display = "block";
+  }
+
   function handleSave() {
     var saveBtn = dialog.querySelector(".lt-btn--save");
     saveBtn.disabled = true;
     saveBtn.textContent = "Saving...";
+    showDialogError(null);
 
-    var msgid = currentSpan.dataset.ltMsgid;
-    var context = currentSpan.dataset.ltContext || "";
+    // Read msgid/context from either span data attrs or the stored attr info
+    var attrData = currentAttrName ? _getAttrInfo(currentSpan, currentAttrName) : null;
+    var msgid = attrData ? attrData.m : currentSpan.dataset.ltMsgid;
+    var context = attrData ? attrData.c : (currentSpan.dataset.ltContext || "");
 
     var translations = {};
     for (var i = 0; i < LANGUAGES.length; i++) {
@@ -297,21 +333,27 @@
 
     api
       .saveTranslations(msgid, context, translations)
-      .then(function (result) {
-        // In-place update: replace the span's text with current language translation
-        if (result.current_language_msgstr) {
-          currentSpan.textContent = result.current_language_msgstr;
-        }
-        closeModal();
-        showToast("Translation saved");
+      .then(function () {
+        // Full page reload so Django re-renders all translations server-side.
+        // Inline DOM update can't handle %(var)s interpolation from blocktrans,
+        // plural forms, or other template-level processing.
+        window.location.reload();
       })
       .catch(function (err) {
-        showToast("Save failed: " + err.message, "error");
-      })
-      .finally(function () {
+        showDialogError(err.message, err.details || null);
         saveBtn.disabled = false;
         saveBtn.textContent = "Save";
       });
+  }
+
+  function _getAttrInfo(element, attrName) {
+    try {
+      var attrs = JSON.parse(element.dataset.ltAttrs || "[]");
+      for (var i = 0; i < attrs.length; i++) {
+        if (attrs[i].a === attrName) return attrs[i];
+      }
+    } catch (e) { /* ignore parse errors */ }
+    return null;
   }
 
   function closeModal() {
@@ -319,6 +361,7 @@
       dialog.close();
     }
     currentSpan = null;
+    currentAttrName = null;
     if (state === "editing") {
       state = "active";
     }
@@ -368,13 +411,46 @@
     function (e) {
       if (state !== "active") return;
 
+      // Check for inline text span first
       var span = e.target.closest(".lt-translatable");
-      if (!span) return;
+      if (span) {
+        e.preventDefault();
+        e.stopPropagation();
+        openModal(span);
+        return;
+      }
 
-      e.preventDefault();
-      e.stopPropagation();
-      openModal(span);
+      // Check for attribute-translatable element
+      var attrEl = e.target.closest("[data-lt-attrs]");
+      if (attrEl) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        var attrs;
+        try {
+          attrs = JSON.parse(attrEl.dataset.ltAttrs);
+        } catch (err) {
+          return;
+        }
+        if (!attrs || !attrs.length) return;
+
+        if (attrs.length === 1) {
+          // Single translated attribute — open directly
+          openModal(attrEl, attrs[0]);
+        } else {
+          // Multiple translated attributes — show picker
+          _showAttrPicker(attrEl, attrs);
+        }
+      }
     },
     true
   ); // Use capture phase to intercept before other handlers
+
+  // ─── Attribute Picker (for elements with multiple translated attrs) ──
+
+  function _showAttrPicker(element, attrs) {
+    // Simple: open modal for first attr, with a note about others.
+    // A full picker UI can be added later.
+    openModal(element, attrs[0]);
+  }
 })();

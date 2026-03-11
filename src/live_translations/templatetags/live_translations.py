@@ -1,33 +1,36 @@
 """Drop-in replacement for {% load i18n %}.
 
 Re-exports all standard i18n tags and filters, but overrides
-trans/translate and blocktrans/blocktranslate to wrap output
-in <span> elements when live translations are active.
+trans/translate and blocktrans/blocktranslate to produce text-safe
+markers when live translations are active. The middleware resolves
+these markers into <span> wrappers or attribute metadata.
 """
 
 import typing as t
 
-from django import template
-from django.template import Node
-from django.template.base import Parser, Token  # noqa: TC002
-from django.template.context import Context  # noqa: TC002
-from django.templatetags import i18n
-from django.templatetags.i18n import BlockTranslateNode, TranslateNode  # noqa: TC002
-from django.utils.html import escape
-from django.utils.safestring import mark_safe
+import django.template
+import django.template.base
+import django.template.context
+import django.templatetags.i18n
 
-register = template.Library()
+from live_translations import strings
 
-# ── Re-export all tags and filters from Django's i18n library ──
-_i18n_lib: template.Library = i18n.register
+register = django.template.Library()
+
+# -- Re-export all tags and filters from Django's i18n library --
+_i18n_lib: django.template.Library = django.templatetags.i18n.register
 register.filters.update(_i18n_lib.filters)
 register.tags.update(_i18n_lib.tags)
 
 
-# ── Helpers ────────────────────────────────────────────────────
+# -- Helpers --
 
 
-def _resolve_message_context(node: TranslateNode | BlockTranslateNode, context: Context) -> str:
+def _resolve_message_context(
+    node: django.templatetags.i18n.TranslateNode
+    | django.templatetags.i18n.BlockTranslateNode,
+    context: django.template.context.Context,
+) -> str:
     """Extract the gettext context string from a node, or '' if none."""
     msg_ctx = node.message_context
     if msg_ctx is None:
@@ -36,7 +39,7 @@ def _resolve_message_context(node: TranslateNode | BlockTranslateNode, context: 
     return str(resolved) if resolved is not None else ""
 
 
-def _extract_trans_msgid(node: TranslateNode) -> str:
+def _extract_trans_msgid(node: django.templatetags.i18n.TranslateNode) -> str:
     """Extract the literal msgid from a TranslateNode."""
     var = node.filter_expression.var
     if hasattr(var, "literal") and var.literal is not None:
@@ -44,51 +47,60 @@ def _extract_trans_msgid(node: TranslateNode) -> str:
     return str(var)
 
 
-def _wrap_span(content: str, msgid: str, context: str) -> str:
-    """Wrap translated content in a live-translation span."""
-    escaped_msgid = escape(msgid)
-    escaped_context = escape(context)
-    return mark_safe(  # type: ignore[return-value]
-        f'<span class="lt-translatable" data-lt-msgid="{escaped_msgid}"'
-        f' data-lt-context="{escaped_context}">{content}</span>'
-    )
+def _wrap_marker(
+    content: str,
+    msgid: str,
+    context: str,
+) -> str:
+    """Produce a text-safe marker for live-translation.
+
+    Content from template tags is already HTML-escaped by Django,
+    so we pass escaped=True to avoid double-escaping.
+    """
+    return strings.make_marker(content, msgid, context, escaped=True)
 
 
-# ── Wrapper nodes ──────────────────────────────────────────────
+# -- Wrapper nodes --
 
 
-class LiveTranslateNode(Node):
-    """Wraps a standard TranslateNode, adding <span> for superusers."""
+class LiveTranslateNode(django.template.Node):
+    """Wraps a standard TranslateNode, producing markers for superusers."""
 
     child_nodelists: t.ClassVar[list[str]] = []
 
-    def __init__(self, original_node: TranslateNode) -> None:
+    def __init__(
+        self,
+        original_node: django.templatetags.i18n.TranslateNode,
+    ) -> None:
         self.original_node = original_node
 
     @t.override
-    def render(self, context: Context) -> str:
+    def render(self, context: django.template.context.Context) -> str:
         rendered: str = self.original_node.render(context)
 
         # Never wrap asvar or noop — they don't produce direct output
-        if self.original_node.asvar or self.original_node.noop:
-            return rendered
-
-        # Check the flag set by context processor
-        if not context.get("_live_translations_active", False):
+        if (
+            (not strings.lt_active.get(False))
+            or self.original_node.asvar
+            or self.original_node.noop
+        ):
             return rendered
 
         msgid = _extract_trans_msgid(self.original_node)
         msg_context = _resolve_message_context(self.original_node, context)
 
-        return _wrap_span(rendered, msgid, msg_context)
+        return _wrap_marker(rendered, msgid, msg_context)
 
 
-class LiveBlockTranslateNode(Node):
-    """Wraps a standard BlockTranslateNode, adding <span> for superusers."""
+class LiveBlockTranslateNode(django.template.Node):
+    """Wraps a standard BlockTranslateNode, producing markers for superusers."""
 
     child_nodelists: t.ClassVar[list[str]] = []
 
-    def __init__(self, original_node: BlockTranslateNode) -> None:
+    def __init__(
+        self,
+        original_node: django.templatetags.i18n.BlockTranslateNode,
+    ) -> None:
         self.original_node = original_node
 
     def _extract_msgid(self) -> str:
@@ -97,39 +109,48 @@ class LiveBlockTranslateNode(Node):
         BlockTranslateNode.render_token_list() returns (msg, sentinel_set).
         The msg is the gettext-ready msgid with %(var)s placeholders.
         """
-        msg, _sentinels = self.original_node.render_token_list(self.original_node.singular)
+        msg, _sentinels = self.original_node.render_token_list(
+            self.original_node.singular
+        )
         return msg
 
     @t.override
-    def render(self, context: Context) -> str:
+    def render(self, context: django.template.context.Context) -> str:
         rendered: str = self.original_node.render(context)
 
-        if self.original_node.asvar:
-            return rendered
-
-        if not context.get("_live_translations_active", False):
+        if (not strings.lt_active.get(False)) or self.original_node.asvar:
             return rendered
 
         msgid = self._extract_msgid()
         msg_context = _resolve_message_context(self.original_node, context)
 
-        return _wrap_span(rendered, msgid, msg_context)
+        return _wrap_marker(rendered, msgid, msg_context)
 
 
-# ── Tag registration (overrides the re-exported i18n tags) ─────
+# -- Tag registration (overrides the re-exported i18n tags) --
 
 
 @register.tag("trans")
 @register.tag("translate")
-def do_live_translate(parser: Parser, token: Token) -> LiveTranslateNode:
+def do_live_translate(
+    parser: django.template.base.Parser,
+    token: django.template.base.Token,
+) -> LiveTranslateNode:
     """Parse with Django's do_translate, then wrap in LiveTranslateNode."""
-    original_node: TranslateNode = i18n.do_translate(parser, token)
+    original_node: django.templatetags.i18n.TranslateNode = (
+        django.templatetags.i18n.do_translate(parser, token)
+    )
     return LiveTranslateNode(original_node)
 
 
 @register.tag("blocktrans")
 @register.tag("blocktranslate")
-def do_live_block_translate(parser: Parser, token: Token) -> LiveBlockTranslateNode:
+def do_live_block_translate(
+    parser: django.template.base.Parser,
+    token: django.template.base.Token,
+) -> LiveBlockTranslateNode:
     """Parse with Django's do_block_translate, then wrap in LiveBlockTranslateNode."""
-    original_node: BlockTranslateNode = i18n.do_block_translate(parser, token)
+    original_node: django.templatetags.i18n.BlockTranslateNode = (
+        django.templatetags.i18n.do_block_translate(parser, token)
+    )
     return LiveBlockTranslateNode(original_node)

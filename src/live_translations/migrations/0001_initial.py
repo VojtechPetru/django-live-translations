@@ -4,29 +4,52 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     initial = True
 
-    dependencies = [
-    ]
+    dependencies = []
 
     operations = [
         migrations.CreateModel(
-            name='TranslationEntry',
+            name="TranslationEntry",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('language', models.CharField(db_index=True, max_length=10, verbose_name='Language')),
-                ('msgid', models.TextField(verbose_name='Message ID')),
-                ('context', models.CharField(blank=True, db_index=True, default='', max_length=255, verbose_name='Context')),
-                ('msgstr', models.TextField(blank=True, verbose_name='Translation')),
-                ('updated_at', models.DateTimeField(auto_now=True, verbose_name='Updated at')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                (
+                    "language",
+                    models.CharField(
+                        db_index=True, max_length=10, verbose_name="Language"
+                    ),
+                ),
+                ("msgid", models.TextField(verbose_name="Message ID")),
+                (
+                    "context",
+                    models.CharField(
+                        blank=True,
+                        db_index=True,
+                        default="",
+                        max_length=255,
+                        verbose_name="Context",
+                    ),
+                ),
+                ("msgstr", models.TextField(blank=True, verbose_name="Translation")),
+                (
+                    "updated_at",
+                    models.DateTimeField(auto_now=True, verbose_name="Updated at"),
+                ),
             ],
             options={
-                'verbose_name': 'Translation override',
-                'verbose_name_plural': 'Translation overrides',
-                'db_table': 'live_translations_entry',
-                'ordering': ['language', 'msgid'],
-                'unique_together': {('language', 'msgid', 'context')},
+                "verbose_name": "Translation override",
+                "verbose_name_plural": "Translation overrides",
+                "db_table": "live_translations_entry",
+                "ordering": ["language", "msgid"],
+                "unique_together": {("language", "msgid", "context")},
             },
         ),
     ]

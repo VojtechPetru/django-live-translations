@@ -9,3 +9,6 @@ build/
 .vscode/
 .DS_Store
 *.so
+example/db.sqlite3
+.opencode/
+.superset/

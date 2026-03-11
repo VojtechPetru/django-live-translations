@@ -21,6 +21,21 @@
   background-color: rgba(59, 130, 246, 0.08);
 }
 
+/* ── Attribute-translatable elements ─────────────────── */
+
+.lt-edit-mode [data-lt-attrs] {
+  outline: 2px solid rgba(59, 130, 246, 0.4);
+  outline-offset: 2px;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: outline-color 0.15s ease, background-color 0.15s ease;
+}
+
+.lt-edit-mode [data-lt-attrs]:hover {
+  outline-color: rgba(59, 130, 246, 1);
+  background-color: rgba(59, 130, 246, 0.08);
+}
+
 /* ── Dialog (Modal) ──────────────────────────────────── */
 
 .lt-dialog {
@@ -215,6 +230,19 @@
 .lt-field__input--fuzzy:focus {
   border-color: #f59e0b;
   box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.12);
+}
+
+/* ── Inline Error ────────────────────────────────────── */
+
+.lt-dialog__error {
+  display: none;
+  font-size: 13px;
+  color: #991b1b;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  padding: 8px 12px;
+  line-height: 1.4;
 }
 
 /* ── Buttons ─────────────────────────────────────────── */
