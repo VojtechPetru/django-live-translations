@@ -70,7 +70,7 @@ class LiveTranslationsSettings(t.TypedDict, total=False):
     activation via Django admin before they take effect."""
 
 
-_DEFAULTS: dict[str, str] = {
+_DEFAULTS: LiveTranslationsSettings = {
     "BACKEND": "live_translations.backends.po.POFileBackend",
     "CACHE": "default",
     "DOMAIN": "django",

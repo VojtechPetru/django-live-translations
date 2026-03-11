@@ -27,6 +27,25 @@ def _register_checks() -> None:
         from live_translations import conf
 
         errors: list[django.core.checks.Error | django.core.checks.Warning] = []
+
+        raw: dict[str, t.Any] = getattr(django.conf.settings, "LIVE_TRANSLATIONS", {})
+        valid_keys = set(conf.LiveTranslationsSettings.__annotations__)
+        extra_keys = set(raw) - valid_keys
+        if extra_keys:
+            errors.append(
+                django.core.checks.Warning(
+                    f"Unknown key(s) in LIVE_TRANSLATIONS: {', '.join(sorted(extra_keys))}.",
+                    hint=(
+                        "Valid keys are: "
+                        + ", ".join(sorted(valid_keys))
+                        + ". \n          Use the LiveTranslationsSettings TypedDict as a type hint"
+                        " for your LIVE_TRANSLATIONS setting to catch invalid keys:\n"
+                        '\n          LIVE_TRANSLATIONS: "LiveTranslationsSettings" = {...}'
+                    ),
+                    id="live_translations.W004",
+                )
+            )
+
         settings = conf.get_settings()
 
         if not settings.languages:
