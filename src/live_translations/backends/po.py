@@ -94,6 +94,7 @@ class POFileBackend(base.TranslationBackend):
         msgid: str,
         translations: dict[str, str],
         context: str = "",
+        active_flags: dict[str, bool] | None = None,
     ) -> None:
         mo_path: str | None = None
         for lang, msgstr in translations.items():

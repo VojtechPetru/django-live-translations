@@ -17,6 +17,7 @@ class TranslationEntry:
     msgstr: str
     context: str  # "" if no msgctxt
     fuzzy: bool = False
+    is_active: bool = True
 
 
 class TranslationBackend(abc.ABC):
@@ -56,6 +57,7 @@ class TranslationBackend(abc.ABC):
         msgid: str,
         translations: dict[str, str],
         context: str = "",
+        active_flags: dict[str, bool] | None = None,
     ) -> None:
         """Save translations for a msgid.
 
@@ -63,6 +65,10 @@ class TranslationBackend(abc.ABC):
             msgid: The message identifier.
             translations: Dict mapping language code to new msgstr.
             context: Gettext context (empty string if none).
+            active_flags: Optional dict mapping language code to is_active.
+                When provided, sets the active state per language.
+                When absent, uses the TRANSLATION_ACTIVE_BY_DEFAULT setting
+                for new entries and preserves existing state on updates.
 
         Must persist changes AND signal that overrides changed.
         """

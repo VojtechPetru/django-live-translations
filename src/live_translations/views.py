@@ -97,7 +97,11 @@ def get_translations(request: django.http.HttpRequest) -> django.http.JsonRespon
             "msgid": msgid,
             "context": context,
             "translations": {
-                lang: {"msgstr": entry.msgstr, "fuzzy": entry.fuzzy}
+                lang: {
+                    "msgstr": entry.msgstr,
+                    "fuzzy": entry.fuzzy,
+                    "is_active": entry.is_active,
+                }
                 for lang, entry in entries.items()
             },
             "defaults": backend.get_defaults(
@@ -130,6 +134,7 @@ def save_translations(request: django.http.HttpRequest) -> django.http.JsonRespo
     msgid: str = body.get("msgid", "")
     context: str = body.get("context", "")
     translations: dict[str, str] = body.get("translations", {})
+    active_flags: dict[str, bool] = body.get("active_flags", {})
 
     if not msgid:
         return django.http.JsonResponse({"error": "msgid is required"}, status=400)
@@ -161,6 +166,7 @@ def save_translations(request: django.http.HttpRequest) -> django.http.JsonRespo
             msgid=msgid,
             translations=translations,
             context=context,
+            active_flags=active_flags,
         )
     except FileNotFoundError as e:
         return django.http.JsonResponse({"error": str(e)}, status=404)

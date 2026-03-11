@@ -64,6 +64,11 @@ class LiveTranslationsSettings(t.TypedDict, total=False):
     """Callable ``(HttpRequest) -> bool`` that gates access to the editing UI.
     Dotted path or function reference. Default: authenticated superusers only."""
 
+    TRANSLATION_ACTIVE_BY_DEFAULT: bool
+    """Whether new translation overrides saved from the frontend widget are
+    immediately active. When ``False`` (default), overrides require explicit
+    activation via Django admin before they take effect."""
+
 
 _DEFAULTS: dict[str, str] = {
     "BACKEND": "live_translations.backends.po.POFileBackend",
@@ -83,6 +88,7 @@ class LiveTranslationsConf:
     locale_dir: str = ""
     domain: str = _DEFAULTS["DOMAIN"]
     permission_check: str = _DEFAULTS["PERMISSION_CHECK"]  # type: ignore[assignment]
+    translation_active_by_default: bool = False
 
 
 def default_permission_check(request: django.http.HttpRequest) -> bool:
@@ -97,7 +103,7 @@ def default_permission_check(request: django.http.HttpRequest) -> bool:
 @functools.cache
 def get_settings() -> LiveTranslationsConf:
     """Read LIVE_TRANSLATIONS from Django settings and merge with defaults (cached)."""
-    raw: dict[str, t.Any] = getattr(django.conf.settings, "LIVE_TRANSLATIONS", {})
+    raw: LiveTranslationsSettings = getattr(django.conf.settings, "LIVE_TRANSLATIONS", {})
 
     languages: list[str] = raw.get("LANGUAGES", [])
     if not languages:
@@ -128,6 +134,7 @@ def get_settings() -> LiveTranslationsConf:
         permission_check=_to_dotted_path(
             raw.get("PERMISSION_CHECK", _DEFAULTS["PERMISSION_CHECK"])
         ),
+        translation_active_by_default=raw.get("TRANSLATION_ACTIVE_BY_DEFAULT", False),
     )
 
 

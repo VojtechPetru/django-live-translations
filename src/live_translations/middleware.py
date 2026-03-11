@@ -106,12 +106,17 @@ class LiveTranslationsMiddleware:
         css_url = django.templatetags.static.static("live_translations/widget.css")
         js_url = django.templatetags.static.static("live_translations/widget.js")
 
+        active_by_default = (
+            "true" if settings.translation_active_by_default else "false"
+        )
+
         snippet = (
             f'<link rel="stylesheet" href="{css_url}">'
             "<script>"
             f"window.__LT_CONFIG__={{apiBase:'{conf.API_PREFIX}',"
             f"languages:[{languages_json}],"
-            f"csrfToken:'{csrf_token}'}};"
+            f"csrfToken:'{csrf_token}',"
+            f"activeByDefault:{active_by_default}}};"
             "</script>"
             f'<script src="{js_url}"></script>'
         )

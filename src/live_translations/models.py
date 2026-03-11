@@ -19,6 +19,9 @@ class TranslationEntryQuerySet(django.db.models.QuerySet["TranslationEntry"]):
     ) -> t.Self:
         return self.filter(msgid=msgid, context=context)
 
+    def active(self) -> t.Self:
+        return self.filter(is_active=True)
+
 
 class TranslationEntryManager(django.db.models.Manager["TranslationEntry"]):
     @t.override
@@ -41,6 +44,9 @@ class TranslationEntryManager(django.db.models.Manager["TranslationEntry"]):
         context: str = "",
     ) -> TranslationEntryQuerySet:
         return self.qs.for_msgid(msgid, context=context)
+
+    def active(self) -> TranslationEntryQuerySet:
+        return self.qs.active()
 
 
 class TranslationEntry(django.db.models.Model):
@@ -73,6 +79,13 @@ class TranslationEntry(django.db.models.Model):
         blank=True,
         help_text="The translated text that overrides the .po file default. "
         "If set to the same value as the .po default, this record will be removed automatically.",
+    )
+    is_active = django.db.models.BooleanField(
+        "Active",
+        default=False,
+        db_index=True,
+        help_text="Only active translations override the .po file default. "
+        "Inactive translations are stored but have no effect until activated.",
     )
     updated_at = django.db.models.DateTimeField("Updated at", auto_now=True)
 

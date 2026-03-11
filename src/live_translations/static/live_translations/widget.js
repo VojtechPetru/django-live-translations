@@ -17,6 +17,7 @@
   var API_BASE = CONFIG.apiBase || "/__live-translations__";
   var LANGUAGES = CONFIG.languages || [];
   var CSRF_TOKEN = CONFIG.csrfToken || "";
+  var ACTIVE_BY_DEFAULT = CONFIG.activeByDefault !== undefined ? CONFIG.activeByDefault : false;
 
   // ─── Language display names & flags ──────────────────
   var LANG_META = {
@@ -62,7 +63,7 @@
       });
     },
 
-    saveTranslations: function (msgid, context, translations) {
+    saveTranslations: function (msgid, context, translations, activeFlags) {
       return fetch(API_BASE + "/translations/save/", {
         method: "POST",
         credentials: "same-origin",
@@ -74,6 +75,7 @@
           msgid: msgid,
           context: context,
           translations: translations,
+          active_flags: activeFlags || {},
         }),
       }).then(function (resp) {
         if (!resp.ok) {
@@ -234,6 +236,43 @@
 
       field.appendChild(label);
 
+      // Active toggle — only visible when the value differs from .po default
+      var poDefault = poDefaults ? (poDefaults[lang] || "") : "";
+      var hasOverride = entry.msgstr !== poDefault;
+      var isActive = hasOverride ? entry.is_active !== false : ACTIVE_BY_DEFAULT;
+
+      var toggleWrap = document.createElement("label");
+      toggleWrap.className = "lt-field__toggle";
+      if (!hasOverride) toggleWrap.style.display = "none";
+
+      var checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.className = "lt-field__toggle-input";
+      checkbox.id = "lt-active-" + lang;
+      checkbox.checked = isActive;
+
+      var slider = document.createElement("span");
+      slider.className = "lt-field__toggle-slider";
+
+      var toggleLabel = document.createElement("span");
+      toggleLabel.className = "lt-field__toggle-label";
+      toggleLabel.textContent = isActive ? "Active" : "Inactive";
+
+      (function (lbl) {
+        checkbox.addEventListener("change", function () {
+          lbl.textContent = this.checked ? "Active" : "Inactive";
+        });
+      })(toggleLabel);
+
+      var toggleHelp = document.createElement("span");
+      toggleHelp.className = "lt-field__toggle-help";
+      toggleHelp.textContent = "Inactive overrides are saved but won\u2019t take effect until activated.";
+
+      toggleWrap.appendChild(checkbox);
+      toggleWrap.appendChild(slider);
+      toggleWrap.appendChild(toggleLabel);
+      toggleWrap.appendChild(toggleHelp);
+
       var textarea = document.createElement("textarea");
       textarea.className = "lt-field__input";
       textarea.id = "lt-input-" + lang;
@@ -244,11 +283,23 @@
         textarea.classList.add("lt-field__input--fuzzy");
       }
 
-      // Auto-resize textarea on input
-      textarea.addEventListener("input", function () {
-        this.style.height = "auto";
-        this.style.height = this.scrollHeight + "px";
-      });
+      // Show/hide toggle + auto-resize on input
+      (function (ta, toggle, defaultVal, cb, defaultActive) {
+        function syncToggle() {
+          var differs = ta.value !== defaultVal;
+          toggle.style.display = differs ? "" : "none";
+          if (!differs) {
+            cb.checked = defaultActive;
+          }
+        }
+        ta.addEventListener("input", function () {
+          this.style.height = "auto";
+          this.style.height = this.scrollHeight + "px";
+          syncToggle();
+        });
+        // Expose for the revert button
+        ta._ltSyncToggle = syncToggle;
+      })(textarea, toggleWrap, poDefault, checkbox, ACTIVE_BY_DEFAULT);
 
       // Show .po default with revert button if available
       if (poDefaults && poDefaults[lang]) {
@@ -270,6 +321,7 @@
             ta.value = defaultValue;
             ta.style.height = "auto";
             ta.style.height = ta.scrollHeight + "px";
+            if (ta._ltSyncToggle) ta._ltSyncToggle();
             ta.focus();
           });
         })(textarea, poDefaults[lang]);
@@ -280,6 +332,7 @@
       }
 
       field.appendChild(textarea);
+      field.appendChild(toggleWrap);
       container.appendChild(field);
     }
 
@@ -323,16 +376,19 @@
     var context = attrData ? attrData.c : (currentSpan.dataset.ltContext || "");
 
     var translations = {};
+    var activeFlags = {};
     for (var i = 0; i < LANGUAGES.length; i++) {
       var lang = LANGUAGES[i];
       var input = dialog.querySelector("#lt-input-" + lang);
+      var toggle = dialog.querySelector("#lt-active-" + lang);
       if (input) {
         translations[lang] = input.value;
+        activeFlags[lang] = toggle ? toggle.checked : ACTIVE_BY_DEFAULT;
       }
     }
 
     api
-      .saveTranslations(msgid, context, translations)
+      .saveTranslations(msgid, context, translations, activeFlags)
       .then(function () {
         // Full page reload so Django re-renders all translations server-side.
         // Inline DOM update can't handle %(var)s interpolation from blocktrans,

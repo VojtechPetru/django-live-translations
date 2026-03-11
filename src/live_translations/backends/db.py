@@ -130,7 +130,7 @@ class DatabaseBackend(base.TranslationBackend):
         from live_translations import models
 
         try:
-            rows = models.TranslationEntry.objects.all().values_list(
+            rows = models.TranslationEntry.objects.active().values_list(
                 "language", "msgid", "context", "msgstr"
             )
         except (django.db.utils.OperationalError, django.db.utils.ProgrammingError):
@@ -175,14 +175,14 @@ class DatabaseBackend(base.TranslationBackend):
         )
 
         # Query DB overrides for this specific msgid
-        db_overrides: dict[str, str] = {}
+        db_overrides: dict[str, tuple[str, bool]] = {}
         try:
             for row in (
                 models.TranslationEntry.objects.for_msgid(msgid, context)
                 .filter(language__in=languages)
-                .values_list("language", "msgstr")
+                .values_list("language", "msgstr", "is_active")
             ):
-                db_overrides[row[0]] = row[1]
+                db_overrides[row[0]] = (row[1], row[2])
         except (django.db.utils.OperationalError, django.db.utils.ProgrammingError):
             pass
 
@@ -192,14 +192,15 @@ class DatabaseBackend(base.TranslationBackend):
             po_msgstr = po_entry.msgstr if po_entry else ""
             po_fuzzy = po_entry.fuzzy if po_entry else False
 
-            db_msgstr = db_overrides.get(lang)
+            db_entry = db_overrides.get(lang)
 
             result[lang] = base.TranslationEntry(
                 language=lang,
                 msgid=msgid,
-                msgstr=db_msgstr if db_msgstr is not None else po_msgstr,
+                msgstr=db_entry[0] if db_entry is not None else po_msgstr,
                 context=context,
-                fuzzy=po_fuzzy if db_msgstr is None else False,
+                fuzzy=po_fuzzy if db_entry is None else False,
+                is_active=db_entry[1] if db_entry is not None else True,
             )
 
         return result
@@ -235,6 +236,7 @@ class DatabaseBackend(base.TranslationBackend):
         msgid: str,
         translations: dict[str, str],
         context: str = "",
+        active_flags: dict[str, bool] | None = None,
     ) -> None:
         """Save translation overrides to the database.
 
@@ -242,8 +244,10 @@ class DatabaseBackend(base.TranslationBackend):
         DB override is deleted instead of created/updated -- no point storing
         a redundant record.
         """
+        from live_translations import conf as lt_conf
         from live_translations import models
 
+        fallback_active = lt_conf.get_settings().translation_active_by_default
         po_defaults = self.get_defaults(msgid, list(translations.keys()), context)
 
         for lang, msgstr in translations.items():
@@ -253,11 +257,16 @@ class DatabaseBackend(base.TranslationBackend):
                     lang
                 ).delete()
             else:
+                is_active = (
+                    active_flags.get(lang, fallback_active)
+                    if active_flags
+                    else fallback_active
+                )
                 models.TranslationEntry.objects.update_or_create(
                     language=lang,
                     msgid=msgid,
                     context=context,
-                    defaults={"msgstr": msgstr},
+                    defaults={"msgstr": msgstr, "is_active": is_active},
                 )
 
         self.bump_catalog_version()
