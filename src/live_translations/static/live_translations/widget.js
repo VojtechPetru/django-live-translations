@@ -3,13 +3,13 @@
  * Vanilla JS, zero dependencies. Injected by middleware for superusers.
  *
  * State machine:
- *   inactive ──(Shift+T)──► active ──(click span)──► editing
- *      ▲                      │                         │
- *      └──────(Shift+T)───────┘                         │
- *      ▲                                                │
- *      └──────(save/cancel/Escape)──────────────────────┘
+ *   inactive ──(shortcut)──► active ──(click span)──► editing
+ *      ▲                       │                         │
+ *      └──────(shortcut)───────┘                         │
+ *      ▲                                                 │
+ *      └──────(save/cancel/Escape)───────────────────────┘
  *
- * Preview mode (Shift+P → page reload):
+ * Preview mode (shortcut → page reload):
  *   Server renders inactive translations. Elements with inactive overrides
  *   get amber borders. Shift+click selects them for bulk activation.
  */
@@ -85,10 +85,69 @@
   var CSRF_TOKEN = CONFIG.csrfToken || "";
   /** @type {boolean} */
   var ACTIVE_BY_DEFAULT = CONFIG.activeByDefault !== undefined ? CONFIG.activeByDefault : false;
+  /** @type {string} */
+  var SHORTCUT_EDIT = CONFIG.shortcutEdit || "ctrl+shift+e";
+  /** @type {string} */
+  var SHORTCUT_PREVIEW = CONFIG.shortcutPreview || "ctrl+shift+p";
   /** @type {boolean} */
   var PREVIEW = CONFIG.preview || false;
   /** @type {Array<{m:string, c:string}>} */
   var PREVIEW_ENTRIES = CONFIG.previewEntries || [];
+
+  // ─── Shortcut Parsing ────────────────────────────────
+
+  /**
+   * Parse a shortcut string like "ctrl+shift+e" into a descriptor object.
+   * @param {string} combo - "+"-separated modifier+key string (case-insensitive).
+   * @returns {{ctrl: boolean, shift: boolean, alt: boolean, meta: boolean, key: string}}
+   */
+  function _parseShortcut(combo) {
+    var parts = combo.toLowerCase().split("+");
+    var key = parts[parts.length - 1];
+    return {
+      ctrl: parts.indexOf("ctrl") !== -1,
+      shift: parts.indexOf("shift") !== -1,
+      alt: parts.indexOf("alt") !== -1,
+      meta: parts.indexOf("meta") !== -1,
+      key: key,
+    };
+  }
+
+  /**
+   * Test whether a KeyboardEvent matches a parsed shortcut descriptor.
+   * @param {KeyboardEvent} e - The keyboard event.
+   * @param {{ctrl: boolean, shift: boolean, alt: boolean, meta: boolean, key: string}} sc
+   * @returns {boolean}
+   */
+  function _matchShortcut(e, sc) {
+    return (
+      e.key.toLowerCase() === sc.key &&
+      e.ctrlKey === sc.ctrl &&
+      e.shiftKey === sc.shift &&
+      e.altKey === sc.alt &&
+      e.metaKey === sc.meta
+    );
+  }
+
+  /**
+   * Format a shortcut descriptor as a human-readable label (e.g. "Ctrl + Shift + E").
+   * Uses platform-aware symbols on macOS (⌘/⌃/⌥/⇧).
+   * @param {{ctrl: boolean, shift: boolean, alt: boolean, meta: boolean, key: string}} sc
+   * @returns {string}
+   */
+  function _formatShortcut(sc) {
+    var isMac = navigator.platform ? navigator.platform.indexOf("Mac") !== -1 : false;
+    var parts = [];
+    if (sc.ctrl) parts.push(isMac ? "\u2303" : "Ctrl");
+    if (sc.shift) parts.push(isMac ? "\u21E7" : "Shift");
+    if (sc.alt) parts.push(isMac ? "\u2325" : "Alt");
+    if (sc.meta) parts.push(isMac ? "\u2318" : "Meta");
+    parts.push(sc.key.toUpperCase());
+    return parts.join(isMac ? "" : " + ");
+  }
+
+  var SC_EDIT = _parseShortcut(SHORTCUT_EDIT);
+  var SC_PREVIEW = _parseShortcut(SHORTCUT_PREVIEW);
 
   // ─── Language display names & flags ──────────────────
   /** @type {Object<string, LangMeta>} */
@@ -1670,6 +1729,7 @@
   function activateEditMode() {
     state = "active";
     document.body.classList.add("lt-edit-mode");
+    _updateHintActiveState();
     showToast(
       "Translation edit mode ON \u2014 click any highlighted text",
       "info"
@@ -1686,6 +1746,7 @@
     _clearSelection();
     state = "inactive";
     document.body.classList.remove("lt-edit-mode");
+    _updateHintActiveState();
     showToast("Translation edit mode OFF", "info");
   }
 
@@ -1695,8 +1756,8 @@
     var tag = document.activeElement ? document.activeElement.tagName : "";
     var inInput = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 
-    // Shift+T toggles edit mode (but not when typing in inputs)
-    if (e.key === "T" && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    // Toggle edit mode
+    if (_matchShortcut(e, SC_EDIT)) {
       if (inInput) return;
       e.preventDefault();
       if (state === "inactive") {
@@ -1706,8 +1767,8 @@
       }
     }
 
-    // Shift+P toggles preview mode (cookie + reload)
-    if (e.key === "P" && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    // Toggle preview mode (cookie + reload)
+    if (_matchShortcut(e, SC_PREVIEW)) {
       if (inInput) return;
       e.preventDefault();
       if (document.cookie.indexOf("lt_preview=1") !== -1) {
@@ -1735,6 +1796,7 @@
         // Shift+click on preview elements toggles selection
         if (e.shiftKey && PREVIEW && span.classList.contains("lt-preview")) {
           _toggleSelected(span);
+          window.getSelection().removeAllRanges();
           return;
         }
 
@@ -1751,6 +1813,7 @@
         // Shift+click on preview elements toggles selection
         if (e.shiftKey && PREVIEW && attrEl.classList.contains("lt-preview")) {
           _toggleSelected(attrEl);
+          window.getSelection().removeAllRanges();
           return;
         }
 
@@ -1796,4 +1859,219 @@
       _initPreviewMode();
     });
   }
+
+  // ─── Shortcut Hint (sticky bar) ──────────────────────
+
+  /** @type {string} */
+  var _HINT_POS_KEY = "lt_hint_pos";
+  /** @type {HTMLElement|null} */
+  var _hintBar = null;
+  /** @type {boolean} - True while a drag gesture is in progress (past threshold). */
+  var _hintDidDrag = false;
+
+  /**
+   * Show a persistent shortcut hint bar at the bottom of the viewport.
+   * The entire bar is draggable. Edit/Preview are clickable toggle buttons.
+   * Position is remembered in localStorage.
+   * @returns {void}
+   */
+  function _showShortcutHint() {
+    var bar = document.createElement("div");
+    bar.className = "lt-hint";
+
+    // Brand label
+    var brand = document.createElement("span");
+    brand.className = "lt-hint__brand";
+    brand.textContent = "Live Translations";
+    bar.appendChild(brand);
+
+    // Separator after brand
+    var sep0 = document.createElement("span");
+    sep0.className = "lt-hint__sep";
+    bar.appendChild(sep0);
+
+    // Edit mode button
+    var editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "lt-hint__action";
+    editBtn.dataset.mode = "edit";
+    editBtn.title = "Toggle inline translation editor";
+    editBtn.innerHTML =
+      '<kbd class="lt-hint__kbd">' + _formatShortcut(SC_EDIT) + "</kbd>" +
+      '<span class="lt-hint__label">Edit</span>';
+    editBtn.addEventListener("click", function () {
+      if (_hintDidDrag) return;
+      if (state === "inactive") {
+        activateEditMode();
+      } else {
+        deactivateEditMode();
+      }
+    });
+    bar.appendChild(editBtn);
+
+    // Preview mode button
+    var previewBtn = document.createElement("button");
+    previewBtn.type = "button";
+    previewBtn.className = "lt-hint__action";
+    previewBtn.dataset.mode = "preview";
+    previewBtn.title = "Preview translations from the database";
+    previewBtn.innerHTML =
+      '<kbd class="lt-hint__kbd">' + _formatShortcut(SC_PREVIEW) + "</kbd>" +
+      '<span class="lt-hint__label">Preview</span>';
+    previewBtn.addEventListener("click", function () {
+      if (_hintDidDrag) return;
+      if (document.cookie.indexOf("lt_preview=1") !== -1) {
+        document.cookie = "lt_preview=; path=/; max-age=0";
+      } else {
+        document.cookie = "lt_preview=1; path=/; max-age=86400; SameSite=Lax";
+      }
+      window.location.reload();
+    });
+    bar.appendChild(previewBtn);
+
+    // Preview tip (visible only in preview mode)
+    var tip = document.createElement("span");
+    tip.className = "lt-hint__tip";
+    tip.title = "Hold Shift and click translated text to select multiple entries";
+    tip.innerHTML = '<kbd class="lt-hint__kbd">Shift</kbd><span class="lt-hint__label">click to select</span>';
+    bar.appendChild(tip);
+
+    document.body.appendChild(bar);
+    _hintBar = bar;
+
+    // Restore saved position or use default centered bottom
+    var savedPos = null;
+    try {
+      var raw = localStorage.getItem(_HINT_POS_KEY);
+      if (raw) savedPos = JSON.parse(raw);
+    } catch (e) { /* ignore */ }
+
+    if (savedPos && typeof savedPos.x === "number" && typeof savedPos.y === "number") {
+      var x = Math.max(0, Math.min(window.innerWidth - bar.offsetWidth, savedPos.x));
+      var y = Math.max(0, Math.min(window.innerHeight - bar.offsetHeight, savedPos.y));
+      bar.style.left = x + "px";
+      bar.style.top = y + "px";
+      bar.classList.add("lt-hint--positioned");
+    }
+
+    _updateHintActiveState();
+    _initHintDrag(bar);
+
+    void bar.offsetHeight;
+    bar.classList.add("lt-hint--visible");
+  }
+
+  /** @type {number} - Pixel threshold to distinguish click from drag. */
+  var _DRAG_THRESHOLD = 3;
+
+  /**
+   * Make the entire hint bar draggable.
+   * Uses a movement threshold to distinguish clicks from drags — button
+   * click handlers check `_hintDidDrag` and bail if a drag just occurred.
+   * @param {HTMLElement} bar - The hint bar element.
+   * @returns {void}
+   */
+  function _initHintDrag(bar) {
+    var dragState = null;
+
+    bar.addEventListener("mousedown", function (e) {
+      if (e.button !== 0) return;
+      // Don't prevent default — let clicks reach buttons if no drag happens
+
+      var rect = bar.getBoundingClientRect();
+      dragState = {
+        mouseX: e.clientX,
+        mouseY: e.clientY,
+        barX: rect.left,
+        barY: rect.top,
+        moved: false,
+      };
+      _hintDidDrag = false;
+    });
+
+    document.addEventListener("mousemove", function (e) {
+      if (!dragState) return;
+
+      var dx = e.clientX - dragState.mouseX;
+      var dy = e.clientY - dragState.mouseY;
+
+      // Only start dragging after passing the threshold
+      if (!dragState.moved) {
+        if (Math.abs(dx) < _DRAG_THRESHOLD && Math.abs(dy) < _DRAG_THRESHOLD) return;
+        dragState.moved = true;
+        _hintDidDrag = true;
+
+        // Switch from center-anchored to explicit positioning on first drag
+        if (!bar.classList.contains("lt-hint--positioned")) {
+          bar.style.left = dragState.barX + "px";
+          bar.style.top = dragState.barY + "px";
+          bar.classList.add("lt-hint--positioned");
+        }
+
+        bar.classList.add("lt-hint--dragging");
+      }
+
+      var newX = dragState.barX + dx;
+      var newY = dragState.barY + dy;
+      var maxX = window.innerWidth - bar.offsetWidth;
+      var maxY = window.innerHeight - bar.offsetHeight;
+      bar.style.left = Math.max(0, Math.min(maxX, newX)) + "px";
+      bar.style.top = Math.max(0, Math.min(maxY, newY)) + "px";
+    });
+
+    document.addEventListener("mouseup", function () {
+      if (!dragState) return;
+      var wasDrag = dragState.moved;
+      dragState = null;
+      bar.classList.remove("lt-hint--dragging");
+
+      if (wasDrag) {
+        // Persist position
+        try {
+          localStorage.setItem(_HINT_POS_KEY, JSON.stringify({
+            x: parseInt(bar.style.left, 10),
+            y: parseInt(bar.style.top, 10),
+          }));
+        } catch (e) { /* ignore */ }
+
+        // Reset drag flag after a tick so the click event (which fires after
+        // mouseup) still sees _hintDidDrag=true and is suppressed
+        setTimeout(function () { _hintDidDrag = false; }, 0);
+      }
+    });
+  }
+
+  /**
+   * Update the hint bar to highlight the currently active mode.
+   * @returns {void}
+   */
+  function _updateHintActiveState() {
+    if (!_hintBar) return;
+    var editEl = _hintBar.querySelector('[data-mode="edit"]');
+    var previewEl = _hintBar.querySelector('[data-mode="preview"]');
+    var tipEl = _hintBar.querySelector(".lt-hint__tip");
+    if (editEl) {
+      if (state === "active" || state === "editing") {
+        editEl.classList.add("lt-hint__action--active");
+      } else {
+        editEl.classList.remove("lt-hint__action--active");
+      }
+    }
+    if (previewEl) {
+      if (PREVIEW) {
+        previewEl.classList.add("lt-hint__action--active");
+      } else {
+        previewEl.classList.remove("lt-hint__action--active");
+      }
+    }
+    if (tipEl) {
+      if (PREVIEW) {
+        tipEl.classList.add("lt-hint__tip--visible");
+      } else {
+        tipEl.classList.remove("lt-hint__tip--visible");
+      }
+    }
+  }
+
+  _showShortcutHint();
 })();

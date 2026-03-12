@@ -1069,3 +1069,139 @@
 .lt-action-bar__cancel:hover {
   color: #a1a1aa;
 }
+
+/* ── Shortcut Hint Bar ───────────────────────────────── */
+
+.lt-hint {
+  position: fixed;
+  bottom: 16px;
+  left: 0;
+  right: 0;
+  width: fit-content;
+  margin: 0 auto;
+  transform: translateY(8px);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  background: #18181b;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  font-size: 12px;
+  color: #71717a;
+  z-index: 2147483646;
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  pointer-events: none;
+  white-space: nowrap;
+  cursor: grab;
+}
+
+.lt-hint--visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.lt-hint--positioned {
+  bottom: auto;
+  right: auto;
+  width: auto;
+  margin: 0;
+  transform: none;
+}
+
+.lt-hint--positioned.lt-hint--visible {
+  transform: none;
+}
+
+.lt-hint--dragging {
+  transition: none;
+  user-select: none;
+  cursor: grabbing;
+}
+
+.lt-hint--dragging * {
+  cursor: grabbing !important;
+}
+
+.lt-hint__brand {
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: #52525b;
+}
+
+.lt-hint__sep {
+  width: 1px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+
+.lt-hint__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: none;
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.lt-hint__action:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.lt-hint__action--active {
+  background: rgba(96, 165, 250, 0.12);
+}
+
+.lt-hint__action--active .lt-hint__kbd {
+  border-color: rgba(96, 165, 250, 0.3);
+  color: #93c5fd;
+}
+
+.lt-hint__action--active .lt-hint__label {
+  color: #93c5fd;
+}
+
+.lt-hint__kbd {
+  display: inline-block;
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #a1a1aa;
+  line-height: 1;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.lt-hint__label {
+  font-size: 12px;
+  color: #71717a;
+  transition: color 0.15s ease;
+}
+
+.lt-hint__tip {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 3px 0 3px 12px;
+}
+
+.lt-hint__tip--visible {
+  display: inline-flex;
+}
+
+

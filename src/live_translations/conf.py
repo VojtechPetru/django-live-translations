@@ -69,6 +69,15 @@ class LiveTranslationsSettings(t.TypedDict, total=False):
     immediately active. When ``False`` (default), overrides require explicit
     activation via Django admin before they take effect."""
 
+    SHORTCUT_EDIT: str
+    """Keyboard shortcut to toggle edit mode.  Expressed as a ``+``-separated
+    combo of modifier names (``ctrl``, ``shift``, ``alt``, ``meta``) and a
+    single key character.  Case-insensitive.  Default: ``"ctrl+shift+e"``."""
+
+    SHORTCUT_PREVIEW: str
+    """Keyboard shortcut to toggle preview mode (inactive overrides).
+    Same format as ``SHORTCUT_EDIT``.  Default: ``"ctrl+shift+p"``."""
+
 
 _DEFAULTS: LiveTranslationsSettings = {
     "BACKEND": "live_translations.backends.po.POFileBackend",
@@ -89,6 +98,8 @@ class LiveTranslationsConf:
     domain: str = _DEFAULTS["DOMAIN"]
     permission_check: str = _DEFAULTS["PERMISSION_CHECK"]  # type: ignore[assignment]
     translation_active_by_default: bool = False
+    shortcut_edit: str = "ctrl+shift+e"
+    shortcut_preview: str = "ctrl+shift+p"
 
 
 def default_permission_check(request: django.http.HttpRequest) -> bool:
@@ -103,7 +114,9 @@ def default_permission_check(request: django.http.HttpRequest) -> bool:
 @functools.cache
 def get_settings() -> LiveTranslationsConf:
     """Read LIVE_TRANSLATIONS from Django settings and merge with defaults (cached)."""
-    raw: LiveTranslationsSettings = getattr(django.conf.settings, "LIVE_TRANSLATIONS", {})
+    raw: LiveTranslationsSettings = getattr(
+        django.conf.settings, "LIVE_TRANSLATIONS", {}
+    )
 
     languages: list[str] = raw.get("LANGUAGES", [])
     if not languages:
@@ -139,6 +152,8 @@ def get_settings() -> LiveTranslationsConf:
             raw.get("PERMISSION_CHECK", _DEFAULTS["PERMISSION_CHECK"])
         ),
         translation_active_by_default=raw.get("TRANSLATION_ACTIVE_BY_DEFAULT", False),
+        shortcut_edit=raw.get("SHORTCUT_EDIT", "ctrl+shift+e"),
+        shortcut_preview=raw.get("SHORTCUT_PREVIEW", "ctrl+shift+p"),
     )
 
 

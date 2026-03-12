@@ -169,12 +169,15 @@ class LiveTranslationsMiddleware:
         )
 
         preview_config = ""
-        if preview_entries:
+        if preview_entries is not None:
             entries_json = json.dumps(
                 [{"m": m, "c": c} for (m, c) in preview_entries],
                 separators=(",", ":"),
             )
             preview_config = f",preview:true,previewEntries:{entries_json}"
+
+        shortcut_edit_js = json.dumps(settings.shortcut_edit)
+        shortcut_preview_js = json.dumps(settings.shortcut_preview)
 
         snippet = (
             f'<link rel="stylesheet" href="{css_url}">'
@@ -182,7 +185,10 @@ class LiveTranslationsMiddleware:
             f"window.__LT_CONFIG__={{apiBase:'{conf.API_PREFIX}',"
             f"languages:[{languages_json}],"
             f"csrfToken:'{csrf_token}',"
-            f"activeByDefault:{active_by_default}{preview_config}}};"
+            f"activeByDefault:{active_by_default},"
+            f"shortcutEdit:{shortcut_edit_js},"
+            f"shortcutPreview:{shortcut_preview_js}"
+            f"{preview_config}}};"
             "</script>"
             f'<script src="{js_url}"></script>'
         )
