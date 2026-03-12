@@ -12,14 +12,78 @@
 (function () {
   "use strict";
 
+  /**
+   * @typedef {Object} LTConfig
+   * @property {string}   [apiBase]          - URL prefix for the translation API endpoints.
+   * @property {string[]} [languages]        - Language codes enabled for editing (e.g. ["en","cs","de"]).
+   * @property {string}   [csrfToken]        - Django CSRF token injected by middleware.
+   * @property {boolean}  [activeByDefault]  - Whether new overrides are active immediately.
+   */
+
+  /**
+   * @typedef {Object} LangMeta
+   * @property {string} flag - Emoji flag for the language.
+   * @property {string} name - English display name.
+   */
+
+  /**
+   * Attribute translation descriptor embedded in `data-lt-attrs` JSON.
+   * @typedef {Object} AttrInfo
+   * @property {string} a - HTML attribute name (e.g. "title", "placeholder").
+   * @property {string} m - The gettext msgid.
+   * @property {string} c - The gettext context (empty string if none).
+   */
+
+  /**
+   * Single language entry returned by the translations API.
+   * @typedef {Object} TranslationEntry
+   * @property {string}  msgstr    - Current translated string.
+   * @property {boolean} fuzzy     - Whether the .po entry is marked fuzzy.
+   * @property {boolean} is_active - Whether the DB override is active.
+   */
+
+  /**
+   * Response payload from `GET /translations/`.
+   * @typedef {Object} TranslationData
+   * @property {Object<string, TranslationEntry>} translations - Keyed by language code.
+   * @property {Object<string, string>|null}       defaults     - .po file defaults keyed by language code.
+   * @property {string|null}                        hint         - Optional translator hint from the .po file.
+   */
+
+  /**
+   * Single diff segment within a history entry.
+   * @typedef {Object} DiffSegment
+   * @property {"equal"|"insert"|"delete"} type - Diff operation type.
+   * @property {string}                     text - Text content of this segment.
+   */
+
+  /**
+   * Single entry from the edit history API.
+   * @typedef {Object} HistoryEntry
+   * @property {number}         id         - Database primary key.
+   * @property {string}         language   - Language code this change applies to.
+   * @property {"create"|"update"|"delete"|"activate"|"deactivate"} action - Type of change.
+   * @property {string}         created_at - ISO 8601 timestamp.
+   * @property {string|null}    user       - Username of the editor, or null.
+   * @property {string|null}    old_value  - Previous msgstr (null for creates).
+   * @property {string|null}    new_value  - New msgstr (null for deletes).
+   * @property {DiffSegment[]}  diff       - Token-level diff between old and new values.
+   */
+
   // ─── Config (injected by middleware) ─────────────────
+  /** @type {LTConfig} */
   var CONFIG = window.__LT_CONFIG__ || {};
+  /** @type {string} */
   var API_BASE = CONFIG.apiBase || "/__live-translations__";
+  /** @type {string[]} */
   var LANGUAGES = CONFIG.languages || [];
+  /** @type {string} */
   var CSRF_TOKEN = CONFIG.csrfToken || "";
+  /** @type {boolean} */
   var ACTIVE_BY_DEFAULT = CONFIG.activeByDefault !== undefined ? CONFIG.activeByDefault : false;
 
   // ─── Language display names & flags ──────────────────
+  /** @type {Object<string, LangMeta>} */
   var LANG_META = {
     cs: { flag: "\uD83C\uDDE8\uD83C\uDDFF", name: "Czech" },
     en: { flag: "\uD83C\uDDEC\uD83C\uDDE7", name: "English" },
@@ -38,6 +102,10 @@
     ko: { flag: "\uD83C\uDDF0\uD83C\uDDF7", name: "Korean" },
   };
 
+  /**
+   * @param {string} code - ISO 639-1 language code.
+   * @returns {string} Emoji flag + English name, or uppercased code if unknown.
+   */
   function langLabel(code) {
     var meta = LANG_META[code];
     if (meta) return meta.flag + "  " + meta.name;
@@ -45,15 +113,26 @@
   }
 
   // ─── State ───────────────────────────────────────────
-  var state = "inactive"; // "inactive" | "active" | "editing"
+  /** @type {"inactive"|"active"|"editing"} */
+  var state = "inactive";
+  /** @type {HTMLDialogElement|null} */
   var dialog = null;
+  /** @type {HTMLElement|null} */
   var currentSpan = null;
-  var currentAttrName = null; // Set when editing an attribute translation
+  /** @type {string|null} - HTML attribute name when editing an attribute translation. */
+  var currentAttrName = null;
+  /** @type {boolean} */
   var historyOpen = false;
 
   // ─── API Client ──────────────────────────────────────
 
   var api = {
+    /**
+     * Fetch all language translations for a single msgid.
+     * @param {string} msgid  - The gettext message identifier.
+     * @param {string} context - The gettext context (empty string if none).
+     * @returns {Promise<TranslationData>}
+     */
     getTranslations: function (msgid, context) {
       var params = new URLSearchParams({ msgid: msgid, context: context });
       return fetch(API_BASE + "/translations/?" + params, {
@@ -64,6 +143,14 @@
       });
     },
 
+    /**
+     * Persist translation overrides to the database.
+     * @param {string}                msgid        - The gettext message identifier.
+     * @param {string}                context      - The gettext context.
+     * @param {Object<string,string>} translations - Map of language code to msgstr value.
+     * @param {Object<string,boolean>} activeFlags - Map of language code to active/inactive flag.
+     * @returns {Promise<Object>} Server confirmation payload.
+     */
     saveTranslations: function (msgid, context, translations, activeFlags) {
       return fetch(API_BASE + "/translations/save/", {
         method: "POST",
@@ -95,6 +182,12 @@
       });
     },
 
+    /**
+     * Fetch the edit history for a msgid/context pair.
+     * @param {string} msgid   - The gettext message identifier.
+     * @param {string} context - The gettext context.
+     * @returns {Promise<{history: HistoryEntry[]}>}
+     */
     getHistory: function (msgid, context) {
       var params = new URLSearchParams({ msgid: msgid, context: context });
       return fetch(API_BASE + "/translations/history/?" + params, {
@@ -108,6 +201,11 @@
 
   // ─── Toast ───────────────────────────────────────────
 
+  /**
+   * @param {string} message - Text to display.
+   * @param {"success"|"error"|"info"} [type="success"] - Visual style of the toast.
+   * @returns {void}
+   */
   function showToast(message, type) {
     type = type || "success";
     var existing = document.querySelector(".lt-toast");
@@ -132,6 +230,11 @@
 
   // ─── Modal ───────────────────────────────────────────
 
+  /**
+   * Lazily create the shared `<dialog>` element and attach its event listeners.
+   * Subsequent calls are no-ops; the dialog is reused across all edit sessions.
+   * @returns {void}
+   */
   function createDialog() {
     if (dialog) return;
 
@@ -209,6 +312,18 @@
     });
   }
 
+  /**
+   * Open the translation editor for a translatable element.
+   *
+   * For inline text spans (`<span class="lt-translatable">`), `attrInfo` is
+   * omitted and the msgid/context are read from the element's `data-lt-msgid`
+   * and `data-lt-context` attributes. For attribute translations (e.g. `title`),
+   * the caller passes the {@link AttrInfo} descriptor from `data-lt-attrs`.
+   *
+   * @param {HTMLElement}   element   - The DOM element that was clicked.
+   * @param {AttrInfo}      [attrInfo] - Attribute descriptor; omit for inline text.
+   * @returns {void}
+   */
   function openModal(element, attrInfo) {
     createDialog();
     currentSpan = element;
@@ -244,6 +359,12 @@
       });
   }
 
+  /**
+   * Populate the dialog with per-language textarea fields, active toggles,
+   * and .po default hints. Called after the translations API responds.
+   * @param {TranslationData} data - Payload from `api.getTranslations`.
+   * @returns {void}
+   */
   function renderFields(data) {
     var container = dialog.querySelector(".lt-dialog__fields");
     dialog.querySelector(".lt-dialog__loading").style.display = "none";
@@ -382,6 +503,16 @@
     if (first) first.focus();
   }
 
+  /**
+   * Display or clear the inline error banner inside the dialog.
+   *
+   * When `details` is provided, the error is rendered as per-language lines
+   * (e.g. missing `%(key)s` placeholders). Otherwise `message` is shown as plain text.
+   *
+   * @param {string|null}                     message - Error message, or null to clear.
+   * @param {Object<string, string[]>|null}   [details] - Per-language error arrays from the server.
+   * @returns {void}
+   */
   function showDialogError(message, details) {
     var errorEl = dialog.querySelector(".lt-dialog__error");
     if (!message) {
@@ -405,6 +536,11 @@
     errorEl.style.display = "block";
   }
 
+  /**
+   * Collect values from all language fields and POST them to the save endpoint.
+   * On success the page is reloaded so Django re-renders server-side translations.
+   * @returns {void}
+   */
   function handleSave() {
     var saveBtn = dialog.querySelector(".lt-btn--save");
     saveBtn.disabled = true;
@@ -443,6 +579,12 @@
       });
   }
 
+  /**
+   * Look up a single attribute descriptor from the element's `data-lt-attrs` JSON array.
+   * @param {HTMLElement} element  - Element carrying `data-lt-attrs`.
+   * @param {string}      attrName - Attribute name to find (e.g. "title").
+   * @returns {AttrInfo|null} The matching descriptor, or null if not found.
+   */
   function _getAttrInfo(element, attrName) {
     try {
       var attrs = JSON.parse(element.dataset.ltAttrs || "[]");
@@ -455,9 +597,16 @@
 
   // ─── History Panel ──────────────────────────────────
 
-  var _historyData = [];        // cached entries from last fetch
-  var _historyLangFilter = "";  // "" = all, "en" = specific language
+  /** @type {HistoryEntry[]} - Cached entries from the last history fetch. */
+  var _historyData = [];
+  /** @type {string} - Active language filter ("" = show all languages). */
+  var _historyLangFilter = "";
 
+  /**
+   * Read the msgid and context for the element currently being edited,
+   * accounting for both inline text spans and attribute translations.
+   * @returns {{msgid: string, context: string}}
+   */
   function _getMsgidAndContext() {
     var attrData = currentAttrName ? _getAttrInfo(currentSpan, currentAttrName) : null;
     return {
@@ -466,6 +615,10 @@
     };
   }
 
+  /**
+   * Toggle the dialog between the edit form and the history timeline.
+   * @returns {void}
+   */
   function toggleHistory() {
     if (historyOpen) {
       _showEditView();
@@ -475,6 +628,10 @@
     historyOpen = !historyOpen;
   }
 
+  /**
+   * Switch the dialog chrome to show the translation editor (fields + save/cancel).
+   * @returns {void}
+   */
   function _showEditView() {
     if (!dialog) return;
     dialog.querySelector(".lt-dialog__title").textContent = "Edit Translation";
@@ -487,6 +644,10 @@
     dialog.querySelector(".lt-dialog__history").style.display = "none";
   }
 
+  /**
+   * Switch the dialog chrome to show the history timeline, fetching data from the API.
+   * @returns {void}
+   */
   function _showHistoryView() {
     if (!dialog) return;
     dialog.querySelector(".lt-dialog__title").textContent = "Edit History";
@@ -520,7 +681,7 @@
       });
   }
 
-  // ── Action labels (used for tooltips) ──
+  /** @type {Object<string, string>} - Human-readable labels for history action types. */
   var _ACTION_LABELS = {
     create: "Created",
     update: "Updated",
@@ -529,7 +690,7 @@
     deactivate: "Deactivated",
   };
 
-  // ── Action icons (inline SVG, colored via currentColor) ──
+  /** @type {Object<string, string>} - Inline SVG markup for each history action type. */
   var _ACTION_ICONS = {
     create: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>',
     update: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 11v2.5H5L13 5.5 10.5 3 2.5 11z"/><path d="M9 4.5l2.5 2.5"/></svg>',
@@ -538,6 +699,17 @@
     deactivate: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="5" width="12" height="6" rx="3"/><circle cx="5" cy="8" r="2"/></svg>',
   };
 
+  /**
+   * Render the history timeline into the given container.
+   *
+   * Builds language filter pills (when multiple languages have history),
+   * applies the current `_historyLangFilter`, and renders a chronological
+   * list of history entries with diff views and restore controls.
+   * Re-called when the user changes the language filter.
+   *
+   * @param {HTMLElement} container - The `.lt-dialog__history` element to populate.
+   * @returns {void}
+   */
   function _renderHistoryPanel(container) {
     container.innerHTML = "";
 
@@ -778,6 +950,19 @@
     container.appendChild(timeline);
   }
 
+  /**
+   * Append a "Restore" button and confirmation panel to a history entry.
+   *
+   * Clicking "Restore" reveals two options: "Restore & activate" and
+   * "Restore as inactive", each of which calls `_executeRestore`.
+   * The restore value is `new_value` for create/update actions and
+   * `old_value` for delete actions (i.e. the state after the event).
+   *
+   * @param {HTMLElement}  header - The entry's header row (button is appended here).
+   * @param {HTMLElement}  item   - The entry's root element (confirmation panel appended here).
+   * @param {HistoryEntry} entry  - The history entry data.
+   * @returns {void}
+   */
   function _appendRestoreControl(header, item, entry) {
     // Determine the value to restore:
     // CREATE/UPDATE → new_value (the state after this event)
@@ -842,6 +1027,14 @@
     });
   }
 
+  /**
+   * Save a single-language translation restore and reload the page on success.
+   * @param {string}      language  - Language code to restore.
+   * @param {string}      value     - The msgstr value to restore.
+   * @param {boolean}     activate  - Whether the restored value should be active.
+   * @param {HTMLElement} confirmEl - The confirmation panel (buttons are disabled during request).
+   * @returns {void}
+   */
   function _executeRestore(language, value, activate, confirmEl) {
     // Disable buttons during request
     var buttons = confirmEl.querySelectorAll("button");
@@ -865,6 +1058,12 @@
       });
   }
 
+  /**
+   * Render "Before" / "After" value sections for the history Value tab.
+   * @param {HTMLElement}  container - Parent element to append sections into.
+   * @param {HistoryEntry} entry     - The history entry with `old_value` and/or `new_value`.
+   * @returns {void}
+   */
   function _buildValueSections(container, entry) {
     if (entry.old_value) {
       var sec1 = document.createElement("div");
@@ -894,6 +1093,12 @@
     }
   }
 
+  /**
+   * Format an ISO 8601 timestamp as a human-friendly relative time string
+   * (e.g. "just now", "5m ago", "3d ago") or a locale date for older entries.
+   * @param {string} isoString - ISO 8601 date string from the API.
+   * @returns {string}
+   */
   function _formatTime(isoString) {
     var date = new Date(isoString);
     var now = new Date();
@@ -912,6 +1117,10 @@
     return date.toLocaleDateString();
   }
 
+  /**
+   * Close the dialog and reset editing state back to "active" mode.
+   * @returns {void}
+   */
   function closeModal() {
     if (dialog && dialog.open) {
       dialog.close();
@@ -926,6 +1135,11 @@
 
   // ─── Edit Mode Toggle ───────────────────────────────
 
+  /**
+   * Enter translation edit mode: add the body class that highlights translatable
+   * elements and show a toast notification.
+   * @returns {void}
+   */
   function activateEditMode() {
     state = "active";
     document.body.classList.add("lt-edit-mode");
@@ -935,6 +1149,11 @@
     );
   }
 
+  /**
+   * Leave translation edit mode: close any open modal, remove the body class,
+   * and show a toast notification.
+   * @returns {void}
+   */
   function deactivateEditMode() {
     closeModal();
     state = "inactive";
@@ -1005,9 +1224,15 @@
 
   // ─── Attribute Picker (for elements with multiple translated attrs) ──
 
+  /**
+   * Handle elements with multiple translated attributes (e.g. both `title` and
+   * `placeholder`). Currently opens the editor for the first attribute only;
+   * a multi-attribute picker UI is planned for a future release.
+   * @param {HTMLElement} element - The element carrying `data-lt-attrs`.
+   * @param {AttrInfo[]}  attrs   - Parsed array of attribute descriptors.
+   * @returns {void}
+   */
   function _showAttrPicker(element, attrs) {
-    // Simple: open modal for first attr, with a note about others.
-    // A full picker UI can be added later.
     openModal(element, attrs[0]);
   }
 })();
