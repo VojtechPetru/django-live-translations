@@ -8,6 +8,10 @@
  *      └──────(Shift+T)───────┘                         │
  *      ▲                                                │
  *      └──────(save/cancel/Escape)──────────────────────┘
+ *
+ * Preview mode (Shift+P → page reload):
+ *   Server renders inactive translations. Elements with inactive overrides
+ *   get amber borders. Shift+click selects them for bulk activation.
  */
 (function () {
   "use strict";
@@ -81,6 +85,10 @@
   var CSRF_TOKEN = CONFIG.csrfToken || "";
   /** @type {boolean} */
   var ACTIVE_BY_DEFAULT = CONFIG.activeByDefault !== undefined ? CONFIG.activeByDefault : false;
+  /** @type {boolean} */
+  var PREVIEW = CONFIG.preview || false;
+  /** @type {Array<{m:string, c:string}>} */
+  var PREVIEW_ENTRIES = CONFIG.previewEntries || [];
 
   // ─── Language display names & flags ──────────────────
   /** @type {Object<string, LangMeta>} */
@@ -123,6 +131,20 @@
   var currentAttrName = null;
   /** @type {boolean} */
   var historyOpen = false;
+
+  // ─── Editor State (tabbed editing) ───────────────────
+  /** @type {TranslationData|null} - Cached API data for the current edit session. */
+  var _editData = null;
+  /** @type {string} - Currently selected language tab for editing. */
+  var _editLang = "";
+  /** @type {Object<string, string>} - Accumulated edited text values keyed by language. */
+  var _editedValues = {};
+  /** @type {Object<string, boolean>} - Accumulated active flags keyed by language. */
+  var _editedActiveFlags = {};
+  /** @type {Object<string, string>} - Snapshot of initial text values from API (for dirty detection). */
+  var _originalValues = {};
+  /** @type {Object<string, boolean>} - Snapshot of initial active flags from API (for dirty detection). */
+  var _originalActiveFlags = {};
 
   // ─── API Client ──────────────────────────────────────
 
@@ -197,6 +219,68 @@
         return resp.json();
       });
     },
+
+    /**
+     * Delete DB override(s) for a msgid/context.
+     * @param {string} msgid    - The gettext message identifier.
+     * @param {string} context  - The gettext context.
+     * @param {string} language - Language code to delete (single language).
+     * @returns {Promise<{ok:boolean, deleted:number}>}
+     */
+    deleteTranslation: function (msgid, context, language) {
+      var payload = { msgid: msgid, context: context };
+      if (language) payload.language = language;
+      return fetch(API_BASE + "/translations/delete/", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": CSRF_TOKEN,
+        },
+        body: JSON.stringify(payload),
+      }).then(function (resp) {
+        if (!resp.ok) {
+          return resp
+            .json()
+            .catch(function () {
+              return {};
+            })
+            .then(function (err) {
+              throw new Error(err.error || "POST failed: " + resp.status);
+            });
+        }
+        return resp.json();
+      });
+    },
+
+    /**
+     * Bulk-activate translations for the given msgid/context pairs across ALL languages.
+     * @param {Array<{msgid:string, context:string}>} msgids - Entries to activate.
+     * @returns {Promise<{ok:boolean, activated:number}>}
+     */
+    bulkActivate: function (msgids) {
+      return fetch(API_BASE + "/translations/bulk-activate/", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": CSRF_TOKEN,
+        },
+        body: JSON.stringify({ msgids: msgids }),
+      }).then(function (resp) {
+        if (!resp.ok) {
+          return resp
+            .json()
+            .catch(function () {
+              return {};
+            })
+            .then(function (err) {
+              throw new Error(err.error || "POST failed: " + resp.status);
+            });
+        }
+        return resp.json();
+      });
+    },
   };
 
   // ─── Toast ───────────────────────────────────────────
@@ -268,6 +352,7 @@
       "</div>" +
       '<div class="lt-dialog__msgid"></div>' +
       '<div class="lt-dialog__hint"></div>' +
+      '<div class="lt-editor__tabs"></div>' +
       '<div class="lt-dialog__fields"></div>' +
       '<div class="lt-dialog__history"></div>' +
       '<div class="lt-dialog__error"></div>' +
@@ -281,6 +366,7 @@
     // Store icon templates on the dialog for toggling
     dialog._ltIconHistory = ICON_HISTORY;
     dialog._ltIconBack = ICON_BACK;
+
     document.body.appendChild(dialog);
 
     // Event listeners
@@ -405,13 +491,12 @@
   }
 
   /**
-   * Populate the dialog with per-language textarea fields, active toggles,
-   * and .po default hints. Called after the translations API responds.
+   * Populate the dialog with tabbed language editing.
+   * Called after the translations API responds.
    * @param {TranslationData} data - Payload from `api.getTranslations`.
    * @returns {void}
    */
   function renderFields(data) {
-    var container = dialog.querySelector(".lt-dialog__fields");
     dialog.querySelector(".lt-dialog__loading").style.display = "none";
     dialog.querySelector(".lt-btn--save").disabled = false;
 
@@ -425,135 +510,307 @@
       hintEl.style.display = "none";
     }
 
-    container.innerHTML = "";
+    // Store data for tab switching
+    _editData = data;
+    _editedValues = {};
+    _editedActiveFlags = {};
+    _originalValues = {};
+    _originalActiveFlags = {};
 
-    var poDefaults = data.defaults || null;
+    var poDefaults = data.defaults || {};
 
+    // Initialize values from API data
     for (var i = 0; i < LANGUAGES.length; i++) {
       var lang = LANGUAGES[i];
       var entry = data.translations[lang] || { msgstr: "", fuzzy: false };
-
-      var field = document.createElement("div");
-      field.className = "lt-field";
-
-      var label = document.createElement("label");
-      label.className = "lt-field__label";
-      label.textContent = langLabel(lang);
-      label.setAttribute("for", "lt-input-" + lang);
-
-      field.appendChild(label);
-
-      // Active toggle — only visible when the value differs from .po default
-      var poDefault = poDefaults ? (poDefaults[lang] || "") : "";
-      var hasOverride = entry.msgstr !== poDefault;
-      var isActive = hasOverride ? entry.is_active !== false : ACTIVE_BY_DEFAULT;
-
-      var toggleWrap = document.createElement("label");
-      toggleWrap.className = "lt-field__toggle";
-      if (!hasOverride) toggleWrap.style.display = "none";
-
-      var checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.className = "lt-field__toggle-input";
-      checkbox.id = "lt-active-" + lang;
-      checkbox.checked = isActive;
-
-      var slider = document.createElement("span");
-      slider.className = "lt-field__toggle-slider";
-
-      var toggleLabel = document.createElement("span");
-      toggleLabel.className = "lt-field__toggle-label";
-      toggleLabel.textContent = isActive ? "Active" : "Inactive";
-
-      (function (lbl) {
-        checkbox.addEventListener("change", function () {
-          lbl.textContent = this.checked ? "Active" : "Inactive";
-        });
-      })(toggleLabel);
-
-      var toggleHelp = document.createElement("span");
-      toggleHelp.className = "lt-field__toggle-help";
-      toggleHelp.textContent = "Inactive overrides are saved but won\u2019t take effect until activated.";
-
-      toggleWrap.appendChild(checkbox);
-      toggleWrap.appendChild(slider);
-      toggleWrap.appendChild(toggleLabel);
-      toggleWrap.appendChild(toggleHelp);
-
-      var textarea = document.createElement("textarea");
-      textarea.className = "lt-field__input";
-      textarea.id = "lt-input-" + lang;
-      textarea.name = lang;
-      textarea.value = entry.msgstr;
-      textarea.rows = 3;
-      if (entry.fuzzy) {
-        textarea.classList.add("lt-field__input--fuzzy");
-      }
-
-      // Show/hide toggle + revert button + auto-resize on input
-      (function (ta, toggle, defaultVal, cb, defaultActive) {
-        /** @type {HTMLElement|null} */
-        var revertEl = null;
-
-        function syncToggle() {
-          var differs = ta.value !== defaultVal;
-          toggle.style.display = differs ? "" : "none";
-          if (revertEl) revertEl.style.display = differs ? "" : "none";
-          if (!differs) {
-            cb.checked = defaultActive;
-          }
-        }
-        ta.addEventListener("input", function () {
-          this.style.height = "auto";
-          this.style.height = this.scrollHeight + "px";
-          syncToggle();
-        });
-        // Expose for the revert button
-        ta._ltSyncToggle = syncToggle;
-        ta._ltSetRevertEl = function (el) { revertEl = el; syncToggle(); };
-      })(textarea, toggleWrap, poDefault, checkbox, ACTIVE_BY_DEFAULT);
-
-      // Show .po default with revert button if available
-      if (poDefaults && poDefaults[lang]) {
-        var poRow = document.createElement("div");
-        poRow.className = "lt-field__po-row";
-
-        var poHint = document.createElement("div");
-        poHint.className = "lt-field__po-default";
-        poHint.textContent = poDefaults[lang];
-        poHint.title = ".po file default";
-
-        var revertBtn = document.createElement("button");
-        revertBtn.type = "button";
-        revertBtn.className = "lt-btn--revert";
-        revertBtn.textContent = "Revert";
-        revertBtn.title = "Revert to .po default";
-        (function (ta, defaultValue) {
-          revertBtn.addEventListener("click", function () {
-            ta.value = defaultValue;
-            ta.style.height = "auto";
-            ta.style.height = ta.scrollHeight + "px";
-            if (ta._ltSyncToggle) ta._ltSyncToggle();
-            ta.focus();
-          });
-        })(textarea, poDefaults[lang]);
-
-        poRow.appendChild(poHint);
-        poRow.appendChild(revertBtn);
-        field.appendChild(poRow);
-
-        // Register revert button with sync logic so it hides when values match
-        if (textarea._ltSetRevertEl) textarea._ltSetRevertEl(revertBtn);
-      }
-
-      field.appendChild(textarea);
-      field.appendChild(toggleWrap);
-      container.appendChild(field);
+      _editedValues[lang] = entry.msgstr;
+      var hasOverride = !!entry.has_override;
+      _editedActiveFlags[lang] = hasOverride ? entry.is_active !== false : ACTIVE_BY_DEFAULT;
+      _originalValues[lang] = entry.msgstr;
+      _originalActiveFlags[lang] = _editedActiveFlags[lang];
     }
 
-    // Focus first textarea
-    var first = container.querySelector("textarea");
-    if (first) first.focus();
+    // Default edit language: first configured language
+    _editLang = LANGUAGES[0];
+
+    _renderEditorTabs();
+    _renderEditorPanels();
+  }
+
+  /**
+   * Render the language tab bar above the editor panels.
+   * Hidden when only one language is configured.
+   * @returns {void}
+   */
+  function _renderEditorTabs() {
+    var tabBar = dialog.querySelector(".lt-editor__tabs");
+    tabBar.innerHTML = "";
+
+    if (LANGUAGES.length <= 1) {
+      tabBar.style.display = "none";
+      return;
+    }
+
+    tabBar.style.display = "";
+
+    for (var i = 0; i < LANGUAGES.length; i++) {
+      (function (lang) {
+        var meta = LANG_META[lang];
+        var pill = document.createElement("button");
+        pill.type = "button";
+        pill.className = "lt-editor__tab" + (_editLang === lang ? " lt-editor__tab--active" : "");
+        pill.textContent = meta ? meta.flag + "  " + meta.name : lang.toUpperCase();
+        pill.dataset.lang = lang;
+        pill.addEventListener("click", function () {
+          if (_editLang === lang) return;
+          _switchEditLang(lang);
+        });
+        tabBar.appendChild(pill);
+      })(LANGUAGES[i]);
+    }
+  }
+
+  /**
+   * Switch the active edit language tab.
+   * Persists current edits, swaps languages, and re-renders the editor.
+   * @param {string} newLang - Language code to switch to.
+   * @returns {void}
+   */
+  function _switchEditLang(newLang) {
+    _persistCurrentEdit();
+    _editLang = newLang;
+
+    // Update tab active states without full re-render
+    var tabs = dialog.querySelectorAll(".lt-editor__tab");
+    for (var i = 0; i < tabs.length; i++) {
+      if (tabs[i].dataset.lang === newLang) {
+        tabs[i].classList.add("lt-editor__tab--active");
+      } else {
+        tabs[i].classList.remove("lt-editor__tab--active");
+      }
+    }
+
+    _renderEditorPanels();
+    _updateTabDirtyDots();
+  }
+
+  /**
+   * Save current textarea value and toggle state to the accumulated edit stores.
+   * Called before tab switches and before save.
+   * @returns {void}
+   */
+  function _persistCurrentEdit() {
+    if (!_editLang || !dialog) return;
+    var textarea = dialog.querySelector("#lt-input-" + _editLang);
+    if (textarea) {
+      _editedValues[_editLang] = textarea.value;
+    }
+    var toggle = dialog.querySelector("#lt-active-" + _editLang);
+    if (toggle) {
+      _editedActiveFlags[_editLang] = toggle.checked;
+    }
+  }
+
+  /**
+   * Check whether a language has unsaved changes relative to the API snapshot.
+   * @param {string} lang - Language code.
+   * @returns {boolean}
+   */
+  function _isLangDirty(lang) {
+    if (_editedValues[lang] !== _originalValues[lang]) return true;
+    if (_editedActiveFlags[lang] !== _originalActiveFlags[lang]) return true;
+    return false;
+  }
+
+  /**
+   * Update the dirty-dot indicator on each language tab.
+   * Reads the current textarea/toggle for `_editLang` live (without persisting).
+   * @returns {void}
+   */
+  function _updateTabDirtyDots() {
+    if (!dialog || LANGUAGES.length <= 1) return;
+    var tabs = dialog.querySelectorAll(".lt-editor__tab");
+    for (var i = 0; i < tabs.length; i++) {
+      var lang = tabs[i].dataset.lang;
+      var dirty;
+      if (lang === _editLang) {
+        // Read live from DOM for the active tab
+        var ta = dialog.querySelector("#lt-input-" + lang);
+        var cb = dialog.querySelector("#lt-active-" + lang);
+        dirty = (ta && ta.value !== _originalValues[lang]) ||
+                (cb && cb.checked !== _originalActiveFlags[lang]);
+      } else {
+        dirty = _isLangDirty(lang);
+      }
+      if (dirty) {
+        tabs[i].classList.add("lt-editor__tab--dirty");
+      } else {
+        tabs[i].classList.remove("lt-editor__tab--dirty");
+      }
+    }
+  }
+
+  /**
+   * Render the editor content area for the currently selected language.
+   * @returns {void}
+   */
+  function _renderEditorPanels() {
+    var container = dialog.querySelector(".lt-dialog__fields");
+    container.innerHTML = "";
+
+    var wrapper = document.createElement("div");
+    wrapper.className = "lt-editor__single";
+    _renderEditPanel(wrapper);
+    container.appendChild(wrapper);
+
+    // Focus and auto-resize textarea
+    var ta = container.querySelector("textarea");
+    if (ta) {
+      ta.focus();
+      ta.style.height = "auto";
+      ta.style.height = ta.scrollHeight + "px";
+    }
+  }
+
+  /**
+   * Render the edit panel for the currently selected language.
+   * Contains .po default hint, textarea, active toggle, and delete override button.
+   * @param {HTMLElement} container - Parent element to render into.
+   * @returns {void}
+   */
+  function _renderEditPanel(container) {
+    container.innerHTML = "";
+    var lang = _editLang;
+    var entry = (_editData.translations[lang]) || { msgstr: "", fuzzy: false };
+    var poDefaults = _editData.defaults || {};
+    var poDefault = poDefaults[lang] || "";
+    var hasOverride = !!entry.has_override;
+
+    // Show language label in single-language mode (no tabs to indicate it)
+    if (LANGUAGES.length <= 1) {
+      var langLabelEl = document.createElement("label");
+      langLabelEl.className = "lt-field__label";
+      langLabelEl.textContent = langLabel(lang);
+      langLabelEl.setAttribute("for", "lt-input-" + lang);
+      container.appendChild(langLabelEl);
+    }
+
+    // .po default row with delete override button
+    if (poDefault) {
+      var poRow = document.createElement("div");
+      poRow.className = "lt-field__po-row";
+
+      var poHint = document.createElement("div");
+      poHint.className = "lt-field__po-default";
+      poHint.textContent = poDefault;
+      poHint.title = ".po file default";
+
+      var deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "lt-btn--delete-override";
+      deleteBtn.textContent = "Delete Override";
+      deleteBtn.title = "Remove DB override for this language";
+      if (!hasOverride) deleteBtn.style.display = "none";
+
+      (function (btn, langCode) {
+        btn.addEventListener("click", function () {
+          if (btn.dataset.confirm !== "1") {
+            btn.dataset.confirm = "1";
+            btn.textContent = "Confirm?";
+            btn.classList.add("lt-btn--delete-override-confirm");
+            return;
+          }
+          btn.disabled = true;
+          btn.textContent = "Deleting...";
+          showDialogError(null);
+          var info = _getMsgidAndContext();
+          api
+            .deleteTranslation(info.msgid, info.context, langCode)
+            .then(function () {
+              window.location.reload();
+            })
+            .catch(function (err) {
+              showDialogError(err.message);
+              btn.disabled = false;
+              btn.textContent = "Delete Override";
+              btn.classList.remove("lt-btn--delete-override-confirm");
+              delete btn.dataset.confirm;
+            });
+        });
+      })(deleteBtn, lang);
+
+      poRow.appendChild(poHint);
+      poRow.appendChild(deleteBtn);
+      container.appendChild(poRow);
+    }
+
+    // Textarea
+    var textarea = document.createElement("textarea");
+    textarea.className = "lt-field__input";
+    textarea.id = "lt-input-" + lang;
+    textarea.name = lang;
+    textarea.value = _editedValues[lang] || "";
+    textarea.rows = 3;
+    if (entry.fuzzy) {
+      textarea.classList.add("lt-field__input--fuzzy");
+    }
+
+    // Active toggle
+    var isActive = _editedActiveFlags[lang];
+    var currentVal = _editedValues[lang] || "";
+
+    var toggleWrap = document.createElement("label");
+    toggleWrap.className = "lt-field__toggle";
+    if (!hasOverride && currentVal === poDefault) {
+      toggleWrap.style.display = "none";
+    }
+
+    var checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.className = "lt-field__toggle-input";
+    checkbox.id = "lt-active-" + lang;
+    checkbox.checked = isActive;
+
+    var slider = document.createElement("span");
+    slider.className = "lt-field__toggle-slider";
+
+    var toggleLabelEl = document.createElement("span");
+    toggleLabelEl.className = "lt-field__toggle-label";
+    toggleLabelEl.textContent = isActive ? "Active" : "Inactive";
+
+    checkbox.addEventListener("change", function () {
+      toggleLabelEl.textContent = checkbox.checked ? "Active" : "Inactive";
+      _updateTabDirtyDots();
+    });
+
+    var toggleHelp = document.createElement("span");
+    toggleHelp.className = "lt-field__toggle-help";
+    toggleHelp.textContent = "Inactive overrides are saved but won\u2019t take effect until activated.";
+
+    toggleWrap.appendChild(checkbox);
+    toggleWrap.appendChild(slider);
+    toggleWrap.appendChild(toggleLabelEl);
+    toggleWrap.appendChild(toggleHelp);
+
+    // Show/hide toggle + auto-resize on input
+    (function (ta, toggle, defaultVal, cb, defaultActive, hadOverride) {
+      function syncToggle() {
+        var differs = ta.value !== defaultVal;
+        toggle.style.display = (differs || hadOverride) ? "" : "none";
+        if (!differs && !hadOverride) {
+          cb.checked = defaultActive;
+        }
+      }
+      ta.addEventListener("input", function () {
+        this.style.height = "auto";
+        this.style.height = this.scrollHeight + "px";
+        syncToggle();
+        _updateTabDirtyDots();
+      });
+    })(textarea, toggleWrap, poDefault, checkbox, ACTIVE_BY_DEFAULT, hasOverride);
+
+    container.appendChild(textarea);
+    container.appendChild(toggleWrap);
   }
 
   /**
@@ -590,8 +847,8 @@
   }
 
   /**
-   * Collect values from all language fields and POST them to the save endpoint.
-   * On success the page is reloaded so Django re-renders server-side translations.
+   * Persist the current textarea, collect all accumulated edits, and POST
+   * them to the save endpoint. On success the page is reloaded.
    * @returns {void}
    */
   function handleSave() {
@@ -600,29 +857,25 @@
     saveBtn.textContent = "Saving...";
     showDialogError(null);
 
-    // Read msgid/context from either span data attrs or the stored attr info
+    // Capture whatever is in the current textarea/toggle before sending
+    _persistCurrentEdit();
+
     var attrData = currentAttrName ? _getAttrInfo(currentSpan, currentAttrName) : null;
     var msgid = attrData ? attrData.m : currentSpan.dataset.ltMsgid;
     var context = attrData ? attrData.c : (currentSpan.dataset.ltContext || "");
 
+    // Send all accumulated values (all languages, not just the visible one)
     var translations = {};
     var activeFlags = {};
     for (var i = 0; i < LANGUAGES.length; i++) {
       var lang = LANGUAGES[i];
-      var input = dialog.querySelector("#lt-input-" + lang);
-      var toggle = dialog.querySelector("#lt-active-" + lang);
-      if (input) {
-        translations[lang] = input.value;
-        activeFlags[lang] = toggle ? toggle.checked : ACTIVE_BY_DEFAULT;
-      }
+      translations[lang] = _editedValues[lang] !== undefined ? _editedValues[lang] : "";
+      activeFlags[lang] = _editedActiveFlags[lang] !== undefined ? _editedActiveFlags[lang] : ACTIVE_BY_DEFAULT;
     }
 
     api
       .saveTranslations(msgid, context, translations, activeFlags)
       .then(function () {
-        // Full page reload so Django re-renders all translations server-side.
-        // Inline DOM update can't handle %(var)s interpolation from blocktrans,
-        // plural forms, or other template-level processing.
         window.location.reload();
       })
       .catch(function (err) {
@@ -682,7 +935,7 @@
   }
 
   /**
-   * Switch the dialog chrome to show the translation editor (fields + save/cancel).
+   * Switch the dialog chrome to show the translation editor (tabs + fields + save/cancel).
    * @returns {void}
    */
   function _showEditView() {
@@ -692,9 +945,17 @@
     btn.innerHTML = dialog._ltIconHistory;
     btn.title = "View edit history";
 
+    var tabBar = dialog.querySelector(".lt-editor__tabs");
+    if (tabBar) tabBar.style.display = LANGUAGES.length > 1 ? "" : "none";
+
     dialog.querySelector(".lt-dialog__fields").style.display = "";
     dialog.querySelector(".lt-dialog__actions").style.display = "";
     dialog.querySelector(".lt-dialog__history").style.display = "none";
+
+    // Restore hint visibility
+    if (_editData && _editData.hint) {
+      dialog.querySelector(".lt-dialog__hint").style.display = "block";
+    }
   }
 
   /**
@@ -707,6 +968,12 @@
     var btn = dialog.querySelector(".lt-btn--history");
     btn.innerHTML = dialog._ltIconBack;
     btn.title = "Back to editing";
+
+    // Persist current edits before switching views
+    _persistCurrentEdit();
+
+    var tabBar = dialog.querySelector(".lt-editor__tabs");
+    if (tabBar) tabBar.style.display = "none";
 
     dialog.querySelector(".lt-dialog__fields").style.display = "none";
     dialog.querySelector(".lt-dialog__hint").style.display = "none";
@@ -1181,9 +1448,216 @@
     currentSpan = null;
     currentAttrName = null;
     historyOpen = false;
+    _editData = null;
+    _editLang = "";
+    _editedValues = {};
+    _editedActiveFlags = {};
+    _originalValues = {};
+    _originalActiveFlags = {};
     if (state === "editing") {
       state = "active";
     }
+  }
+
+  // ─── Preview Mode: Multi-select & Action Bar ────────
+
+  /** @type {HTMLElement[]} */
+  var selectedElements = [];
+  /** @type {HTMLElement|null} */
+  var actionBar = null;
+  /** @type {boolean} */
+  var actionBarConfirming = false;
+
+  /**
+   * Toggle an element's selection state for bulk activation.
+   * @param {HTMLElement} el - The element to toggle.
+   * @returns {void}
+   */
+  function _toggleSelected(el) {
+    var idx = selectedElements.indexOf(el);
+    if (idx !== -1) {
+      selectedElements.splice(idx, 1);
+      el.classList.remove("lt-selected");
+    } else {
+      selectedElements.push(el);
+      el.classList.add("lt-selected");
+    }
+    _updateActionBar();
+  }
+
+  /**
+   * Clear all selected elements.
+   * @returns {void}
+   */
+  function _clearSelection() {
+    for (var i = 0; i < selectedElements.length; i++) {
+      selectedElements[i].classList.remove("lt-selected");
+    }
+    selectedElements = [];
+    _updateActionBar();
+  }
+
+  /**
+   * Create the floating action bar element (called once on preview init).
+   * @returns {void}
+   */
+  function _createActionBar() {
+    if (actionBar) return;
+    actionBar = document.createElement("div");
+    actionBar.className = "lt-action-bar";
+    document.body.appendChild(actionBar);
+    _renderActionBarDefault();
+  }
+
+  /**
+   * Render the action bar in its default state (count + activate + clear).
+   * @returns {void}
+   */
+  function _renderActionBarDefault() {
+    if (!actionBar) return;
+    actionBarConfirming = false;
+    var count = selectedElements.length;
+    actionBar.innerHTML =
+      '<span class="lt-action-bar__count">' + count + " selected</span>" +
+      '<button type="button" class="lt-action-bar__activate">Activate for all languages</button>' +
+      '<button type="button" class="lt-action-bar__clear">Clear</button>';
+    actionBar.querySelector(".lt-action-bar__activate").addEventListener("click", _showActivateConfirm);
+    actionBar.querySelector(".lt-action-bar__clear").addEventListener("click", _clearSelection);
+  }
+
+  /**
+   * Show/hide the action bar based on selection count.
+   * @returns {void}
+   */
+  function _updateActionBar() {
+    if (!actionBar) return;
+    var count = selectedElements.length;
+    if (count === 0) {
+      actionBar.classList.remove("lt-action-bar--visible");
+      actionBarConfirming = false;
+      _renderActionBarDefault();
+      return;
+    }
+    actionBar.classList.add("lt-action-bar--visible");
+    if (!actionBarConfirming) {
+      _renderActionBarDefault();
+    }
+  }
+
+  /**
+   * Switch the action bar to confirmation state with a warning about all-language scope.
+   * @returns {void}
+   */
+  function _showActivateConfirm() {
+    actionBarConfirming = true;
+    var count = selectedElements.length;
+    actionBar.innerHTML =
+      '<span class="lt-action-bar__warning">' +
+      "This will activate " + count + " translation(s) across ALL languages. Continue?" +
+      "</span>" +
+      '<button type="button" class="lt-action-bar__confirm">Confirm</button>' +
+      '<button type="button" class="lt-action-bar__cancel">Cancel</button>';
+    actionBar.querySelector(".lt-action-bar__confirm").addEventListener("click", _executeBulkActivate);
+    actionBar.querySelector(".lt-action-bar__cancel").addEventListener("click", function () {
+      _renderActionBarDefault();
+    });
+  }
+
+  /**
+   * Collect selected msgid/context pairs and POST to the bulk-activate endpoint.
+   * @returns {void}
+   */
+  function _executeBulkActivate() {
+    var confirmBtn = actionBar.querySelector(".lt-action-bar__confirm");
+    if (confirmBtn) confirmBtn.disabled = true;
+
+    var msgids = [];
+    var seen = {};
+
+    for (var i = 0; i < selectedElements.length; i++) {
+      var el = selectedElements[i];
+
+      if (el.dataset.ltMsgid) {
+        // Inline text span
+        var msgid = el.dataset.ltMsgid;
+        var context = el.dataset.ltContext || "";
+        var key = msgid + "\x00" + context;
+        if (!seen[key]) {
+          seen[key] = true;
+          msgids.push({ msgid: msgid, context: context });
+        }
+      } else if (el.dataset.ltAttrs) {
+        // Attribute element — collect all preview entries
+        try {
+          var attrs = JSON.parse(el.dataset.ltAttrs);
+          for (var j = 0; j < attrs.length; j++) {
+            var aKey = attrs[j].m + "\x00" + (attrs[j].c || "");
+            if (!seen[aKey]) {
+              seen[aKey] = true;
+              msgids.push({ msgid: attrs[j].m, context: attrs[j].c || "" });
+            }
+          }
+        } catch (e) { /* ignore */ }
+      }
+    }
+
+    if (msgids.length === 0) {
+      showToast("No translations to activate", "error");
+      _renderActionBarDefault();
+      return;
+    }
+
+    api
+      .bulkActivate(msgids)
+      .then(function (data) {
+        showToast(data.activated + " translation(s) activated", "success");
+        window.location.reload();
+      })
+      .catch(function (err) {
+        showToast("Bulk activate failed: " + err.message, "error");
+        if (confirmBtn) confirmBtn.disabled = false;
+      });
+  }
+
+  /**
+   * Initialize preview mode: mark elements with inactive overrides and create the action bar.
+   * Called once on DOMContentLoaded when PREVIEW is true.
+   * @returns {void}
+   */
+  function _initPreviewMode() {
+    // Build lookup from config
+    var lookup = {};
+    for (var i = 0; i < PREVIEW_ENTRIES.length; i++) {
+      var e = PREVIEW_ENTRIES[i];
+      lookup[e.m + "\x00" + (e.c || "")] = true;
+    }
+
+    // Mark inline text spans
+    var spans = document.querySelectorAll(".lt-translatable");
+    for (var s = 0; s < spans.length; s++) {
+      var sp = spans[s];
+      var spKey = (sp.dataset.ltMsgid || "") + "\x00" + (sp.dataset.ltContext || "");
+      if (lookup[spKey]) {
+        sp.classList.add("lt-preview");
+      }
+    }
+
+    // Mark attribute-translatable elements
+    var attrEls = document.querySelectorAll("[data-lt-attrs]");
+    for (var a = 0; a < attrEls.length; a++) {
+      try {
+        var attrs = JSON.parse(attrEls[a].dataset.ltAttrs || "[]");
+        for (var j = 0; j < attrs.length; j++) {
+          var aKey = (attrs[j].m || "") + "\x00" + (attrs[j].c || "");
+          if (lookup[aKey]) {
+            attrEls[a].classList.add("lt-preview");
+            break;
+          }
+        }
+      } catch (e) { /* ignore parse errors */ }
+    }
+
+    _createActionBar();
   }
 
   // ─── Edit Mode Toggle ───────────────────────────────
@@ -1209,6 +1683,7 @@
    */
   function deactivateEditMode() {
     closeModal();
+    _clearSelection();
     state = "inactive";
     document.body.classList.remove("lt-edit-mode");
     showToast("Translation edit mode OFF", "info");
@@ -1217,19 +1692,30 @@
   // ─── Keyboard Handler ───────────────────────────────
 
   document.addEventListener("keydown", function (e) {
+    var tag = document.activeElement ? document.activeElement.tagName : "";
+    var inInput = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+
     // Shift+T toggles edit mode (but not when typing in inputs)
     if (e.key === "T" && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
-      var tag = document.activeElement ? document.activeElement.tagName : "";
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
-        return;
-      }
-
+      if (inInput) return;
       e.preventDefault();
       if (state === "inactive") {
         activateEditMode();
       } else {
         deactivateEditMode();
       }
+    }
+
+    // Shift+P toggles preview mode (cookie + reload)
+    if (e.key === "P" && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      if (inInput) return;
+      e.preventDefault();
+      if (document.cookie.indexOf("lt_preview=1") !== -1) {
+        document.cookie = "lt_preview=; path=/; max-age=0";
+      } else {
+        document.cookie = "lt_preview=1; path=/; max-age=86400; SameSite=Lax";
+      }
+      window.location.reload();
     }
   });
 
@@ -1245,6 +1731,13 @@
       if (span) {
         e.preventDefault();
         e.stopPropagation();
+
+        // Shift+click on preview elements toggles selection
+        if (e.shiftKey && PREVIEW && span.classList.contains("lt-preview")) {
+          _toggleSelected(span);
+          return;
+        }
+
         openModal(span);
         return;
       }
@@ -1254,6 +1747,12 @@
       if (attrEl) {
         e.preventDefault();
         e.stopPropagation();
+
+        // Shift+click on preview elements toggles selection
+        if (e.shiftKey && PREVIEW && attrEl.classList.contains("lt-preview")) {
+          _toggleSelected(attrEl);
+          return;
+        }
 
         var attrs;
         try {
@@ -1287,5 +1786,14 @@
    */
   function _showAttrPicker(element, attrs) {
     openModal(element, attrs[0]);
+  }
+
+  // ─── Preview Mode Auto-Activation ───────────────────
+
+  if (PREVIEW) {
+    document.addEventListener("DOMContentLoaded", function () {
+      activateEditMode();
+      _initPreviewMode();
+    });
   }
 })();

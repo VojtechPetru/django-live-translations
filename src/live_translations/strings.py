@@ -98,6 +98,13 @@ lt_current_user: "contextvars.ContextVar[AbstractBaseUser | None]" = (
     contextvars.ContextVar("lt_current_user", default=None)
 )
 
+# Per-request preview overrides: maps (msgid, context) -> msgstr for inactive
+# translations that should be shown in preview mode. Set by the middleware when
+# the lt_preview cookie is present, reset in its finally block.
+lt_preview_overrides: contextvars.ContextVar[dict[tuple[str, str], str] | None] = (
+    contextvars.ContextVar("lt_preview_overrides", default=None)
+)
+
 
 class TranslatableString(str):
     """A str subclass that remembers its gettext msgid for live translation.
@@ -191,6 +198,11 @@ def install_gettext_patch() -> None:
         if not lt_active.get(False):
             return result  # type: ignore[no-any-return]
         try:
+            preview = lt_preview_overrides.get(None)
+            if preview is not None:
+                pv = preview.get((str(message), ""))
+                if pv is not None:
+                    return TranslatableString(pv, msgid=str(message))
             return TranslatableString(result, msgid=str(message))
         except Exception:
             logger.exception("Failed to wrap gettext result in TranslatableString")
@@ -208,6 +220,13 @@ def install_gettext_patch() -> None:
         if not lt_active.get(False):
             return result  # type: ignore[no-any-return]
         try:
+            preview = lt_preview_overrides.get(None)
+            if preview is not None:
+                pv = preview.get((str(message), str(context)))
+                if pv is not None:
+                    return TranslatableString(
+                        pv, msgid=str(message), context=str(context)
+                    )
             return TranslatableString(result, msgid=str(message), context=str(context))
         except Exception:
             logger.exception("Failed to wrap pgettext result in TranslatableString")
@@ -229,6 +248,11 @@ def install_gettext_patch() -> None:
     def _gettext_translatable(message: str) -> TranslatableString:
         result = _orig_gettext(message)
         try:
+            preview = lt_preview_overrides.get(None)
+            if preview is not None:
+                pv = preview.get((str(message), ""))
+                if pv is not None:
+                    return TranslatableString(pv, msgid=str(message))
             return TranslatableString(result, msgid=str(message))
         except Exception:
             logger.exception("Failed to create TranslatableString for lazy gettext")
@@ -244,6 +268,13 @@ def install_gettext_patch() -> None:
             else _orig_gettext(message)
         )
         try:
+            preview = lt_preview_overrides.get(None)
+            if preview is not None:
+                pv = preview.get((str(message), str(context)))
+                if pv is not None:
+                    return TranslatableString(
+                        pv, msgid=str(message), context=str(context)
+                    )
             return TranslatableString(result, msgid=str(message), context=str(context))
         except Exception:
             logger.exception("Failed to create TranslatableString for lazy pgettext")

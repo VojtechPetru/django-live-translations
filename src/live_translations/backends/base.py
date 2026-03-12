@@ -18,6 +18,7 @@ class TranslationEntry:
     context: str  # "" if no msgctxt
     fuzzy: bool = False
     is_active: bool = True
+    has_override: bool = False
 
 
 class TranslationBackend(abc.ABC):

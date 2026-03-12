@@ -101,6 +101,7 @@ def get_translations(request: django.http.HttpRequest) -> django.http.JsonRespon
                     "msgstr": entry.msgstr,
                     "fuzzy": entry.fuzzy,
                     "is_active": entry.is_active,
+                    "has_override": entry.has_override,
                 }
                 for lang, entry in entries.items()
             },
@@ -250,3 +251,106 @@ def get_history(request: django.http.HttpRequest) -> django.http.JsonResponse:
         results.append(item)
 
     return django.http.JsonResponse({"history": results})
+
+
+@django.views.decorators.csrf.csrf_protect
+@django.views.decorators.http.require_POST
+def delete_translation(request: django.http.HttpRequest) -> django.http.JsonResponse:
+    """Delete DB overrides for a msgid/context.
+
+    POST /__live-translations__/translations/delete/
+    Body: {"msgid": "...", "context": "", "language": "cs"}
+
+    ``language`` restricts deletion to a single language.
+    Omit it to delete all languages at once.
+    """
+    forbidden = _check_permission(request)
+    if forbidden:
+        return forbidden
+
+    try:
+        body: dict[str, t.Any] = json.loads(request.body)
+    except json.JSONDecodeError:
+        return django.http.JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    msgid: str = body.get("msgid", "")
+    context: str = body.get("context", "")
+    language: str = body.get("language", "")
+
+    if not msgid:
+        return django.http.JsonResponse({"error": "msgid is required"}, status=400)
+
+    qs = models.TranslationEntry.objects.for_msgid(msgid, context)
+    if language:
+        qs = qs.for_language(language)
+
+    entries = list(qs.values_list("language", "msgstr"))
+    deleted_count, _ = qs.delete()
+
+    if deleted_count:
+        for lang, old_value in entries:
+            history.record_change(
+                language=lang,
+                msgid=msgid,
+                context=context,
+                action=models.TranslationHistory.Action.DELETE,
+                old_value=old_value,
+                new_value="",
+            )
+        conf.get_backend_instance().bump_catalog_version()
+
+    return django.http.JsonResponse({"ok": True, "deleted": deleted_count})
+
+
+@django.views.decorators.csrf.csrf_protect
+@django.views.decorators.http.require_POST
+def bulk_activate(request: django.http.HttpRequest) -> django.http.JsonResponse:
+    """Activate translations for the given msgids across ALL languages.
+
+    POST /__live-translations__/translations/bulk-activate/
+    Body: {"msgids": [{"msgid": "...", "context": ""}, ...]}
+    """
+    import django.db.models
+
+    forbidden = _check_permission(request)
+    if forbidden:
+        return forbidden
+
+    try:
+        body: dict[str, t.Any] = json.loads(request.body)
+    except json.JSONDecodeError:
+        return django.http.JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    msgid_list: list[dict[str, str]] = body.get("msgids", [])
+    if not msgid_list:
+        return django.http.JsonResponse(
+            {"error": "msgids list is required"}, status=400
+        )
+
+    for item in msgid_list:
+        if not isinstance(item, dict) or "msgid" not in item:
+            return django.http.JsonResponse(
+                {"error": "Each item must have a 'msgid' key"}, status=400
+            )
+
+    # Build OR query for all (msgid, context) pairs across ALL languages
+    q = django.db.models.Q()
+    for item in msgid_list:
+        q |= django.db.models.Q(msgid=item["msgid"], context=item.get("context", ""))
+
+    qs = models.TranslationEntry.objects.filter(q, is_active=False)
+
+    # Materialize before update so history records the correct rows
+    affected = list(qs.values_list("language", "msgid", "context"))
+    updated = qs.update(is_active=True)
+
+    if updated:
+        history.record_bulk_action(
+            entries=affected,
+            action=models.TranslationHistory.Action.ACTIVATE,
+            old_value="inactive",
+            new_value="active",
+        )
+        conf.get_backend_instance().bump_catalog_version()
+
+    return django.http.JsonResponse({"ok": True, "activated": updated})

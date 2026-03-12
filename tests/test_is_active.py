@@ -336,6 +336,167 @@ class TestGetTranslationsView:
         data = json.loads(response.content)
 
         assert data["translations"]["en"]["is_active"] is False
+        assert data["translations"]["en"]["has_override"] is True
+
+        conf.get_settings.cache_clear()
+        conf.get_backend_instance.cache_clear()
+        conf.get_permission_checker.cache_clear()
+
+
+@pytest.mark.django_db
+class TestHasOverride:
+    def test_db_entry_has_override_true(self):
+        models.TranslationEntry.objects.create(
+            language="en", msgid="hello", msgstr="Hello", context="", is_active=True
+        )
+        backend = db.DatabaseBackend(locale_dir="/tmp", domain="django")
+        po_entry = base.TranslationEntry(
+            language="en", msgid="hello", msgstr="Hello", context=""
+        )
+        with unittest.mock.patch.object(
+            backend,
+            "_get_po_backend",
+            return_value=unittest.mock.MagicMock(
+                get_translations=unittest.mock.MagicMock(return_value={"en": po_entry})
+            ),
+        ):
+            result = backend.get_translations("hello", ["en"], context="")
+        assert result["en"].has_override is True
+
+    def test_po_only_has_override_false(self):
+        backend = db.DatabaseBackend(locale_dir="/tmp", domain="django")
+        po_entry = base.TranslationEntry(
+            language="en", msgid="hello", msgstr="Hello", context=""
+        )
+        with unittest.mock.patch.object(
+            backend,
+            "_get_po_backend",
+            return_value=unittest.mock.MagicMock(
+                get_translations=unittest.mock.MagicMock(return_value={"en": po_entry})
+            ),
+        ):
+            result = backend.get_translations("hello", ["en"], context="")
+        assert result["en"].has_override is False
+
+
+@pytest.mark.django_db
+class TestDeleteTranslationView:
+    def _setup(self, settings):
+        settings.LIVE_TRANSLATIONS = {
+            "BACKEND": "live_translations.backends.db.DatabaseBackend",
+            "LANGUAGES": ["en", "cs"],
+            "LOCALE_DIR": "/tmp",
+        }
+        conf.get_settings.cache_clear()
+        conf.get_backend_instance.cache_clear()
+        conf.get_permission_checker.cache_clear()
+
+        backend = conf.get_backend_instance()
+        mock_po = unittest.mock.MagicMock()
+        mock_po.get_translations.return_value = {}
+        mock_po.get_hint.return_value = ""
+        backend._po_backend = mock_po
+        return backend
+
+    def _make_request(self, body):
+        factory = django.test.RequestFactory(enforce_csrf_checks=False)
+        request = factory.post(
+            "/__live-translations__/translations/delete/",
+            data=json.dumps(body),
+            content_type="application/json",
+        )
+        request.user = unittest.mock.MagicMock(is_authenticated=True, is_superuser=True)
+        # Bypass CSRF for unit tests
+        request._dont_enforce_csrf_checks = True
+        return request
+
+    def test_deletes_all_languages(self, settings):
+        self._setup(settings)
+        models.TranslationEntry.objects.create(
+            language="en", msgid="hello", msgstr="Hi", context=""
+        )
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", msgstr="Ahoj", context=""
+        )
+
+        from live_translations import views
+
+        with unittest.mock.patch.object(
+            conf.get_backend_instance(), "bump_catalog_version"
+        ):
+            response = views.delete_translation(
+                self._make_request({"msgid": "hello", "context": ""})
+            )
+
+        data = json.loads(response.content)
+        assert data["ok"] is True
+        assert data["deleted"] == 2
+        assert models.TranslationEntry.objects.count() == 0
+
+        conf.get_settings.cache_clear()
+        conf.get_backend_instance.cache_clear()
+        conf.get_permission_checker.cache_clear()
+
+    def test_records_history(self, settings):
+        self._setup(settings)
+        models.TranslationEntry.objects.create(
+            language="en", msgid="hello", msgstr="Hi", context=""
+        )
+
+        from live_translations import views
+
+        with unittest.mock.patch.object(
+            conf.get_backend_instance(), "bump_catalog_version"
+        ):
+            views.delete_translation(
+                self._make_request({"msgid": "hello", "context": ""})
+            )
+
+        h = models.TranslationHistory.objects.get()
+        assert h.action == "delete"
+        assert h.old_value == "Hi"
+        assert h.new_value == ""
+
+        conf.get_settings.cache_clear()
+        conf.get_backend_instance.cache_clear()
+        conf.get_permission_checker.cache_clear()
+
+    def test_deletes_single_language(self, settings):
+        self._setup(settings)
+        models.TranslationEntry.objects.create(
+            language="en", msgid="hello", msgstr="Hi", context=""
+        )
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", msgstr="Ahoj", context=""
+        )
+
+        from live_translations import views
+
+        with unittest.mock.patch.object(
+            conf.get_backend_instance(), "bump_catalog_version"
+        ):
+            response = views.delete_translation(
+                self._make_request({"msgid": "hello", "context": "", "language": "cs"})
+            )
+
+        data = json.loads(response.content)
+        assert data["ok"] is True
+        assert data["deleted"] == 1
+        # English override still exists
+        assert models.TranslationEntry.objects.count() == 1
+        assert models.TranslationEntry.objects.get().language == "en"
+
+        conf.get_settings.cache_clear()
+        conf.get_backend_instance.cache_clear()
+        conf.get_permission_checker.cache_clear()
+
+    def test_missing_msgid_returns_400(self, settings):
+        self._setup(settings)
+
+        from live_translations import views
+
+        response = views.delete_translation(self._make_request({"context": ""}))
+        assert response.status_code == 400
 
         conf.get_settings.cache_clear()
         conf.get_backend_instance.cache_clear()

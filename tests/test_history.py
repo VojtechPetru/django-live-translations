@@ -288,24 +288,56 @@ class TestHistoryIntegrationWidget:
         assert h.old_value == "Hi"
         assert h.new_value == "Hello"
 
-    def test_delete_when_matches_po_records_history(self):
+    def test_save_matching_po_default_keeps_override(self):
+        """Saving text that matches .po default no longer auto-deletes the
+        DB entry -- explicit delete action is required instead."""
         models.TranslationEntry.objects.create(
             language="en",
             msgid="hello",
             msgstr="Hi",
             context="",
+            is_active=True,
         )
         backend = self._make_backend()
         with unittest.mock.patch.object(
             backend, "get_defaults", return_value={"en": "Default"}
         ):
             with unittest.mock.patch.object(backend, "bump_catalog_version"):
-                backend.save_translations("hello", {"en": "Default"}, context="")
+                backend.save_translations(
+                    "hello", {"en": "Default"}, context="", active_flags={"en": True}
+                )
 
+        entry = models.TranslationEntry.objects.get(language="en", msgid="hello")
+        assert entry.msgstr == "Default"
+        assert entry.is_active is True
+        # History records the text change, not a delete
         h = models.TranslationHistory.objects.get()
-        assert h.action == "delete"
+        assert h.action == "update"
         assert h.old_value == "Hi"
         assert h.new_value == "Default"
+
+    def test_save_matching_po_default_inactive(self):
+        """Saving text that matches .po default as inactive preserves the
+        entry so the user can preview the revert before activating."""
+        models.TranslationEntry.objects.create(
+            language="en",
+            msgid="hello",
+            msgstr="Hi",
+            context="",
+            is_active=False,
+        )
+        backend = self._make_backend()
+        with unittest.mock.patch.object(
+            backend, "get_defaults", return_value={"en": "Default"}
+        ):
+            with unittest.mock.patch.object(backend, "bump_catalog_version"):
+                backend.save_translations(
+                    "hello", {"en": "Default"}, context="", active_flags={"en": False}
+                )
+
+        entry = models.TranslationEntry.objects.get(language="en", msgid="hello")
+        assert entry.msgstr == "Default"
+        assert entry.is_active is False
 
     def test_no_change_no_history(self):
         models.TranslationEntry.objects.create(
