@@ -26,6 +26,7 @@ _resolver = resolver.MarkerResolver(
 _API_ROUTES: dict[str, str] = {
     f"{conf.API_PREFIX}/translations/": "get_translations",
     f"{conf.API_PREFIX}/translations/save/": "save_translations",
+    f"{conf.API_PREFIX}/translations/history/": "get_history",
 }
 
 
@@ -39,6 +40,23 @@ class LiveTranslationsMiddleware:
         self.get_response = get_response
 
     def __call__(
+        self,
+        request: django.http.HttpRequest,
+    ) -> django.http.HttpResponse:
+        # Set current user for history tracking (available to all code paths
+        # including API dispatch and admin saves).
+        raw_user = getattr(request, "user", None)
+        user_token = strings.lt_current_user.set(
+            raw_user
+            if raw_user and getattr(raw_user, "is_authenticated", False)
+            else None
+        )
+        try:
+            return self._handle_request(request)
+        finally:
+            strings.lt_current_user.reset(user_token)
+
+    def _handle_request(
         self,
         request: django.http.HttpRequest,
     ) -> django.http.HttpResponse:

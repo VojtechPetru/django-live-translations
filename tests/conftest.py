@@ -7,7 +7,11 @@ def pytest_configure() -> None:
         DATABASES={
             "default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}
         },
-        INSTALLED_APPS=["live_translations"],
+        INSTALLED_APPS=[
+            "django.contrib.contenttypes",
+            "django.contrib.auth",
+            "live_translations",
+        ],
         USE_TZ=True,
     )
     django.setup()

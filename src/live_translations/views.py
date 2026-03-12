@@ -9,7 +9,7 @@ import django.http
 import django.views.decorators.csrf
 import django.views.decorators.http
 
-from live_translations import conf
+from live_translations import conf, history, models
 
 logger = logging.getLogger(__name__)
 
@@ -184,3 +184,69 @@ def save_translations(request: django.http.HttpRequest) -> django.http.JsonRespo
             "current_language_msgstr": current_msgstr,
         }
     )
+
+
+if t.TYPE_CHECKING:
+    from django.contrib.auth.base_user import AbstractBaseUser
+
+
+def _format_user(user: "AbstractBaseUser | None") -> str:
+    """Format a user object for display. Returns 'System' for None."""
+    if user is None:
+        return "System"
+    name = getattr(user, "get_full_name", lambda: "")()
+    if name:
+        return name
+    username_field = getattr(user, "USERNAME_FIELD", None)
+    if not username_field:
+        logger.warning("User does not have a USERNAME_FIELD attribute set.")
+        return "Unknown"
+    return str(getattr(user, username_field))
+
+
+@django.views.decorators.http.require_GET
+def get_history(request: django.http.HttpRequest) -> django.http.JsonResponse:
+    """Fetch edit history for a msgid across all languages.
+
+    GET /__live-translations__/translations/history/?msgid=hero-title&context=&limit=50
+    """
+    forbidden = _check_permission(request)
+    if forbidden:
+        return forbidden
+
+    msgid = request.GET.get("msgid", "")
+    context = request.GET.get("context", "")
+
+    if not msgid:
+        return django.http.JsonResponse({"error": "msgid is required"}, status=400)
+
+    try:
+        limit = min(int(request.GET.get("limit", "50")), 200)
+    except (ValueError, TypeError):
+        limit = 50
+
+    entries = (
+        models.TranslationHistory.objects.filter(msgid=msgid, context=context)
+        .select_related("user")
+        .order_by("-created_at")[:limit]
+    )
+
+    results = []
+    for entry in entries:
+        item: dict[str, t.Any] = {
+            "id": entry.pk,
+            "language": entry.language,
+            "action": entry.action,
+            "old_value": entry.old_value,
+            "new_value": entry.new_value,
+            "user": _format_user(entry.user),
+            "created_at": entry.created_at.isoformat(),
+        }
+        if entry.action not in (
+            models.TranslationHistory.Action.ACTIVATE,
+            models.TranslationHistory.Action.DEACTIVATE,
+        ):
+            item["diff"] = history.compute_diff(entry.old_value, entry.new_value)
+        results.append(item)
+
+    return django.http.JsonResponse({"history": results})

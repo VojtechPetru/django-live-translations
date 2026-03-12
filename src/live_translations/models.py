@@ -1,7 +1,8 @@
-"""Database model for storing translation overrides."""
+"""Database models for storing translation overrides and edit history."""
 
 import typing as t
 
+import django.conf
 import django.db.models
 
 
@@ -101,3 +102,45 @@ class TranslationEntry(django.db.models.Model):
     def __str__(self) -> str:
         ctx = f" [{self.context}]" if self.context else ""
         return f"{self.language}: {self.msgid}{ctx}"
+
+
+class TranslationHistory(django.db.models.Model):
+    """Audit log entry for a translation change."""
+
+    class Action(django.db.models.TextChoices):
+        CREATE = "create", "Created"
+        UPDATE = "update", "Updated"
+        DELETE = "delete", "Deleted"
+        ACTIVATE = "activate", "Activated"
+        DEACTIVATE = "deactivate", "Deactivated"
+
+    language = django.db.models.CharField(max_length=10, db_index=True)
+    msgid = django.db.models.TextField()
+    context = django.db.models.CharField(max_length=255, default="", blank=True)
+    action = django.db.models.CharField(max_length=10, choices=Action.choices)
+    old_value = django.db.models.TextField(blank=True, default="")
+    new_value = django.db.models.TextField(blank=True, default="")
+    user = django.db.models.ForeignKey(
+        django.conf.settings.AUTH_USER_MODEL,
+        on_delete=django.db.models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    created_at = django.db.models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = "live_translations_history"
+        ordering = ["-created_at"]
+        indexes = [
+            django.db.models.Index(
+                fields=["msgid", "context", "language", "-created_at"],
+                name="lt_history_lookup",
+            ),
+        ]
+        verbose_name = "Translation history entry"
+        verbose_name_plural = "Translation history entries"
+
+    def __str__(self) -> str:
+        ctx = f" [{self.context}]" if self.context else ""
+        return f"{self.action} {self.language}: {self.msgid}{ctx}"

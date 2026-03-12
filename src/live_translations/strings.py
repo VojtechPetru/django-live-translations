@@ -89,6 +89,15 @@ lt_active: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "lt_active", default=False
 )
 
+if t.TYPE_CHECKING:
+    from django.contrib.auth.models import AbstractBaseUser
+
+# Per-request user reference for history tracking.
+# Set by LiveTranslationsMiddleware, used by history.record_change().
+lt_current_user: "contextvars.ContextVar[AbstractBaseUser | None]" = (
+    contextvars.ContextVar("lt_current_user", default=None)
+)
+
 
 class TranslatableString(str):
     """A str subclass that remembers its gettext msgid for live translation.

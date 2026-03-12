@@ -245,17 +245,39 @@ class DatabaseBackend(base.TranslationBackend):
         a redundant record.
         """
         from live_translations import conf as lt_conf
-        from live_translations import models
+        from live_translations import history, models
 
         fallback_active = lt_conf.get_settings().translation_active_by_default
         po_defaults = self.get_defaults(msgid, list(translations.keys()), context)
 
+        # Snapshot existing DB values (text + active state) for history tracking
+        existing: dict[str, tuple[str, bool]] = {}
+        for row in (
+            models.TranslationEntry.objects.for_msgid(msgid, context)
+            .filter(language__in=translations.keys())
+            .values_list("language", "msgstr", "is_active")
+        ):
+            existing[row[0]] = (row[1], row[2])
+
         for lang, msgstr in translations.items():
+            old_entry = existing.get(lang)
+            old_msgstr = old_entry[0] if old_entry else ""
+            old_is_active = old_entry[1] if old_entry else False
+
             if msgstr == po_defaults.get(lang, ""):
                 # Matches .po default -- remove any existing override
                 models.TranslationEntry.objects.for_msgid(msgid, context).for_language(
                     lang
                 ).delete()
+                if old_msgstr:
+                    history.record_change(
+                        language=lang,
+                        msgid=msgid,
+                        context=context,
+                        action=models.TranslationHistory.Action.DELETE,
+                        old_value=old_msgstr,
+                        new_value=po_defaults.get(lang, ""),
+                    )
             else:
                 is_active = (
                     active_flags.get(lang, fallback_active)
@@ -268,5 +290,38 @@ class DatabaseBackend(base.TranslationBackend):
                     context=context,
                     defaults={"msgstr": msgstr, "is_active": is_active},
                 )
+                # Track text changes
+                if not old_msgstr:
+                    history.record_change(
+                        language=lang,
+                        msgid=msgid,
+                        context=context,
+                        action=models.TranslationHistory.Action.CREATE,
+                        old_value=po_defaults.get(lang, ""),
+                        new_value=msgstr,
+                    )
+                elif old_msgstr != msgstr:
+                    history.record_change(
+                        language=lang,
+                        msgid=msgid,
+                        context=context,
+                        action=models.TranslationHistory.Action.UPDATE,
+                        old_value=old_msgstr,
+                        new_value=msgstr,
+                    )
+                # Track active state changes (only for pre-existing entries)
+                if old_entry is not None and old_is_active != is_active:
+                    history.record_change(
+                        language=lang,
+                        msgid=msgid,
+                        context=context,
+                        action=(
+                            models.TranslationHistory.Action.ACTIVATE
+                            if is_active
+                            else models.TranslationHistory.Action.DEACTIVATE
+                        ),
+                        old_value="active" if old_is_active else "inactive",
+                        new_value="active" if is_active else "inactive",
+                    )
 
         self.bump_catalog_version()

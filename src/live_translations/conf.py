@@ -107,9 +107,13 @@ def get_settings() -> LiveTranslationsConf:
 
     languages: list[str] = raw.get("LANGUAGES", [])
     if not languages:
+        # If languages not set in the plugin settings, fallback to settings.LANGUAGES.
+        # If settings.LANGUAGES is also not set, fallback to settings.LANGUAGE_CODE.
         languages = [
             code for code, _name in getattr(django.conf.settings, "LANGUAGES", [])
         ]
+        if not languages and django.conf.settings.LANGUAGE_CODE:
+            languages = [django.conf.settings.LANGUAGE_CODE]
 
     locale_dir_raw = raw.get("LOCALE_DIR", "")
     locale_dir = (

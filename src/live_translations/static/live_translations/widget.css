@@ -94,11 +94,9 @@
 .lt-dialog__close {
   background: none;
   border: none;
-  font-size: 18px;
   cursor: pointer;
   color: #52525b;
   padding: 0;
-  line-height: 1;
   border-radius: 4px;
   transition: color 0.15s ease;
   display: flex;
@@ -176,8 +174,8 @@
 .lt-field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 14px 0;
+  gap: 8px;
+  padding: 16px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
@@ -205,7 +203,7 @@
   font-family: "JetBrains Mono", "Fira Code", "SF Mono", Menlo, monospace;
   font-size: 11px;
   font-variant-ligatures: none;
-  color: #71717a;
+  color: #a1a1aa;
   background: none;
   border: none;
   padding: 0;
@@ -220,7 +218,7 @@
   font-size: 11px;
   font-weight: 500;
   font-family: inherit;
-  color: #52525b;
+  color: #71717a;
   background: none;
   border: none;
   cursor: pointer;
@@ -229,11 +227,11 @@
 }
 
 .lt-btn--revert:hover {
-  color: #a1a1aa;
+  color: #d4d4d8;
 }
 
 .lt-field__input {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid #3f3f46;
   border-radius: 6px;
   padding: 10px 12px;
   font-size: 13px;
@@ -242,7 +240,7 @@
   min-height: 40px;
   line-height: 1.5;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
-  background: rgba(255, 255, 255, 0.04);
+  background: #27272a;
   color: #fafafa;
 }
 
@@ -432,6 +430,421 @@
 
 .lt-field__toggle-help {
   font-size: 10px;
-  color: #52525b;
+  color: #71717a;
   margin-left: 4px;
+}
+
+/* ── Header Actions ──────────────────────────────────── */
+
+.lt-dialog__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.lt-btn.lt-btn--history {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #52525b;
+  padding: 0;
+  border-radius: 4px;
+  transition: color 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+}
+
+.lt-btn--history:hover {
+  color: #d4d4d8;
+}
+
+/* ── History Panel ───────────────────────────────────── */
+
+.lt-dialog__history {
+  display: none;
+  max-height: 56vh;
+  overflow-y: auto;
+  padding: 0;
+}
+
+.lt-dialog__history::-webkit-scrollbar {
+  width: 4px;
+}
+
+.lt-dialog__history::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.lt-dialog__history::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+}
+
+.lt-history__empty,
+.lt-history__loading {
+  text-align: center;
+  color: #52525b;
+  padding: 32px 20px;
+  font-size: 13px;
+}
+
+/* ── Language Filter Pills ───────────────────────────── */
+
+.lt-history__filters {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-wrap: wrap;
+}
+
+.lt-history__filter-pill {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #71717a;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  line-height: 1;
+}
+
+.lt-history__filter-pill:hover {
+  color: #a1a1aa;
+  border-color: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.lt-history__filter-pill--active {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: #fafafa;
+}
+
+.lt-history__filter-pill--active:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* ── Timeline ────────────────────────────────────────── */
+
+.lt-history__timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 20px 8px;
+}
+
+.lt-history__entry {
+  padding: 12px 0;
+}
+
+/* ── Entry Header ────────────────────────────────────── */
+
+.lt-history__entry-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.lt-history__flag {
+  font-size: 14px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+/* ── Action Icon Containers ─────────────────────────── */
+
+.lt-history__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.lt-history__icon--create {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.10);
+}
+
+.lt-history__icon--update {
+  color: #60a5fa;
+  background: rgba(96, 165, 250, 0.10);
+}
+
+.lt-history__icon--delete {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.10);
+}
+
+.lt-history__icon--activate {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.10);
+}
+
+.lt-history__icon--deactivate {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.10);
+}
+
+/* ── Entry Meta (time + user) ────────────────────────── */
+
+.lt-history__time {
+  font-family: "JetBrains Mono", "Fira Code", "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  font-variant-ligatures: none;
+  color: #71717a;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.lt-history__sep {
+  color: #3f3f46;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.lt-history__user {
+  font-size: 12px;
+  font-weight: 500;
+  color: #a1a1aa;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* ── Status (activate/deactivate) ────────────────────── */
+
+.lt-history__status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #a1a1aa;
+  padding: 6px 10px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.lt-history__status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.lt-history__status--activate .lt-history__status-dot {
+  background: #10b981;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.4);
+}
+
+.lt-history__status--deactivate .lt-history__status-dot {
+  background: #f59e0b;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.3);
+}
+
+/* ── Diff Rendering ──────────────────────────────────── */
+
+.lt-history__diff {
+  font-family: "JetBrains Mono", "Fira Code", "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  font-variant-ligatures: none;
+  line-height: 1.6;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.lt-diff--equal {
+  color: #a1a1aa;
+}
+
+.lt-diff--insert {
+  background: rgba(52, 211, 153, 0.15);
+  color: #6ee7b7;
+  border-radius: 2px;
+  padding: 1px 3px;
+}
+
+.lt-diff--delete {
+  background: rgba(248, 113, 113, 0.12);
+  color: #fca5a5;
+  text-decoration: line-through;
+  text-decoration-color: rgba(252, 165, 165, 0.4);
+  border-radius: 2px;
+  padding: 1px 3px;
+}
+
+/* ── Content Tabs (Diff / Value toggle) ──────────────── */
+
+.lt-history__content-tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+
+.lt-history__content-tab {
+  font-size: 11px;
+  font-weight: 500;
+  font-family: inherit;
+  color: #52525b;
+  background: none;
+  border: none;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.lt-history__content-tab:hover {
+  color: #71717a;
+}
+
+.lt-history__content-tab--active {
+  color: #a1a1aa;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* ── Value View ──────────────────────────────────────── */
+
+.lt-history__values {
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.lt-history__value-section + .lt-history__value-section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.lt-history__value-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #52525b;
+  margin-bottom: 2px;
+}
+
+.lt-history__value-text {
+  font-family: "JetBrains Mono", "Fira Code", "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  font-variant-ligatures: none;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #d4d4d8;
+}
+
+/* ── Restore Control ─────────────────────────────────── */
+
+.lt-history__restore-btn {
+  font-size: 11px;
+  font-weight: 500;
+  font-family: inherit;
+  color: #52525b;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.15s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.lt-history__restore-btn:hover {
+  color: #a1a1aa;
+}
+
+.lt-history__restore-confirm {
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.lt-history__restore-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lt-history__restore-activate {
+  font-size: 11px;
+  font-weight: 600;
+  font-family: inherit;
+  padding: 5px 12px;
+  background: #fafafa;
+  color: #18181b;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.lt-history__restore-activate:hover:not(:disabled) {
+  background: #e4e4e7;
+}
+
+.lt-history__restore-inactive {
+  font-size: 11px;
+  font-weight: 500;
+  font-family: inherit;
+  padding: 5px 12px;
+  background: transparent;
+  color: #a1a1aa;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.lt-history__restore-inactive:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #d4d4d8;
+}
+
+.lt-history__restore-cancel {
+  font-size: 11px;
+  font-family: inherit;
+  color: #52525b;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 5px 8px;
+  margin-left: auto;
+  transition: color 0.15s ease;
+}
+
+.lt-history__restore-cancel:hover {
+  color: #a1a1aa;
+}
+
+.lt-history__restore-activate:disabled,
+.lt-history__restore-inactive:disabled,
+.lt-history__restore-cancel:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }

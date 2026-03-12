@@ -114,14 +114,51 @@ class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
         form: t.Any,
         change: bool,
     ) -> None:
+        from live_translations import conf, history
+
+        # Capture old value before save for history tracking
+        old_msgstr = ""
+        if change and obj.pk:
+            try:
+                old_msgstr = models.TranslationEntry.objects.get(pk=obj.pk).msgstr
+            except models.TranslationEntry.DoesNotExist:
+                pass
+
         po_default = _get_po_default(obj)
         if obj.msgstr == po_default:
             # Matches .po default — no need to store an override
             if obj.pk:
+                history.record_change(
+                    language=obj.language,
+                    msgid=obj.msgid,
+                    context=obj.context,
+                    action=models.TranslationHistory.Action.DELETE,
+                    old_value=old_msgstr,
+                    new_value=po_default,
+                )
                 obj.delete()
             return
+
         super().save_model(request, obj, form, change)
-        from live_translations import conf
+
+        if not change:
+            history.record_change(
+                language=obj.language,
+                msgid=obj.msgid,
+                context=obj.context,
+                action=models.TranslationHistory.Action.CREATE,
+                old_value=po_default,
+                new_value=obj.msgstr,
+            )
+        elif old_msgstr != obj.msgstr:
+            history.record_change(
+                language=obj.language,
+                msgid=obj.msgid,
+                context=obj.context,
+                action=models.TranslationHistory.Action.UPDATE,
+                old_value=old_msgstr,
+                new_value=obj.msgstr,
+            )
 
         backend = conf.get_backend_instance()
         backend.bump_catalog_version()
@@ -131,8 +168,18 @@ class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
         request: django.http.HttpRequest,
         obj: models.TranslationEntry,
     ) -> None:
+        from live_translations import conf, history
+
+        po_default = _get_po_default(obj)
+        history.record_change(
+            language=obj.language,
+            msgid=obj.msgid,
+            context=obj.context,
+            action=models.TranslationHistory.Action.DELETE,
+            old_value=obj.msgstr,
+            new_value=po_default,
+        )
         super().delete_model(request, obj)
-        from live_translations import conf
 
         backend = conf.get_backend_instance()
         backend.bump_catalog_version()
@@ -142,8 +189,47 @@ class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
         request: django.http.HttpRequest,
         queryset: django.db.models.QuerySet[models.TranslationEntry],
     ) -> None:
-        super().delete_queryset(request, queryset)
         from live_translations import conf
+        from live_translations.backends import po
+        from live_translations.history import _get_user
+
+        settings = conf.get_settings()
+        po_backend = po.POFileBackend(
+            locale_dir=settings.locale_dir, domain=settings.domain
+        )
+
+        # Materialize before deletion so we can record per-entry old values + .po defaults
+        affected: list[tuple[str, str, str, str, str]] = []
+        for lang, mid, ctx, msgstr in queryset.values_list(
+            "language", "msgid", "context", "msgstr"
+        ):
+            try:
+                po_entries = po_backend.get_translations(
+                    msgid=mid, languages=[lang], context=ctx
+                )
+                po_entry = po_entries.get(lang)
+                po_default = po_entry.msgstr if po_entry else ""
+            except FileNotFoundError:
+                po_default = ""
+            affected.append((lang, mid, ctx, msgstr, po_default))
+
+        super().delete_queryset(request, queryset)
+
+        user = _get_user()
+        models.TranslationHistory.objects.bulk_create(
+            [
+                models.TranslationHistory(
+                    language=lang,
+                    msgid=mid,
+                    context=ctx,
+                    action=models.TranslationHistory.Action.DELETE,
+                    old_value=msgstr,
+                    new_value=po_default,
+                    user=user,
+                )
+                for lang, mid, ctx, msgstr, po_default in affected
+            ]
+        )
 
         backend = conf.get_backend_instance()
         backend.bump_catalog_version()
@@ -154,10 +240,18 @@ class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
         request: django.http.HttpRequest,
         queryset: django.db.models.QuerySet[models.TranslationEntry],
     ) -> None:
-        updated = queryset.filter(is_active=False).update(is_active=True)
-        if updated:
-            from live_translations import conf
+        from live_translations import conf, history
 
+        to_activate = queryset.filter(is_active=False)
+        affected = list(to_activate.values_list("language", "msgid", "context"))
+        updated = to_activate.update(is_active=True)
+        if updated:
+            history.record_bulk_action(
+                entries=affected,
+                action=models.TranslationHistory.Action.ACTIVATE,
+                old_value="inactive",
+                new_value="active",
+            )
             backend = conf.get_backend_instance()
             backend.bump_catalog_version()
         self.message_user(request, f"{updated} translation(s) activated.")
@@ -168,10 +262,18 @@ class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
         request: django.http.HttpRequest,
         queryset: django.db.models.QuerySet[models.TranslationEntry],
     ) -> None:
-        updated = queryset.filter(is_active=True).update(is_active=False)
-        if updated:
-            from live_translations import conf
+        from live_translations import conf, history
 
+        to_deactivate = queryset.filter(is_active=True)
+        affected = list(to_deactivate.values_list("language", "msgid", "context"))
+        updated = to_deactivate.update(is_active=False)
+        if updated:
+            history.record_bulk_action(
+                entries=affected,
+                action=models.TranslationHistory.Action.DEACTIVATE,
+                old_value="active",
+                new_value="inactive",
+            )
             backend = conf.get_backend_instance()
             backend.bump_catalog_version()
         self.message_user(request, f"{updated} translation(s) deactivated.")
