@@ -297,6 +297,35 @@
       .querySelector(".lt-btn--history")
       .addEventListener("click", toggleHistory);
 
+    // Click on msgid copies to clipboard with inline feedback
+    dialog
+      .querySelector(".lt-dialog__msgid")
+      .addEventListener("click", function () {
+        var el = this;
+        var raw = el.dataset.msgid || "";
+        if (!raw || el.classList.contains("lt-dialog__msgid--copied")) return;
+        navigator.clipboard.writeText(raw).then(function () {
+          el.classList.add("lt-dialog__msgid--copied");
+          var icon = el.querySelector(".lt-dialog__msgid-icon");
+          if (icon) {
+            icon.innerHTML =
+              '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" ' +
+              'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+              '<path d="M3.5 8.5l3 3 6-7"/></svg>';
+          }
+          setTimeout(function () {
+            el.classList.remove("lt-dialog__msgid--copied");
+            if (icon) {
+              icon.innerHTML =
+                '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" ' +
+                'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' +
+                '<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/>' +
+                '<path d="M10.5 5.5V3.5a1.5 1.5 0 0 0-1.5-1.5H3.5A1.5 1.5 0 0 0 2 3.5V9a1.5 1.5 0 0 0 1.5 1.5h2"/></svg>';
+            }
+          }, 1500);
+        });
+      });
+
     // Native <dialog> close event (Escape key)
     dialog.addEventListener("close", function () {
       if (state === "editing") {
@@ -338,11 +367,27 @@
     // Show loading state
     dialog.querySelector(".lt-dialog__fields").innerHTML = "";
     dialog.querySelector(".lt-dialog__loading").style.display = "block";
-    var label = "msgid: " + msgid;
+    var msgidEl = dialog.querySelector(".lt-dialog__msgid");
+    msgidEl.dataset.msgid = msgid;
+    msgidEl.innerHTML = "";
+
+    var msgidCode = document.createElement("code");
+    msgidCode.textContent = "msgid: " + msgid;
     if (currentAttrName) {
-      label += "  (attr: " + currentAttrName + ")";
+      msgidCode.textContent += "  (attr: " + currentAttrName + ")";
     }
-    dialog.querySelector(".lt-dialog__msgid").textContent = label;
+
+    var copyIcon = document.createElement("span");
+    copyIcon.className = "lt-dialog__msgid-icon";
+    copyIcon.title = "Copy msgid";
+    copyIcon.innerHTML =
+      '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" ' +
+      'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' +
+      '<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/>' +
+      '<path d="M10.5 5.5V3.5a1.5 1.5 0 0 0-1.5-1.5H3.5A1.5 1.5 0 0 0 2 3.5V9a1.5 1.5 0 0 0 1.5 1.5h2"/></svg>';
+
+    msgidEl.appendChild(msgidCode);
+    msgidEl.appendChild(copyIcon);
     dialog.querySelector(".lt-btn--save").disabled = true;
     showDialogError(null);
 
@@ -445,11 +490,15 @@
         textarea.classList.add("lt-field__input--fuzzy");
       }
 
-      // Show/hide toggle + auto-resize on input
+      // Show/hide toggle + revert button + auto-resize on input
       (function (ta, toggle, defaultVal, cb, defaultActive) {
+        /** @type {HTMLElement|null} */
+        var revertEl = null;
+
         function syncToggle() {
           var differs = ta.value !== defaultVal;
           toggle.style.display = differs ? "" : "none";
+          if (revertEl) revertEl.style.display = differs ? "" : "none";
           if (!differs) {
             cb.checked = defaultActive;
           }
@@ -461,6 +510,7 @@
         });
         // Expose for the revert button
         ta._ltSyncToggle = syncToggle;
+        ta._ltSetRevertEl = function (el) { revertEl = el; syncToggle(); };
       })(textarea, toggleWrap, poDefault, checkbox, ACTIVE_BY_DEFAULT);
 
       // Show .po default with revert button if available
@@ -491,6 +541,9 @@
         poRow.appendChild(poHint);
         poRow.appendChild(revertBtn);
         field.appendChild(poRow);
+
+        // Register revert button with sync logic so it hides when values match
+        if (textarea._ltSetRevertEl) textarea._ltSetRevertEl(revertBtn);
       }
 
       field.appendChild(textarea);
