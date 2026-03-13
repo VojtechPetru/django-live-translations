@@ -534,9 +534,6 @@ class TestResolverEdgeCases:
 
 
 class TestResolverMalformedHTML:
-    @pytest.mark.xfail(
-        reason="Unquoted attr values: marker metadata is lost, no data-lt-attrs emitted"
-    )
     def test_unquoted_attribute_value(
         self,
         resolver: resolver_mod.MarkerResolver,
@@ -546,9 +543,6 @@ class TestResolverMalformedHTML:
         result = resolver.resolve(html)
         assert "data-lt-attrs=" in result
 
-    @pytest.mark.xfail(
-        reason="Missing closing quote leaves parser stuck in _S_ATTR_DQ, corrupting all subsequent output"
-    )
     def test_missing_closing_quote(
         self,
         resolver: resolver_mod.MarkerResolver,
@@ -559,9 +553,6 @@ class TestResolverMalformedHTML:
         # The marker after the malformed tag should still be resolved as text
         assert '<span class="lt-translatable"' in result
 
-    @pytest.mark.xfail(
-        reason="Quote type mismatch: single quote does not close a double-quoted attribute"
-    )
     def test_quote_type_mismatch(
         self,
         resolver: resolver_mod.MarkerResolver,

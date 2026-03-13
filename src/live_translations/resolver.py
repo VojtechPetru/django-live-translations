@@ -28,6 +28,7 @@ class MarkerResolver:
     _S_ATTR_SQ = 7  # Inside single-quoted attribute value
     _S_RAWTEXT = 8  # Inside <script>, <style>, <textarea>, <title>
     _S_COMMENT = 9
+    _S_ATTR_UQ = 10  # Inside unquoted attribute value
 
     _RAWTEXT_TAGS: t.ClassVar[frozenset[str]] = frozenset(
         {"script", "style", "textarea", "title"}
@@ -104,10 +105,17 @@ class MarkerResolver:
                             f'<span class="lt-translatable" data-lt-msgid="{self._html_escape(msgid)}"'
                             f' data-lt-context="{self._html_escape(ctx)}">{escaped_content}</span>'
                         )
-                    elif state in (self._S_ATTR_DQ, self._S_ATTR_SQ):
+                    elif state in (
+                        self._S_ATTR_DQ,
+                        self._S_ATTR_SQ,
+                        self._S_ATTR_EQ,
+                        self._S_ATTR_UQ,
+                    ):
                         # Inside an attribute value -> plain text, record metadata
                         result.append(escaped_content)
                         pending_attrs.append({"a": cur_attr_name, "m": msgid, "c": ctx})
+                        if state == self._S_ATTR_EQ:
+                            state = self._S_ATTR_UQ
                     else:
                         # RAWTEXT, COMMENT, or unexpected -> plain text only
                         result.append(escaped_content)
@@ -216,18 +224,86 @@ class MarkerResolver:
                     state = self._S_ATTR_SQ
                 elif ch in (" ", "\t", "\n", "\r", "\f"):
                     pass  # whitespace after =
+                elif ch == ">":
+                    # '=' immediately before '>' is malformed — close the tag
+                    if pending_attrs:
+                        result.append(self._attrs_json(pending_attrs))
+                        pending_attrs = []
+                    if tag_name in self._RAWTEXT_TAGS:
+                        state = self._S_RAWTEXT
+                        rawtext_close = f"</{tag_name}>"
+                    else:
+                        state = self._S_TEXT
                 else:
                     # Unquoted attribute value — consume until whitespace or >
-                    # Markers in unquoted attrs are extremely unlikely but handle gracefully
-                    state = self._S_TAG_ATTRS
+                    state = self._S_ATTR_UQ
 
             elif state == self._S_ATTR_DQ:
                 if ch == '"':
                     state = self._S_TAG_ATTRS
+                elif ch == ">":
+                    # Recovery heuristic for unclosed double-quoted attribute:
+                    # if no closing " exists before the next tag-like <, assume
+                    # the quote was never closed and treat > as tag close.
+                    recover = True
+                    for j in range(i + 1, n):
+                        if html[j] == '"':
+                            recover = False
+                            break
+                        if (
+                            html[j] == "<"
+                            and j + 1 < n
+                            and (html[j + 1].isalpha() or html[j + 1] == "/")
+                        ):
+                            break
+                    if recover:
+                        if pending_attrs:
+                            result.append(self._attrs_json(pending_attrs))
+                            pending_attrs = []
+                        if tag_name in self._RAWTEXT_TAGS:
+                            state = self._S_RAWTEXT
+                            rawtext_close = f"</{tag_name}>"
+                        else:
+                            state = self._S_TEXT
 
             elif state == self._S_ATTR_SQ:
                 if ch == "'":
                     state = self._S_TAG_ATTRS
+                elif ch == ">":
+                    # Same recovery heuristic for unclosed single-quoted attribute.
+                    recover = True
+                    for j in range(i + 1, n):
+                        if html[j] == "'":
+                            recover = False
+                            break
+                        if (
+                            html[j] == "<"
+                            and j + 1 < n
+                            and (html[j + 1].isalpha() or html[j + 1] == "/")
+                        ):
+                            break
+                    if recover:
+                        if pending_attrs:
+                            result.append(self._attrs_json(pending_attrs))
+                            pending_attrs = []
+                        if tag_name in self._RAWTEXT_TAGS:
+                            state = self._S_RAWTEXT
+                            rawtext_close = f"</{tag_name}>"
+                        else:
+                            state = self._S_TEXT
+
+            elif state == self._S_ATTR_UQ:
+                if ch in (" ", "\t", "\n", "\r", "\f"):
+                    state = self._S_TAG_ATTRS
+                elif ch == ">":
+                    if pending_attrs:
+                        result.append(self._attrs_json(pending_attrs))
+                        pending_attrs = []
+                    if tag_name in self._RAWTEXT_TAGS:
+                        state = self._S_RAWTEXT
+                        rawtext_close = f"</{tag_name}>"
+                    else:
+                        state = self._S_TEXT
 
             elif state == self._S_RAWTEXT:
                 close_len = len(rawtext_close)
