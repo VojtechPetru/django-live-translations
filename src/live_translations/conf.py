@@ -67,7 +67,7 @@ class LiveTranslationsSettings(t.TypedDict, total=False):
     TRANSLATION_ACTIVE_BY_DEFAULT: bool
     """Whether new translation overrides saved from the frontend widget are
     immediately active. When ``False`` (default), overrides require explicit
-    activation via Django admin before they take effect."""
+    activation before they take effect."""
 
     SHORTCUT_EDIT: str
     """Keyboard shortcut to toggle edit mode.  Expressed as a ``+``-separated
