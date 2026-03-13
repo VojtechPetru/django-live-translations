@@ -4,10 +4,12 @@
  *
  * State machine:
  *   inactive ──(shortcut)──► active ──(click span)──► editing
- *      ▲                       │                         │
- *      └──────(shortcut)───────┘                         │
- *      ▲                                                 │
- *      └──────(save/cancel/Escape)───────────────────────┘
+ *      ▲                       ▲│                        │
+ *      └──────(shortcut)───────┘│                        │
+ *                                └──(save/cancel/Esc)────┘
+ *
+ *   Save triggers a page reload; edit mode is persisted to
+ *   sessionStorage and restored on the next load.
  *
  * Preview mode (shortcut → page reload):
  *   Server renders inactive translations. Elements with inactive overrides
@@ -179,9 +181,78 @@
     return code.toUpperCase();
   }
 
+  // ─── Clipboard Copy Helper ───────────────────────────
+
+  /** @type {string} */
+  var ICON_COPY_SVG =
+    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" ' +
+    'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' +
+    '<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/>' +
+    '<path d="M10.5 5.5V3.5a1.5 1.5 0 0 0-1.5-1.5H3.5A1.5 1.5 0 0 0 2 3.5V9a1.5 1.5 0 0 0 1.5 1.5h2"/></svg>';
+  /** @type {string} */
+  var ICON_CHECK_SVG =
+    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" ' +
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M3.5 8.5l3 3 6-7"/></svg>';
+  /** @type {string} */
+  var ICON_CHECKBOX_SVG =
+    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" ' +
+    'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' +
+    '<rect x="2" y="2" width="12" height="12" rx="2"/></svg>';
+  /** @type {string} */
+  var ICON_CHECKBOX_CHECKED_SVG =
+    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" ' +
+    'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' +
+    '<rect x="2" y="2" width="12" height="12" rx="2" fill="currentColor" fill-opacity="0.15"/>' +
+    '<path d="M5 8l2.5 2.5L11 6"/></svg>';
+
+  /**
+   * Make a container element copyable: clicking anywhere on it copies text to
+   * the clipboard, swaps the icon to a checkmark, and adds a `--copied` CSS
+   * modifier class for visual feedback.
+   *
+   * @param {HTMLElement}        container   - The clickable wrapper element.
+   * @param {HTMLElement}        iconEl      - Element whose innerHTML is swapped (copy ↔ check).
+   * @param {function(): string} getText     - Returns the string to copy.
+   * @param {string}             copiedClass - CSS class toggled during feedback (e.g. "foo--copied").
+   * @param {number}             [duration]  - Feedback duration in ms (default 1500).
+   * @returns {void}
+   */
+  function _makeCopyable(container, iconEl, getText, copiedClass, duration) {
+    var ms = duration || 1500;
+    iconEl.innerHTML = ICON_COPY_SVG;
+    container.style.cursor = "pointer";
+    container.addEventListener("click", function () {
+      var text = getText();
+      if (!text || container.classList.contains(copiedClass)) return;
+      navigator.clipboard.writeText(text).then(function () {
+        container.classList.add(copiedClass);
+        iconEl.innerHTML = ICON_CHECK_SVG;
+        setTimeout(function () {
+          container.classList.remove(copiedClass);
+          iconEl.innerHTML = ICON_COPY_SVG;
+        }, ms);
+      });
+    });
+  }
+
   // ─── State ───────────────────────────────────────────
   /** @type {"inactive"|"active"|"editing"} */
   var state = "inactive";
+  /** @type {string} */
+  var _EDIT_MODE_KEY = "lt_edit_mode";
+
+  /**
+   * Persist edit-mode flag to sessionStorage and reload the page.
+   * Edit mode is restored on the next page load via DOMContentLoaded.
+   * @returns {void}
+   */
+  function _reloadPage() {
+    if (state === "active" || state === "editing") {
+      try { sessionStorage.setItem(_EDIT_MODE_KEY, "1"); } catch (e) { /* quota / private */ }
+    }
+    window.location.reload();
+  }
   /** @type {HTMLDialogElement|null} */
   var dialog = null;
   /** @type {HTMLElement|null} */
@@ -204,6 +275,8 @@
   var _originalValues = {};
   /** @type {Object<string, boolean>} - Snapshot of initial active flags from API (for dirty detection). */
   var _originalActiveFlags = {};
+  /** @type {Object<string, boolean>} - Languages marked for override deletion (submitted on Save). */
+  var _deletionsMarked = {};
 
   // ─── API Client ──────────────────────────────────────
 
@@ -281,14 +354,14 @@
 
     /**
      * Delete DB override(s) for a msgid/context.
-     * @param {string} msgid    - The gettext message identifier.
-     * @param {string} context  - The gettext context.
-     * @param {string} language - Language code to delete (single language).
+     * @param {string}   msgid     - The gettext message identifier.
+     * @param {string}   context   - The gettext context.
+     * @param {string[]} languages - Language codes to delete.
      * @returns {Promise<{ok:boolean, deleted:number}>}
      */
-    deleteTranslation: function (msgid, context, language) {
+    deleteTranslation: function (msgid, context, languages) {
       var payload = { msgid: msgid, context: context };
-      if (language) payload.language = language;
+      if (languages && languages.length) payload.languages = languages;
       return fetch(API_BASE + "/translations/delete/", {
         method: "POST",
         credentials: "same-origin",
@@ -416,6 +489,7 @@
       '<div class="lt-dialog__history"></div>' +
       '<div class="lt-dialog__error"></div>' +
       '<div class="lt-dialog__actions">' +
+      '<button type="button" class="lt-btn lt-btn--delete-override" style="display:none">Delete Override</button>' +
       '<button type="button" class="lt-btn lt-btn--cancel">Cancel</button>' +
       '<button type="button" class="lt-btn lt-btn--save">Save</button>' +
       "</div>" +
@@ -439,37 +513,11 @@
       .querySelector(".lt-btn--save")
       .addEventListener("click", handleSave);
     dialog
+      .querySelector(".lt-btn--delete-override")
+      .addEventListener("click", handleDeleteOverride);
+    dialog
       .querySelector(".lt-btn--history")
       .addEventListener("click", toggleHistory);
-
-    // Click on msgid copies to clipboard with inline feedback
-    dialog
-      .querySelector(".lt-dialog__msgid")
-      .addEventListener("click", function () {
-        var el = this;
-        var raw = el.dataset.msgid || "";
-        if (!raw || el.classList.contains("lt-dialog__msgid--copied")) return;
-        navigator.clipboard.writeText(raw).then(function () {
-          el.classList.add("lt-dialog__msgid--copied");
-          var icon = el.querySelector(".lt-dialog__msgid-icon");
-          if (icon) {
-            icon.innerHTML =
-              '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" ' +
-              'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-              '<path d="M3.5 8.5l3 3 6-7"/></svg>';
-          }
-          setTimeout(function () {
-            el.classList.remove("lt-dialog__msgid--copied");
-            if (icon) {
-              icon.innerHTML =
-                '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" ' +
-                'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' +
-                '<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/>' +
-                '<path d="M10.5 5.5V3.5a1.5 1.5 0 0 0-1.5-1.5H3.5A1.5 1.5 0 0 0 2 3.5V9a1.5 1.5 0 0 0 1.5 1.5h2"/></svg>';
-            }
-          }, 1500);
-        });
-      });
 
     // Native <dialog> close event (Escape key)
     dialog.addEventListener("close", function () {
@@ -527,15 +575,16 @@
     var copyIcon = document.createElement("span");
     copyIcon.className = "lt-dialog__msgid-icon";
     copyIcon.title = "Copy msgid";
-    copyIcon.innerHTML =
-      '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" ' +
-      'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' +
-      '<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/>' +
-      '<path d="M10.5 5.5V3.5a1.5 1.5 0 0 0-1.5-1.5H3.5A1.5 1.5 0 0 0 2 3.5V9a1.5 1.5 0 0 0 1.5 1.5h2"/></svg>';
 
     msgidEl.appendChild(msgidLabel);
     msgidEl.appendChild(msgidText);
     msgidEl.appendChild(copyIcon);
+    _makeCopyable(
+      msgidEl,
+      copyIcon,
+      function () { return msgidEl.dataset.msgid || ""; },
+      "lt-dialog__msgid--copied"
+    );
     dialog.querySelector(".lt-btn--save").disabled = true;
     showDialogError(null);
 
@@ -619,9 +668,13 @@
     for (var i = 0; i < LANGUAGES.length; i++) {
       (function (lang) {
         var meta = LANG_META[lang];
+        var entry = (_editData && _editData.translations[lang]) || {};
         var pill = document.createElement("button");
         pill.type = "button";
         pill.className = "lt-editor__tab" + (_editLang === lang ? " lt-editor__tab--active" : "");
+        if (entry.has_override && entry.is_active === false) {
+          pill.classList.add("lt-editor__tab--inactive-override");
+        }
         pill.textContent = meta ? meta.flag + "  " + meta.name : lang.toUpperCase();
         pill.dataset.lang = lang;
         pill.addEventListener("click", function () {
@@ -680,13 +733,14 @@
    * @returns {boolean}
    */
   function _isLangDirty(lang) {
+    if (_deletionsMarked[lang]) return true;
     if (_editedValues[lang] !== _originalValues[lang]) return true;
     if (_editedActiveFlags[lang] !== _originalActiveFlags[lang]) return true;
     return false;
   }
 
   /**
-   * Update the dirty-dot indicator on each language tab.
+   * Update the dirty-dot and inactive-override indicators on each language tab.
    * Reads the current textarea/toggle for `_editLang` live (without persisting).
    * @returns {void}
    */
@@ -695,20 +749,39 @@
     var tabs = dialog.querySelectorAll(".lt-editor__tab");
     for (var i = 0; i < tabs.length; i++) {
       var lang = tabs[i].dataset.lang;
+      var markedForDelete = !!_deletionsMarked[lang];
       var dirty;
+      var activeNow;
       if (lang === _editLang) {
         // Read live from DOM for the active tab
         var ta = dialog.querySelector("#lt-input-" + lang);
         var cb = dialog.querySelector("#lt-active-" + lang);
-        dirty = (ta && ta.value !== _originalValues[lang]) ||
+        dirty = markedForDelete ||
+                (ta && ta.value !== _originalValues[lang]) ||
                 (cb && cb.checked !== _originalActiveFlags[lang]);
+        activeNow = cb ? cb.checked : _editedActiveFlags[lang];
       } else {
         dirty = _isLangDirty(lang);
+        activeNow = _editedActiveFlags[lang] !== undefined ? _editedActiveFlags[lang] : ACTIVE_BY_DEFAULT;
       }
       if (dirty) {
         tabs[i].classList.add("lt-editor__tab--dirty");
       } else {
         tabs[i].classList.remove("lt-editor__tab--dirty");
+      }
+      // Red dot: marked for deletion (supersedes amber dot)
+      if (markedForDelete) {
+        tabs[i].classList.add("lt-editor__tab--marked-delete");
+        tabs[i].classList.remove("lt-editor__tab--inactive-override");
+      } else {
+        tabs[i].classList.remove("lt-editor__tab--marked-delete");
+        // Amber dot: override exists on server but current active state is off
+        var entry = (_editData && _editData.translations[lang]) || {};
+        if (entry.has_override && !activeNow) {
+          tabs[i].classList.add("lt-editor__tab--inactive-override");
+        } else {
+          tabs[i].classList.remove("lt-editor__tab--inactive-override");
+        }
       }
     }
   }
@@ -733,11 +806,13 @@
       ta.style.height = "auto";
       ta.style.height = ta.scrollHeight + "px";
     }
+    _syncDeleteOverride();
   }
 
   /**
    * Render the edit panel for the currently selected language.
-   * Contains .po default hint, textarea, active toggle, and delete override button.
+   * Contains .po default hint, textarea, and active toggle.
+   * Textarea is disabled when the language is marked for deletion.
    * @param {HTMLElement} container - Parent element to render into.
    * @returns {void}
    */
@@ -748,6 +823,7 @@
     var poDefaults = _editData.defaults || {};
     var poDefault = poDefaults[lang] || "";
     var hasOverride = !!entry.has_override;
+    var markedForDelete = !!_deletionsMarked[lang];
 
     // Show language label in single-language mode (no tabs to indicate it)
     if (LANGUAGES.length <= 1) {
@@ -758,53 +834,39 @@
       container.appendChild(langLabelEl);
     }
 
-    // .po default row with delete override button
+    // .po default hint (click to copy)
     if (poDefault) {
-      var poRow = document.createElement("div");
-      poRow.className = "lt-field__po-row";
+      var poWrap = document.createElement("div");
+      poWrap.className = "lt-field__po-wrap";
 
-      var poHint = document.createElement("div");
-      poHint.className = "lt-field__po-default";
-      poHint.textContent = poDefault;
-      poHint.title = ".po file default";
+      var poHeader = document.createElement("div");
+      poHeader.className = "lt-field__po-header";
 
-      var deleteBtn = document.createElement("button");
-      deleteBtn.type = "button";
-      deleteBtn.className = "lt-btn--delete-override";
-      deleteBtn.textContent = "Delete Override";
-      deleteBtn.title = "Remove DB override for this language";
-      if (!hasOverride) deleteBtn.style.display = "none";
+      var poLabel = document.createElement("span");
+      poLabel.className = "lt-field__po-label";
+      poLabel.textContent = "Default";
 
-      (function (btn, langCode) {
-        btn.addEventListener("click", function () {
-          if (btn.dataset.confirm !== "1") {
-            btn.dataset.confirm = "1";
-            btn.textContent = "Confirm?";
-            btn.classList.add("lt-btn--delete-override-confirm");
-            return;
-          }
-          btn.disabled = true;
-          btn.textContent = "Deleting...";
-          showDialogError(null);
-          var info = _getMsgidAndContext();
-          api
-            .deleteTranslation(info.msgid, info.context, langCode)
-            .then(function () {
-              window.location.reload();
-            })
-            .catch(function (err) {
-              showDialogError(err.message);
-              btn.disabled = false;
-              btn.textContent = "Delete Override";
-              btn.classList.remove("lt-btn--delete-override-confirm");
-              delete btn.dataset.confirm;
-            });
-        });
-      })(deleteBtn, lang);
+      var poCopyIcon = document.createElement("span");
+      poCopyIcon.className = "lt-field__po-copy";
+      poCopyIcon.title = "Copy default";
 
-      poRow.appendChild(poHint);
-      poRow.appendChild(deleteBtn);
-      container.appendChild(poRow);
+      poHeader.appendChild(poLabel);
+      poHeader.appendChild(poCopyIcon);
+
+      var poText = document.createElement("div");
+      poText.className = "lt-field__po-default";
+      poText.textContent = poDefault;
+
+      poWrap.appendChild(poHeader);
+      poWrap.appendChild(poText);
+      container.appendChild(poWrap);
+
+      _makeCopyable(
+        poWrap,
+        poCopyIcon,
+        function () { return poDefault; },
+        "lt-field__po-wrap--copied"
+      );
     }
 
     // Textarea
@@ -817,6 +879,10 @@
     if (entry.fuzzy) {
       textarea.classList.add("lt-field__input--fuzzy");
     }
+    if (markedForDelete) {
+      textarea.disabled = true;
+      textarea.classList.add("lt-field__input--marked-delete");
+    }
 
     // Active toggle
     var isActive = _editedActiveFlags[lang];
@@ -824,7 +890,7 @@
 
     var toggleWrap = document.createElement("label");
     toggleWrap.className = "lt-field__toggle";
-    if (!hasOverride && currentVal === poDefault) {
+    if (markedForDelete || (!hasOverride && currentVal === poDefault)) {
       toggleWrap.style.display = "none";
     }
 
@@ -846,14 +912,10 @@
       _updateTabDirtyDots();
     });
 
-    var toggleHelp = document.createElement("span");
-    toggleHelp.className = "lt-field__toggle-help";
-    toggleHelp.textContent = "Inactive overrides are saved but won\u2019t take effect until activated.";
-
+    toggleWrap.title = "Inactive overrides are saved but won\u2019t take effect until activated.";
     toggleWrap.appendChild(checkbox);
     toggleWrap.appendChild(slider);
     toggleWrap.appendChild(toggleLabelEl);
-    toggleWrap.appendChild(toggleHelp);
 
     // Show/hide toggle + auto-resize on input
     (function (ta, toggle, defaultVal, cb, defaultActive, hadOverride) {
@@ -910,10 +972,52 @@
   }
 
   /**
-   * Persist the current textarea, collect all accumulated edits, and POST
-   * them to the save endpoint. On success the page is reloaded.
+   * Show or hide the "Delete Override" footer button and sync its checkbox state.
+   * Visible whenever an override exists on the server for the current language.
+   * The button acts as a toggle: clicking marks/unmarks the language for deletion.
    * @returns {void}
    */
+  function _syncDeleteOverride() {
+    if (!dialog) return;
+    var btn = dialog.querySelector(".lt-btn--delete-override");
+    if (!btn || !_editData) return;
+    var lang = _editLang;
+    var entry = (_editData.translations[lang]) || {};
+
+    if (!entry.has_override) {
+      btn.style.display = "none";
+      return;
+    }
+
+    btn.style.display = "";
+    var marked = !!_deletionsMarked[lang];
+
+    if (marked) {
+      btn.innerHTML = ICON_CHECKBOX_CHECKED_SVG + " Delete Override";
+      btn.classList.add("lt-btn--delete-override--checked");
+    } else {
+      btn.innerHTML = ICON_CHECKBOX_SVG + " Delete Override";
+      btn.classList.remove("lt-btn--delete-override--checked");
+    }
+  }
+
+  /**
+   * Toggle the current language's "marked for deletion" flag.
+   * Actual deletion happens on Save (all marked languages at once).
+   * @returns {void}
+   */
+  function handleDeleteOverride() {
+    _persistCurrentEdit();
+    var lang = _editLang;
+    if (_deletionsMarked[lang]) {
+      delete _deletionsMarked[lang];
+    } else {
+      _deletionsMarked[lang] = true;
+    }
+    _renderEditorPanels();
+    _updateTabDirtyDots();
+  }
+
   function handleSave() {
     var saveBtn = dialog.querySelector(".lt-btn--save");
     saveBtn.disabled = true;
@@ -927,19 +1031,49 @@
     var msgid = attrData ? attrData.m : currentSpan.dataset.ltMsgid;
     var context = attrData ? attrData.c : (currentSpan.dataset.ltContext || "");
 
-    // Send all accumulated values (all languages, not just the visible one)
+    // Separate languages into save vs delete groups
     var translations = {};
     var activeFlags = {};
+    var activeFlagChanged = false;
+    var langsToDelete = [];
     for (var i = 0; i < LANGUAGES.length; i++) {
       var lang = LANGUAGES[i];
+      if (_deletionsMarked[lang]) {
+        langsToDelete.push(lang);
+        continue;
+      }
       translations[lang] = _editedValues[lang] !== undefined ? _editedValues[lang] : "";
       activeFlags[lang] = _editedActiveFlags[lang] !== undefined ? _editedActiveFlags[lang] : ACTIVE_BY_DEFAULT;
+      if (activeFlags[lang] !== (_originalActiveFlags[lang] !== undefined ? _originalActiveFlags[lang] : ACTIVE_BY_DEFAULT)) {
+        activeFlagChanged = true;
+      }
     }
 
-    api
-      .saveTranslations(msgid, context, translations, activeFlags)
+    // Build parallel work: save non-deleted languages + delete marked ones
+    var work = [];
+    if (Object.keys(translations).length > 0) {
+      work.push(api.saveTranslations(msgid, context, translations, activeFlags));
+    }
+    if (langsToDelete.length > 0) {
+      work.push(api.deleteTranslation(msgid, context, langsToDelete));
+    }
+
+    if (work.length === 0) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Save";
+      closeModal();
+      return;
+    }
+
+    Promise.all(work)
       .then(function () {
-        window.location.reload();
+        if (activeFlagChanged || langsToDelete.length > 0) {
+          _reloadPage();
+        } else {
+          saveBtn.disabled = false;
+          saveBtn.textContent = "Save";
+          closeModal();
+        }
       })
       .catch(function (err) {
         showDialogError(err.message, err.details || null);
@@ -1432,7 +1566,7 @@
     api
       .saveTranslations(info.msgid, info.context, translations, activeFlags)
       .then(function () {
-        window.location.reload();
+        _reloadPage();
       })
       .catch(function (err) {
         // Re-enable buttons on error
@@ -1517,6 +1651,14 @@
     _editedActiveFlags = {};
     _originalValues = {};
     _originalActiveFlags = {};
+    _deletionsMarked = {};
+    if (dialog) {
+      var delBtn = dialog.querySelector(".lt-btn--delete-override");
+      if (delBtn) {
+        delBtn.style.display = "none";
+        delBtn.classList.remove("lt-btn--delete-override--checked");
+      }
+    }
     if (state === "editing") {
       state = "active";
     }
@@ -1674,7 +1816,7 @@
       .bulkActivate(msgids)
       .then(function (data) {
         showToast(data.activated + " translation(s) activated", "success");
-        window.location.reload();
+        _reloadPage();
       })
       .catch(function (err) {
         showToast("Bulk activate failed: " + err.message, "error");
@@ -1848,6 +1990,19 @@
   function _showAttrPicker(element, attrs) {
     openModal(element, attrs[0]);
   }
+
+  // ─── Edit Mode Restore After Reload ──────────────────
+
+  document.addEventListener("DOMContentLoaded", function () {
+    try {
+      if (sessionStorage.getItem(_EDIT_MODE_KEY)) {
+        sessionStorage.removeItem(_EDIT_MODE_KEY);
+        if (state === "inactive") {
+          activateEditMode();
+        }
+      }
+    } catch (e) { /* private browsing / quota */ }
+  });
 
   // ─── Preview Mode Auto-Activation ───────────────────
 

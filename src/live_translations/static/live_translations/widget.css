@@ -155,14 +155,8 @@
 .lt-dialog__msgid:hover .lt-dialog__msgid-icon {
   color: #a1a1aa;
 }
-.lt-dialog__msgid--copied {
-  color: #4ade80;
-}
-.lt-dialog__msgid--copied .lt-dialog__msgid-label {
-  color: #4ade80;
-  background: rgba(74, 222, 128, 0.1);
-}
-.lt-dialog__msgid--copied .lt-dialog__msgid-icon {
+.lt-dialog__msgid--copied .lt-dialog__msgid-icon,
+.lt-dialog__msgid--copied:hover .lt-dialog__msgid-icon {
   color: #4ade80;
 }
 
@@ -234,6 +228,28 @@
   flex-shrink: 0;
 }
 
+.lt-editor__tab--inactive-override::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #f59e0b;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+
+.lt-editor__tab--marked-delete::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #ef4444;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+
 /* ── Editor Layout ───────────────────────────────────── */
 
 .lt-editor__single {
@@ -296,15 +312,47 @@
   letter-spacing: 0;
 }
 
-.lt-field__po-row {
+.lt-field__po-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #71717a;
+  margin-bottom: 4px;
+}
+
+.lt-field__po-wrap {
+  cursor: pointer;
+}
+
+.lt-field__po-header {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.lt-field__po-header .lt-field__po-label {
+  margin-bottom: 0;
+}
+
+.lt-field__po-copy {
+  flex-shrink: 0;
+  color: #3f3f46;
+  transition: color 0.15s;
+}
+
+.lt-field__po-wrap:hover .lt-field__po-copy {
+  color: #a1a1aa;
+}
+
+.lt-field__po-wrap--copied .lt-field__po-copy,
+.lt-field__po-wrap--copied:hover .lt-field__po-copy {
+  color: #4ade80;
 }
 
 .lt-field__po-default {
-  flex: 1;
-  min-width: 0;
   font-family: "JetBrains Mono", "Fira Code", "SF Mono", Menlo, monospace;
   font-size: 11px;
   font-variant-ligatures: none;
@@ -318,29 +366,41 @@
 }
 
 .lt-btn--delete-override {
-  flex-shrink: 0;
-  padding: 0;
-  font-size: 11px;
+  margin-right: auto;
+  padding: 6px 12px;
+  font-size: 13px;
   font-weight: 500;
   font-family: inherit;
-  color: #71717a;
+  color: #a1a1aa;
   background: none;
-  border: none;
+  border: 1px solid #3f3f46;
+  border-radius: 8px;
   cursor: pointer;
-  transition: color 0.15s ease;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
   white-space: nowrap;
+}
+
+.lt-btn--delete-override svg {
+  vertical-align: -2px;
+  margin-right: 2px;
 }
 
 .lt-btn--delete-override:hover:not(:disabled) {
   color: #ef4444;
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.25);
 }
 
-.lt-btn--delete-override-confirm {
+.lt-btn--delete-override--checked {
   color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
 }
 
-.lt-btn--delete-override-confirm:hover:not(:disabled) {
-  color: #dc2626;
+.lt-btn--delete-override--checked:hover:not(:disabled) {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.06);
+  border-color: rgba(239, 68, 68, 0.2);
 }
 
 .lt-btn--delete-override:disabled {
@@ -384,6 +444,13 @@
 .lt-field__input--fuzzy:focus {
   border-color: #f59e0b;
   box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.12);
+}
+
+.lt-field__input--marked-delete {
+  opacity: 0.35;
+  cursor: not-allowed;
+  border-color: rgba(239, 68, 68, 0.25);
+  resize: none;
 }
 
 /* ── Inline Error ────────────────────────────────────── */

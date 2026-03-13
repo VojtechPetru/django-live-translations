@@ -490,6 +490,42 @@ class TestDeleteTranslationView:
         conf.get_backend_instance.cache_clear()
         conf.get_permission_checker.cache_clear()
 
+    def test_deletes_multiple_languages(self, settings):
+        self._setup(settings)
+        models.TranslationEntry.objects.create(
+            language="en", msgid="hello", msgstr="Hi", context=""
+        )
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", msgstr="Ahoj", context=""
+        )
+        models.TranslationEntry.objects.create(
+            language="de",
+            msgid="hello",
+            msgstr="Hallo",
+            context="",
+        )
+
+        from live_translations import views
+
+        with unittest.mock.patch.object(
+            conf.get_backend_instance(), "bump_catalog_version"
+        ):
+            response = views.delete_translation(
+                self._make_request(
+                    {"msgid": "hello", "context": "", "languages": ["cs", "de"]}
+                )
+            )
+
+        data = json.loads(response.content)
+        assert data["ok"] is True
+        assert data["deleted"] == 2
+        assert models.TranslationEntry.objects.count() == 1
+        assert models.TranslationEntry.objects.get().language == "en"
+
+        conf.get_settings.cache_clear()
+        conf.get_backend_instance.cache_clear()
+        conf.get_permission_checker.cache_clear()
+
     def test_missing_msgid_returns_400(self, settings):
         self._setup(settings)
 

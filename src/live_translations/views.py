@@ -260,9 +260,11 @@ def delete_translation(request: django.http.HttpRequest) -> django.http.JsonResp
 
     POST /__live-translations__/translations/delete/
     Body: {"msgid": "...", "context": "", "language": "cs"}
+      or: {"msgid": "...", "context": "", "languages": ["cs", "de"]}
 
-    ``language`` restricts deletion to a single language.
-    Omit it to delete all languages at once.
+    ``languages`` (list) restricts deletion to the given languages.
+    ``language`` (string) is accepted for backwards compatibility.
+    Omit both to delete all languages at once.
     """
     forbidden = _check_permission(request)
     if forbidden:
@@ -275,13 +277,16 @@ def delete_translation(request: django.http.HttpRequest) -> django.http.JsonResp
 
     msgid: str = body.get("msgid", "")
     context: str = body.get("context", "")
+    languages: list[str] = body.get("languages", [])
     language: str = body.get("language", "")
 
     if not msgid:
         return django.http.JsonResponse({"error": "msgid is required"}, status=400)
 
     qs = models.TranslationEntry.objects.for_msgid(msgid, context)
-    if language:
+    if languages:
+        qs = qs.filter(language__in=languages)
+    elif language:
         qs = qs.for_language(language)
 
     entries = list(qs.values_list("language", "msgstr"))
