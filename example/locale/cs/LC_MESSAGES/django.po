@@ -16,51 +16,51 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=4; plural=(n == 1 && n % 1 == 0) ? 0 : (n >= 2 && n <= 4 && n % 1 == 0) ? 1: (n % 1 != 0 ) ? 2 : 3;\n"
 
-msgid "Live Translations Demo"
+msgid "demo.title"
 msgstr "Demo živých překladů"
 
 #. Greeting shown on the homepage
-msgid "Welcome to the demo application!"
+msgid "demo.welcome"
 msgstr "Vítejte v demo aplikaci!"
 
-msgid "About this page"
-msgstr "O této stránce"
-
-msgid "This page demonstrates the live translations widget. Log in as a superuser and press Shift+T to activate edit mode."
-msgstr "Tato stránka demonstruje widget pro živé překlady. Přihlaste se jako superuživatel a stiskněte Shift+T pro aktivaci režimu úprav."
-
-msgid "How it works"
-msgstr "Jak to funguje"
-
-msgid "Press %(key)s to toggle edit mode. Translated strings will be highlighted — click any one to open the editor."
-msgstr "Stiskněte %(key)s pro přepnutí režimu úprav. Přeložené řetězce budou zvýrazněny — klikněte na libovolný pro otevření editoru."
-
-msgid "Features"
-msgstr "Funkce"
-
-msgid "Edit translations directly in the browser"
-msgstr "Upravujte překlady přímo v prohlížeči"
-
-msgid "Changes are saved instantly without restarting the server"
-msgstr "Změny se uloží okamžitě bez nutnosti restartu serveru"
-
-msgid "A minimal example app for testing django-live-translations."
+msgid "demo.description"
 msgstr "Minimální ukázková aplikace pro testování django-live-translations."
 
-msgid "Language"
+msgid "about.heading"
+msgstr "O této stránce"
+
+msgid "about.description"
+msgstr "Tato stránka demonstruje widget pro živé překlady. Přihlaste se jako superuživatel a stiskněte Shift+T pro aktivaci režimu úprav."
+
+msgid "how_it_works.heading"
+msgstr "Jak to funguje"
+
+msgid "edit_mode.toggle_hint %(key)s"
+msgstr "Stiskněte %(key)s pro přepnutí režimu úprav. Přeložené řetězce budou zvýrazněny — klikněte na libovolný pro otevření editoru."
+
+msgid "features.heading"
+msgstr "Funkce"
+
+msgid "features.inline_editing"
+msgstr "Upravujte překlady přímo v prohlížeči"
+
+msgid "features.instant_save"
+msgstr "Změny se uloží okamžitě bez nutnosti restartu serveru"
+
+msgid "common.language"
 msgstr "Jazyk"
 
-msgid "HTML attributes"
+msgid "attrs.heading"
 msgstr "HTML atributy"
 
-msgid "This tooltip was translated with the trans tag"
+msgid "attrs.tooltip_trans"
 msgstr "Tento tooltip byl přeložen pomocí šablonového tagu trans"
 
-msgid "Hover over this paragraph to see a translated tooltip."
+msgid "attrs.tooltip_hint"
 msgstr "Najeďte myší na tento odstavec pro zobrazení přeloženého tooltipu."
 
-msgid "This paragraph has a tooltip from a context variable."
+msgid "attrs.tooltip_context_hint"
 msgstr "Tento odstavec má tooltip z kontextové proměnné."
 
-msgid "This tooltip was translated with gettext()"
+msgid "attrs.tooltip_gettext"
 msgstr "Tento tooltip byl přeložen pomocí gettext()"

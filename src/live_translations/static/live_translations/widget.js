@@ -516,11 +516,13 @@
     msgidEl.dataset.msgid = msgid;
     msgidEl.innerHTML = "";
 
-    var msgidCode = document.createElement("code");
-    msgidCode.textContent = "msgid: " + msgid;
-    if (currentAttrName) {
-      msgidCode.textContent += "  (attr: " + currentAttrName + ")";
-    }
+    var msgidLabel = document.createElement("span");
+    msgidLabel.className = "lt-dialog__msgid-label";
+    msgidLabel.textContent = currentAttrName ? "msgid · " + currentAttrName : "msgid";
+
+    var msgidText = document.createElement("span");
+    msgidText.className = "lt-dialog__msgid-text";
+    msgidText.textContent = msgid;
 
     var copyIcon = document.createElement("span");
     copyIcon.className = "lt-dialog__msgid-icon";
@@ -531,7 +533,8 @@
       '<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/>' +
       '<path d="M10.5 5.5V3.5a1.5 1.5 0 0 0-1.5-1.5H3.5A1.5 1.5 0 0 0 2 3.5V9a1.5 1.5 0 0 0 1.5 1.5h2"/></svg>';
 
-    msgidEl.appendChild(msgidCode);
+    msgidEl.appendChild(msgidLabel);
+    msgidEl.appendChild(msgidText);
     msgidEl.appendChild(copyIcon);
     dialog.querySelector(".lt-btn--save").disabled = true;
     showDialogError(null);
@@ -589,8 +592,9 @@
       _originalActiveFlags[lang] = _editedActiveFlags[lang];
     }
 
-    // Default edit language: first configured language
-    _editLang = LANGUAGES[0];
+    // Default edit language: current page language if configured, else first
+    var pageLang = (document.documentElement.lang || "").toLowerCase();
+    _editLang = LANGUAGES.indexOf(pageLang) !== -1 ? pageLang : LANGUAGES[0];
 
     _renderEditorTabs();
     _renderEditorPanels();
@@ -1723,22 +1727,17 @@
 
   /**
    * Enter translation edit mode: add the body class that highlights translatable
-   * elements and show a toast notification.
+   * elements.
    * @returns {void}
    */
   function activateEditMode() {
     state = "active";
     document.body.classList.add("lt-edit-mode");
     _updateHintActiveState();
-    showToast(
-      "Translation edit mode ON \u2014 click any highlighted text",
-      "info"
-    );
   }
 
   /**
-   * Leave translation edit mode: close any open modal, remove the body class,
-   * and show a toast notification.
+   * Leave translation edit mode: close any open modal, remove the body class.
    * @returns {void}
    */
   function deactivateEditMode() {
@@ -1747,7 +1746,6 @@
     state = "inactive";
     document.body.classList.remove("lt-edit-mode");
     _updateHintActiveState();
-    showToast("Translation edit mode OFF", "info");
   }
 
   // ─── Keyboard Handler ───────────────────────────────

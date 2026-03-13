@@ -115,36 +115,52 @@
 .lt-dialog__msgid {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   font-family: "JetBrains Mono", "Fira Code", "SF Mono", Menlo, monospace;
   font-size: 11px;
   font-variant-ligatures: none;
-  color: #a1a1aa;
-  background: rgba(255, 255, 255, 0.03);
-  padding: 8px 12px;
-  border-radius: 6px;
-  word-break: break-all;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  margin: 16px 20px 0;
+  color: #71717a;
+  background: transparent;
+  padding: 4px 20px 0;
+  margin: 12px 0 0;
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
+  transition: color 0.15s;
 }
 .lt-dialog__msgid:hover {
-  border-color: rgba(255, 255, 255, 0.14);
+  color: #a1a1aa;
+}
+.lt-dialog__msgid-label {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  color: #52525b;
   background: rgba(255, 255, 255, 0.06);
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+.lt-dialog__msgid-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .lt-dialog__msgid-icon {
   flex-shrink: 0;
-  color: #52525b;
+  color: #3f3f46;
   transition: color 0.15s;
 }
 .lt-dialog__msgid:hover .lt-dialog__msgid-icon {
   color: #a1a1aa;
 }
 .lt-dialog__msgid--copied {
-  border-color: rgba(74, 222, 128, 0.3);
-  background: rgba(74, 222, 128, 0.06);
+  color: #4ade80;
+}
+.lt-dialog__msgid--copied .lt-dialog__msgid-label {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.1);
 }
 .lt-dialog__msgid--copied .lt-dialog__msgid-icon {
   color: #4ade80;

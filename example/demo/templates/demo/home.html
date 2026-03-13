@@ -4,7 +4,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{% trans "Live Translations Demo" %}</title>
+    <title>{% trans "demo.title" %}</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: system-ui, -apple-system, sans-serif; line-height: 1.6; color: #1a1a1a; max-width: 640px; margin: 0 auto; padding: 3rem 1.5rem; }
@@ -20,41 +20,55 @@
     </style>
 </head>
 <body>
-    <h1>{% trans "Live Translations Demo" %} <span class="via">{% templatetag openblock %} trans {% templatetag closeblock %}</span></h1>
+    <h1>{% trans "demo.title" %} {% verbatim %}<span class="via">{% trans %}</span>{% endverbatim %}</h1>
 
-    <p><span class="via">gettext()</span> {{ welcome_message }}</p>
-    <p><span class="via">gettext_lazy()</span> {{ page_description }}</p>
+    <p>{% verbatim %}<span class="via">gettext()</span>{% endverbatim %} {{ welcome_message }}</p>
+    <p>{% verbatim %}<span class="via">gettext_lazy()</span>{% endverbatim %} {{ page_description }}</p>
 
     <div class="card">
-        <h2>{% trans "About this page" %} <span class="via">{% templatetag openblock %} trans {% templatetag closeblock %}</span></h2>
-        <p><span class="via">{% templatetag openblock %} trans {% templatetag closeblock %}</span> {% trans "This page demonstrates the live translations widget. Log in as a superuser and press Shift+T to activate edit mode." %}</p>
+        <h2>{% trans "about.heading" %} {% verbatim %}<span class="via">{% trans %}</span>{% endverbatim %}</h2>
+        <p>{% verbatim %}<span class="via">{% trans %}</span>{% endverbatim %} {% trans "about.description" %}</p>
     </div>
 
     <div class="card">
-        <h2>{% trans "How it works" %} <span class="via">{% templatetag openblock %} trans {% templatetag closeblock %}</span></h2>
-        <p><span class="via">{% templatetag openblock %} blocktrans {% templatetag closeblock %}</span> {% blocktrans with key="Shift+T" %}Press {{ key }} to toggle edit mode. Translated strings will be highlighted — click any one to open the editor.{% endblocktrans %}</p>
+        <h2>{% trans "how_it_works.heading" %} {% verbatim %}<span class="via">{% trans %}</span>{% endverbatim %}</h2>
+        <p>{% verbatim %}<span class="via">{% blocktrans %}</span>{% endverbatim %} {% blocktrans with key="Shift+T" %}edit_mode.toggle_hint {{ key }}{% endblocktrans %}</p>
     </div>
 
     <div class="card">
-        <h2>{% trans "Features" %} <span class="via">{% templatetag openblock %} trans {% templatetag closeblock %}</span></h2>
-        <p><span class="via">{% templatetag openblock %} trans {% templatetag closeblock %}</span> {% trans "Edit translations directly in the browser" %}</p>
-        <p><span class="via">{% templatetag openblock %} trans {% templatetag closeblock %}</span> {% trans "Changes are saved instantly without restarting the server" %}</p>
+        <h2>{% trans "features.heading" %} {% verbatim %}<span class="via">{% trans %}</span>{% endverbatim %}</h2>
+        <p>{% verbatim %}<span class="via">{% trans %}</span>{% endverbatim %} {% trans "features.inline_editing" %}</p>
+        <p>{% verbatim %}<span class="via">{% trans %}</span>{% endverbatim %} {% trans "features.instant_save" %}</p>
     </div>
 
     <div class="card">
-        <h2>{% trans "HTML attributes" %} <span class="via">{% templatetag openblock %} trans {% templatetag closeblock %}</span></h2>
-        <p title="{% trans 'This tooltip was translated with the trans tag' %}" class="has-tooltip">
-            <span class="via">{% templatetag openblock %} trans {% templatetag closeblock %} in <code>title</code> attr</span>
-            {% trans "Hover over this paragraph to see a translated tooltip." %}
+        <h2>{% trans "attrs.heading" %} {% verbatim %}<span class="via">{% trans %}</span>{% endverbatim %}</h2>
+        <p title="{% trans 'attrs.tooltip_trans' %}" class="has-tooltip">
+            {% verbatim %}<span class="via">{% trans %} in <code>title</code> attr</span>{% endverbatim %}
+            {% trans "attrs.tooltip_hint" %}
         </p>
         <p title="{{ tooltip_text }}" class="has-tooltip">
-            <span class="via">gettext() in <code>title</code> attr</span>
-            {% trans "This paragraph has a tooltip from a context variable." %}
+            {% verbatim %}<span class="via">gettext() in <code>title</code> attr</span>{% endverbatim %}
+            {% trans "attrs.tooltip_context_hint" %}
         </p>
     </div>
 
-    <p class="hint">
-        {% trans "Language" %}: <code>{{ current_language }}</code>
-    </p>
+    <div class="hint">
+        {% trans "common.language" %}:
+        {% get_available_languages as languages %}
+        {% for lang_code, lang_name in languages %}
+            {% if lang_code == LANGUAGE_CODE %}
+                <strong>{{ lang_name }}</strong>
+            {% else %}
+                <form method="post" action="{% url 'set_language' %}" style="display: inline">
+                    {% csrf_token %}
+                    <input type="hidden" name="language" value="{{ lang_code }}">
+                    <input type="hidden" name="next" value="{{ request.path }}">
+                    <button type="submit" style="background: none; border: none; color: #3b82f6; cursor: pointer; font: inherit; padding: 0; text-decoration: underline;">{{ lang_name }}</button>
+                </form>
+            {% endif %}
+            {% if not forloop.last %} · {% endif %}
+        {% endfor %}
+    </div>
 </body>
 </html>
