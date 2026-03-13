@@ -76,6 +76,4 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 LIVE_TRANSLATIONS = {
     "BACKEND": "live_translations.backends.db.DatabaseBackend",
-    "LANGUAGES": ["en", "cs"],
-    "LOCALE_DIR": str(BASE_DIR / "locale"),
 }
