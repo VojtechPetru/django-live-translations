@@ -386,11 +386,12 @@
     },
 
     /**
-     * Bulk-activate translations for the given msgid/context pairs across ALL languages.
+     * Bulk-activate translations for the given msgid/context pairs for a single language.
      * @param {Array<{msgid:string, context:string}>} msgids - Entries to activate.
+     * @param {string} language - Language code to activate for.
      * @returns {Promise<{ok:boolean, activated:number}>}
      */
-    bulkActivate: function (msgids) {
+    bulkActivate: function (msgids, language) {
       return fetch(API_BASE + "/translations/bulk-activate/", {
         method: "POST",
         credentials: "same-origin",
@@ -398,7 +399,7 @@
           "Content-Type": "application/json",
           "X-CSRFToken": CSRF_TOKEN,
         },
-        body: JSON.stringify({ msgids: msgids }),
+        body: JSON.stringify({ msgids: msgids, language: language }),
       }).then(function (resp) {
         if (!resp.ok) {
           return resp
@@ -1724,7 +1725,7 @@
     var count = selectedElements.length;
     actionBar.innerHTML =
       '<span class="lt-action-bar__count">' + count + " selected</span>" +
-      '<button type="button" class="lt-action-bar__activate">Activate for all languages</button>' +
+      '<button type="button" class="lt-action-bar__activate">Activate</button>' +
       '<button type="button" class="lt-action-bar__clear">Clear</button>';
     actionBar.querySelector(".lt-action-bar__activate").addEventListener("click", _showActivateConfirm);
     actionBar.querySelector(".lt-action-bar__clear").addEventListener("click", _clearSelection);
@@ -1750,15 +1751,16 @@
   }
 
   /**
-   * Switch the action bar to confirmation state with a warning about all-language scope.
+   * Switch the action bar to confirmation state with a warning.
    * @returns {void}
    */
   function _showActivateConfirm() {
     actionBarConfirming = true;
     var count = selectedElements.length;
+    var lang = (document.documentElement.lang || "").toLowerCase() || "unknown";
     actionBar.innerHTML =
       '<span class="lt-action-bar__warning">' +
-      "This will activate " + count + " translation(s) across ALL languages. Continue?" +
+      "This will activate " + count + " translation(s) for language \"" + lang + "\". Continue?" +
       "</span>" +
       '<button type="button" class="lt-action-bar__confirm">Confirm</button>' +
       '<button type="button" class="lt-action-bar__cancel">Cancel</button>';
@@ -1812,8 +1814,10 @@
       return;
     }
 
+    var lang = (document.documentElement.lang || "").toLowerCase();
+
     api
-      .bulkActivate(msgids)
+      .bulkActivate(msgids, lang)
       .then(function (data) {
         showToast(data.activated + " translation(s) activated", "success");
         _reloadPage();

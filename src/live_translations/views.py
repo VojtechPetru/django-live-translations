@@ -310,10 +310,10 @@ def delete_translation(request: django.http.HttpRequest) -> django.http.JsonResp
 @django.views.decorators.csrf.csrf_protect
 @django.views.decorators.http.require_POST
 def bulk_activate(request: django.http.HttpRequest) -> django.http.JsonResponse:
-    """Activate translations for the given msgids across ALL languages.
+    """Activate translations for the given msgids for a single language.
 
     POST /__live-translations__/translations/bulk-activate/
-    Body: {"msgids": [{"msgid": "...", "context": ""}, ...]}
+    Body: {"language": "en", "msgids": [{"msgid": "...", "context": ""}, ...]}
     """
     import django.db.models
 
@@ -325,6 +325,10 @@ def bulk_activate(request: django.http.HttpRequest) -> django.http.JsonResponse:
         body: dict[str, t.Any] = json.loads(request.body)
     except json.JSONDecodeError:
         return django.http.JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    language: str = body.get("language", "")
+    if not language or not isinstance(language, str):
+        return django.http.JsonResponse({"error": "language is required"}, status=400)
 
     msgid_list: list[dict[str, str]] = body.get("msgids", [])
     if not msgid_list:
@@ -338,12 +342,12 @@ def bulk_activate(request: django.http.HttpRequest) -> django.http.JsonResponse:
                 {"error": "Each item must have a 'msgid' key"}, status=400
             )
 
-    # Build OR query for all (msgid, context) pairs across ALL languages
+    # Build OR query for all (msgid, context) pairs for the given language
     q = django.db.models.Q()
     for item in msgid_list:
         q |= django.db.models.Q(msgid=item["msgid"], context=item.get("context", ""))
 
-    qs = models.TranslationEntry.objects.filter(q, is_active=False)
+    qs = models.TranslationEntry.objects.filter(q, language=language, is_active=False)
 
     # Materialize before update so history records the correct rows
     affected = list(qs.values_list("language", "msgid", "context"))
