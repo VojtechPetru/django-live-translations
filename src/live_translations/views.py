@@ -1,5 +1,6 @@
 """API views for fetching and saving translations."""
 
+import functools
 import json
 import logging
 import re
@@ -51,26 +52,29 @@ def _validate_placeholders(
     return errors or None
 
 
-def _check_permission(
-    request: django.http.HttpRequest,
-) -> django.http.JsonResponse | None:
-    """Return a 403 JsonResponse if the user lacks permission, else None."""
-    checker = conf.get_permission_checker()
-    if not checker(request):
-        return django.http.JsonResponse({"error": "Forbidden"}, status=403)
-    return None
+_F = t.TypeVar("_F", bound=t.Callable[..., django.http.JsonResponse])
 
 
+def require_translation_permission(view: _F) -> _F:
+    """Decorator that returns 403 if the user lacks the configured translation permission."""
+
+    @functools.wraps(view)
+    def wrapper(request: django.http.HttpRequest, *args: t.Any, **kwargs: t.Any) -> django.http.JsonResponse:
+        checker = conf.get_permission_checker()
+        if not checker(request):
+            return django.http.JsonResponse({"error": "Forbidden"}, status=403)
+        return view(request, *args, **kwargs)
+
+    return wrapper  # type: ignore[return-value]
+
+
+@require_translation_permission
 @django.views.decorators.http.require_GET
 def get_translations(request: django.http.HttpRequest) -> django.http.JsonResponse:
     """Fetch translations for a msgid across all configured languages.
 
     GET /__live-translations__/translations/?msgid=hero-title&context=
     """
-    forbidden = _check_permission(request)
-    if forbidden:
-        return forbidden
-
     msgid = request.GET.get("msgid", "")
     context = request.GET.get("context", "")
 
@@ -113,6 +117,7 @@ def get_translations(request: django.http.HttpRequest) -> django.http.JsonRespon
     )
 
 
+@require_translation_permission
 @django.views.decorators.csrf.csrf_protect
 @django.views.decorators.http.require_POST
 def save_translations(request: django.http.HttpRequest) -> django.http.JsonResponse:
@@ -122,10 +127,6 @@ def save_translations(request: django.http.HttpRequest) -> django.http.JsonRespo
     Body: {"msgid": "...", "context": "", "translations": {"cs": "...", "en": "..."}}
     """
     import django.utils.translation
-
-    forbidden = _check_permission(request)
-    if forbidden:
-        return forbidden
 
     try:
         body: dict[str, t.Any] = json.loads(request.body)
@@ -205,16 +206,13 @@ def _format_user(user: "AbstractBaseUser | None") -> str:
     return str(getattr(user, username_field))
 
 
+@require_translation_permission
 @django.views.decorators.http.require_GET
 def get_history(request: django.http.HttpRequest) -> django.http.JsonResponse:
     """Fetch edit history for a msgid across all languages.
 
     GET /__live-translations__/translations/history/?msgid=hero-title&context=&limit=50
     """
-    forbidden = _check_permission(request)
-    if forbidden:
-        return forbidden
-
     msgid = request.GET.get("msgid", "")
     context = request.GET.get("context", "")
 
@@ -253,6 +251,7 @@ def get_history(request: django.http.HttpRequest) -> django.http.JsonResponse:
     return django.http.JsonResponse({"history": results})
 
 
+@require_translation_permission
 @django.views.decorators.csrf.csrf_protect
 @django.views.decorators.http.require_POST
 def delete_translation(request: django.http.HttpRequest) -> django.http.JsonResponse:
@@ -266,10 +265,6 @@ def delete_translation(request: django.http.HttpRequest) -> django.http.JsonResp
     ``language`` (string) is accepted for backwards compatibility.
     Omit both to delete all languages at once.
     """
-    forbidden = _check_permission(request)
-    if forbidden:
-        return forbidden
-
     try:
         body: dict[str, t.Any] = json.loads(request.body)
     except json.JSONDecodeError:
@@ -307,6 +302,7 @@ def delete_translation(request: django.http.HttpRequest) -> django.http.JsonResp
     return django.http.JsonResponse({"ok": True, "deleted": deleted_count})
 
 
+@require_translation_permission
 @django.views.decorators.csrf.csrf_protect
 @django.views.decorators.http.require_POST
 def bulk_activate(request: django.http.HttpRequest) -> django.http.JsonResponse:
@@ -316,10 +312,6 @@ def bulk_activate(request: django.http.HttpRequest) -> django.http.JsonResponse:
     Body: {"language": "en", "msgids": [{"msgid": "...", "context": ""}, ...]}
     """
     import django.db.models
-
-    forbidden = _check_permission(request)
-    if forbidden:
-        return forbidden
 
     try:
         body: dict[str, t.Any] = json.loads(request.body)

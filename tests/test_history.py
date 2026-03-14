@@ -7,7 +7,7 @@ import django.contrib.auth.models
 import django.test
 import pytest
 
-from live_translations import conf, history, models, strings
+from live_translations import history, models, strings
 from live_translations.backends import db
 
 
@@ -443,27 +443,10 @@ class TestHistoryView:
             "LANGUAGES": ["en"],
             "LOCALE_DIR": "/tmp",
         }
-        conf.get_settings.cache_clear()
-        conf.get_backend_instance.cache_clear()
-        conf.get_permission_checker.cache_clear()
-        yield
-        conf.get_settings.cache_clear()
-        conf.get_backend_instance.cache_clear()
-        conf.get_permission_checker.cache_clear()
 
-    def _make_request(self, params: dict[str, str]):
-        factory = django.test.RequestFactory()
-        request = factory.get(
-            "/__live-translations__/translations/history/",
-            params,
-        )
-        request.user = unittest.mock.MagicMock(
-            is_authenticated=True,
-            is_superuser=True,
-        )
-        return request
+    _URL = "/__live-translations__/translations/history/"
 
-    def test_returns_history_entries(self):
+    def test_returns_history_entries(self, make_request):
         models.TranslationHistory.objects.create(
             language="en",
             msgid="hello",
@@ -474,7 +457,7 @@ class TestHistoryView:
         )
         from live_translations import views
 
-        response = views.get_history(self._make_request({"msgid": "hello"}))
+        response = views.get_history(make_request("get", self._URL, data={"msgid": "hello"}))
         data = json.loads(response.content)
         assert len(data["history"]) == 1
         entry = data["history"][0]
@@ -483,35 +466,26 @@ class TestHistoryView:
         assert entry["new_value"] == "Hello"
         assert "diff" in entry
 
-    def test_requires_msgid(self):
+    def test_requires_msgid(self, make_request):
         from live_translations import views
 
-        response = views.get_history(self._make_request({}))
+        response = views.get_history(make_request("get", self._URL))
         assert response.status_code == 400
 
-    def test_requires_permission(self):
+    def test_requires_permission(self, make_request):
         from live_translations import views
 
-        factory = django.test.RequestFactory()
-        request = factory.get(
-            "/__live-translations__/translations/history/",
-            {"msgid": "hello"},
-        )
-        request.user = unittest.mock.MagicMock(
-            is_authenticated=False,
-            is_superuser=False,
-        )
-        response = views.get_history(request)
+        response = views.get_history(make_request("get", self._URL, data={"msgid": "hello"}, has_permission=False))
         assert response.status_code == 403
 
-    def test_empty_history(self):
+    def test_empty_history(self, make_request):
         from live_translations import views
 
-        response = views.get_history(self._make_request({"msgid": "hello"}))
+        response = views.get_history(make_request("get", self._URL, data={"msgid": "hello"}))
         data = json.loads(response.content)
         assert data["history"] == []
 
-    def test_limit_parameter(self):
+    def test_limit_parameter(self, make_request):
         for i in range(10):
             models.TranslationHistory.objects.create(
                 language="en",
@@ -523,13 +497,11 @@ class TestHistoryView:
             )
         from live_translations import views
 
-        response = views.get_history(
-            self._make_request({"msgid": "hello", "limit": "3"})
-        )
+        response = views.get_history(make_request("get", self._URL, data={"msgid": "hello", "limit": "3"}))
         data = json.loads(response.content)
         assert len(data["history"]) == 3
 
-    def test_diff_segments_included(self):
+    def test_diff_segments_included(self, make_request):
         models.TranslationHistory.objects.create(
             language="en",
             msgid="hello",
@@ -540,7 +512,7 @@ class TestHistoryView:
         )
         from live_translations import views
 
-        response = views.get_history(self._make_request({"msgid": "hello"}))
+        response = views.get_history(make_request("get", self._URL, data={"msgid": "hello"}))
         data = json.loads(response.content)
         diff = data["history"][0]["diff"]
         assert isinstance(diff, list)
@@ -548,7 +520,7 @@ class TestHistoryView:
         types = {s["type"] for s in diff}
         assert "equal" in types
 
-    def test_activate_action_has_no_diff(self):
+    def test_activate_action_has_no_diff(self, make_request):
         models.TranslationHistory.objects.create(
             language="en",
             msgid="hello",
@@ -559,11 +531,11 @@ class TestHistoryView:
         )
         from live_translations import views
 
-        response = views.get_history(self._make_request({"msgid": "hello"}))
+        response = views.get_history(make_request("get", self._URL, data={"msgid": "hello"}))
         data = json.loads(response.content)
         assert "diff" not in data["history"][0]
 
-    def test_user_formatted(self):
+    def test_user_formatted(self, make_request):
         user = django.contrib.auth.models.User.objects.create_user(
             username="translator",
             password="test",
@@ -579,11 +551,11 @@ class TestHistoryView:
         )
         from live_translations import views
 
-        response = views.get_history(self._make_request({"msgid": "hello"}))
+        response = views.get_history(make_request("get", self._URL, data={"msgid": "hello"}))
         data = json.loads(response.content)
         assert data["history"][0]["user"] == "Jane Doe"
 
-    def test_null_user_shows_system(self):
+    def test_null_user_shows_system(self, make_request):
         models.TranslationHistory.objects.create(
             language="en",
             msgid="hello",
@@ -593,7 +565,7 @@ class TestHistoryView:
         )
         from live_translations import views
 
-        response = views.get_history(self._make_request({"msgid": "hello"}))
+        response = views.get_history(make_request("get", self._URL, data={"msgid": "hello"}))
         data = json.loads(response.content)
         assert data["history"][0]["user"] == "System"
 

@@ -1,13 +1,16 @@
 """Tests for the is_active field on TranslationEntry."""
 
 import json
+import typing as t
 import unittest.mock
 
-import django.test
 import pytest
 
 from live_translations import conf, models
 from live_translations.backends import base, db
+
+if t.TYPE_CHECKING:
+    from pytest_django.fixtures import SettingsWrapper
 
 
 @pytest.fixture()
@@ -162,8 +165,6 @@ class TestSaveTranslations:
         entry = models.TranslationEntry.objects.get(language="en", msgid="hello")
         assert entry.is_active is active_default
 
-        conf.get_settings.cache_clear()
-
     def test_explicit_active_flag_overrides_setting(self, settings):
         """When active_flags is provided, it takes priority over the setting."""
         settings.LIVE_TRANSLATIONS = {"TRANSLATION_ACTIVE_BY_DEFAULT": False}
@@ -178,8 +179,6 @@ class TestSaveTranslations:
 
         entry = models.TranslationEntry.objects.get(language="en", msgid="hello")
         assert entry.is_active is True
-
-        conf.get_settings.cache_clear()
 
     def test_explicit_active_flag_updates_existing(self, settings):
         """When active_flags is provided on update, it overwrites the existing is_active."""
@@ -202,8 +201,6 @@ class TestSaveTranslations:
         assert entry.msgstr == "New"
         assert entry.is_active is False
 
-        conf.get_settings.cache_clear()
-
     def test_no_flags_uses_fallback_on_update(self, settings):
         """Without active_flags, updating uses the setting fallback."""
         settings.LIVE_TRANSLATIONS = {"TRANSLATION_ACTIVE_BY_DEFAULT": False}
@@ -223,23 +220,40 @@ class TestSaveTranslations:
         # Without explicit flags, the setting fallback (False) is used in defaults
         assert entry.is_active is False
 
+
+@pytest.mark.django_db
+class TestSaveTranslationsView:
+    def test_requires_permission(self, settings: "SettingsWrapper", make_request) -> None:
+        settings.LIVE_TRANSLATIONS = {
+            "BACKEND": "live_translations.backends.db.DatabaseBackend",
+            "LANGUAGES": ["en"],
+            "LOCALE_DIR": "/tmp",
+        }
         conf.get_settings.cache_clear()
+
+        request = make_request(
+            "post", "/__live-translations__/translations/save/",
+            data={"msgid": "hello", "context": "", "translations": {"en": "Hi"}},
+            has_permission=False,
+        )
+
+        from live_translations import views
+
+        response = views.save_translations(request)
+        assert response.status_code == 403
 
 
 @pytest.mark.django_db
 class TestSettingDefault:
     def test_default_is_false(self):
-        conf.get_settings.cache_clear()
         settings = conf.get_settings()
         assert settings.translation_active_by_default is False
-        conf.get_settings.cache_clear()
 
     def test_setting_can_be_overridden(self, settings):
         settings.LIVE_TRANSLATIONS = {"TRANSLATION_ACTIVE_BY_DEFAULT": True}
         conf.get_settings.cache_clear()
         resolved = conf.get_settings()
         assert resolved.translation_active_by_default is True
-        conf.get_settings.cache_clear()
 
 
 @pytest.mark.django_db
@@ -298,7 +312,8 @@ class TestAdminActions:
 
 @pytest.mark.django_db
 class TestGetTranslationsView:
-    def test_response_includes_is_active(self, settings):
+    @pytest.fixture(autouse=True)
+    def _setup(self, settings):
         settings.LIVE_TRANSLATIONS = {
             "BACKEND": "live_translations.backends.db.DatabaseBackend",
             "LANGUAGES": ["en"],
@@ -308,16 +323,12 @@ class TestGetTranslationsView:
         conf.get_backend_instance.cache_clear()
         conf.get_permission_checker.cache_clear()
 
+    def test_response_includes_is_active(self, make_request):
         models.TranslationEntry.objects.create(
             language="en", msgid="hello", msgstr="Hi", context="", is_active=False
         )
 
-        factory = django.test.RequestFactory()
-        request = factory.get(
-            "/__live-translations__/translations/",
-            {"msgid": "hello", "context": ""},
-        )
-        request.user = unittest.mock.MagicMock(is_authenticated=True, is_superuser=True)
+        request = make_request("get", "/__live-translations__/translations/", data={"msgid": "hello", "context": ""})
 
         from live_translations import views
 
@@ -338,9 +349,15 @@ class TestGetTranslationsView:
         assert data["translations"]["en"]["is_active"] is False
         assert data["translations"]["en"]["has_override"] is True
 
-        conf.get_settings.cache_clear()
-        conf.get_backend_instance.cache_clear()
-        conf.get_permission_checker.cache_clear()
+    def test_requires_permission(self, make_request) -> None:
+        request = make_request(
+            "get", "/__live-translations__/translations/", data={"msgid": "hello", "context": ""}, has_permission=False
+        )
+
+        from live_translations import views
+
+        response = views.get_translations(request)
+        assert response.status_code == 403
 
 
 @pytest.mark.django_db
@@ -381,6 +398,7 @@ class TestHasOverride:
 
 @pytest.mark.django_db
 class TestDeleteTranslationView:
+    @pytest.fixture(autouse=True)
     def _setup(self, settings):
         settings.LIVE_TRANSLATIONS = {
             "BACKEND": "live_translations.backends.db.DatabaseBackend",
@@ -396,22 +414,10 @@ class TestDeleteTranslationView:
         mock_po.get_translations.return_value = {}
         mock_po.get_hint.return_value = ""
         backend._po_backend = mock_po
-        return backend
 
-    def _make_request(self, body):
-        factory = django.test.RequestFactory(enforce_csrf_checks=False)
-        request = factory.post(
-            "/__live-translations__/translations/delete/",
-            data=json.dumps(body),
-            content_type="application/json",
-        )
-        request.user = unittest.mock.MagicMock(is_authenticated=True, is_superuser=True)
-        # Bypass CSRF for unit tests
-        request._dont_enforce_csrf_checks = True
-        return request
+    _URL = "/__live-translations__/translations/delete/"
 
-    def test_deletes_all_languages(self, settings):
-        self._setup(settings)
+    def test_deletes_all_languages(self, make_request):
         models.TranslationEntry.objects.create(
             language="en", msgid="hello", msgstr="Hi", context=""
         )
@@ -425,7 +431,7 @@ class TestDeleteTranslationView:
             conf.get_backend_instance(), "bump_catalog_version"
         ):
             response = views.delete_translation(
-                self._make_request({"msgid": "hello", "context": ""})
+                make_request("post", self._URL, data={"msgid": "hello", "context": ""})
             )
 
         data = json.loads(response.content)
@@ -433,12 +439,7 @@ class TestDeleteTranslationView:
         assert data["deleted"] == 2
         assert models.TranslationEntry.objects.count() == 0
 
-        conf.get_settings.cache_clear()
-        conf.get_backend_instance.cache_clear()
-        conf.get_permission_checker.cache_clear()
-
-    def test_records_history(self, settings):
-        self._setup(settings)
+    def test_records_history(self, make_request):
         models.TranslationEntry.objects.create(
             language="en", msgid="hello", msgstr="Hi", context=""
         )
@@ -449,7 +450,7 @@ class TestDeleteTranslationView:
             conf.get_backend_instance(), "bump_catalog_version"
         ):
             views.delete_translation(
-                self._make_request({"msgid": "hello", "context": ""})
+                make_request("post", self._URL, data={"msgid": "hello", "context": ""})
             )
 
         h = models.TranslationHistory.objects.get()
@@ -457,12 +458,7 @@ class TestDeleteTranslationView:
         assert h.old_value == "Hi"
         assert h.new_value == ""
 
-        conf.get_settings.cache_clear()
-        conf.get_backend_instance.cache_clear()
-        conf.get_permission_checker.cache_clear()
-
-    def test_deletes_single_language(self, settings):
-        self._setup(settings)
+    def test_deletes_single_language(self, make_request):
         models.TranslationEntry.objects.create(
             language="en", msgid="hello", msgstr="Hi", context=""
         )
@@ -476,7 +472,7 @@ class TestDeleteTranslationView:
             conf.get_backend_instance(), "bump_catalog_version"
         ):
             response = views.delete_translation(
-                self._make_request({"msgid": "hello", "context": "", "language": "cs"})
+                make_request("post", self._URL, data={"msgid": "hello", "context": "", "language": "cs"})
             )
 
         data = json.loads(response.content)
@@ -486,12 +482,7 @@ class TestDeleteTranslationView:
         assert models.TranslationEntry.objects.count() == 1
         assert models.TranslationEntry.objects.get().language == "en"
 
-        conf.get_settings.cache_clear()
-        conf.get_backend_instance.cache_clear()
-        conf.get_permission_checker.cache_clear()
-
-    def test_deletes_multiple_languages(self, settings):
-        self._setup(settings)
+    def test_deletes_multiple_languages(self, make_request):
         models.TranslationEntry.objects.create(
             language="en", msgid="hello", msgstr="Hi", context=""
         )
@@ -511,9 +502,7 @@ class TestDeleteTranslationView:
             conf.get_backend_instance(), "bump_catalog_version"
         ):
             response = views.delete_translation(
-                self._make_request(
-                    {"msgid": "hello", "context": "", "languages": ["cs", "de"]}
-                )
+                make_request("post", self._URL, data={"msgid": "hello", "context": "", "languages": ["cs", "de"]})
             )
 
         data = json.loads(response.content)
@@ -522,25 +511,23 @@ class TestDeleteTranslationView:
         assert models.TranslationEntry.objects.count() == 1
         assert models.TranslationEntry.objects.get().language == "en"
 
-        conf.get_settings.cache_clear()
-        conf.get_backend_instance.cache_clear()
-        conf.get_permission_checker.cache_clear()
-
-    def test_missing_msgid_returns_400(self, settings):
-        self._setup(settings)
-
+    def test_missing_msgid_returns_400(self, make_request):
         from live_translations import views
 
-        response = views.delete_translation(self._make_request({"context": ""}))
+        response = views.delete_translation(make_request("post", self._URL, data={"context": ""}))
         assert response.status_code == 400
 
-        conf.get_settings.cache_clear()
-        conf.get_backend_instance.cache_clear()
-        conf.get_permission_checker.cache_clear()
+    def test_requires_permission(self, make_request) -> None:
+        from live_translations import views
+
+        request = make_request("post", self._URL, data={"msgid": "hello", "context": ""}, has_permission=False)
+        response = views.delete_translation(request)
+        assert response.status_code == 403
 
 
 @pytest.mark.django_db
 class TestBulkActivateView:
+    @pytest.fixture(autouse=True)
     def _setup(self, settings):
         settings.LIVE_TRANSLATIONS = {
             "BACKEND": "live_translations.backends.db.DatabaseBackend",
@@ -551,20 +538,9 @@ class TestBulkActivateView:
         conf.get_backend_instance.cache_clear()
         conf.get_permission_checker.cache_clear()
 
-    def _make_request(self, body):
-        factory = django.test.RequestFactory(enforce_csrf_checks=False)
-        request = factory.post(
-            "/__live-translations__/translations/bulk-activate/",
-            data=json.dumps(body),
-            content_type="application/json",
-        )
-        request.user = unittest.mock.MagicMock(is_authenticated=True, is_superuser=True)
-        request._dont_enforce_csrf_checks = True
-        return request
+    _URL = "/__live-translations__/translations/bulk-activate/"
 
-    def test_activates_only_given_language(self, settings):
-        self._setup(settings)
-
+    def test_activates_only_given_language(self, make_request):
         models.TranslationEntry.objects.create(
             language="en", msgid="hello", msgstr="Hello", context="", is_active=False
         )
@@ -575,12 +551,7 @@ class TestBulkActivateView:
         from live_translations import views
 
         response = views.bulk_activate(
-            self._make_request(
-                {
-                    "language": "en",
-                    "msgids": [{"msgid": "hello", "context": ""}],
-                }
-            )
+            make_request("post", self._URL, data={"language": "en", "msgids": [{"msgid": "hello", "context": ""}]})
         )
         data = json.loads(response.content)
 
@@ -593,45 +564,31 @@ class TestBulkActivateView:
         assert en_entry.is_active is True
         assert cs_entry.is_active is False
 
-        conf.get_settings.cache_clear()
-        conf.get_backend_instance.cache_clear()
-        conf.get_permission_checker.cache_clear()
-
-    def test_missing_language_returns_400(self, settings):
-        self._setup(settings)
-
+    def test_missing_language_returns_400(self, make_request):
         from live_translations import views
 
         response = views.bulk_activate(
-            self._make_request(
-                {
-                    "msgids": [{"msgid": "hello", "context": ""}],
-                }
-            )
+            make_request("post", self._URL, data={"msgids": [{"msgid": "hello", "context": ""}]})
         )
         assert response.status_code == 400
         data = json.loads(response.content)
         assert data["error"] == "language is required"
 
-        conf.get_settings.cache_clear()
-        conf.get_backend_instance.cache_clear()
-        conf.get_permission_checker.cache_clear()
-
-    def test_empty_language_returns_400(self, settings):
-        self._setup(settings)
-
+    def test_empty_language_returns_400(self, make_request):
         from live_translations import views
 
         response = views.bulk_activate(
-            self._make_request(
-                {
-                    "language": "",
-                    "msgids": [{"msgid": "hello", "context": ""}],
-                }
-            )
+            make_request("post", self._URL, data={"language": "", "msgids": [{"msgid": "hello", "context": ""}]})
         )
         assert response.status_code == 400
 
-        conf.get_settings.cache_clear()
-        conf.get_backend_instance.cache_clear()
-        conf.get_permission_checker.cache_clear()
+    def test_requires_permission(self, make_request) -> None:
+        from live_translations import views
+
+        request = make_request(
+            "post", self._URL,
+            data={"language": "en", "msgids": [{"msgid": "hello", "context": ""}]},
+            has_permission=False,
+        )
+        response = views.bulk_activate(request)
+        assert response.status_code == 403
