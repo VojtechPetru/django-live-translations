@@ -18,7 +18,48 @@ dev = [
     "pytest",
     "pytest-django",
     "ruff",
+    "pyrefly",
+    "django-stubs",
+    "pre-commit",
 ]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "D",       # docstrings - not needed everywhere
+    "ANN",     # type annotations - pyrefly handles this
+    "COM812",  # trailing comma - conflicts with formatter
+    "ISC001",  # implicit string concat - conflicts with formatter
+    "ERA",     # commented-out code
+    "FIX",     # fixme comments
+    "TD",      # todo formatting
+    "DJ008",   # __str__ on models - not always needed
+    "RUF012",  # mutable class default - Django model/admin convention
+    "ARG",     # unused arguments - Django overrides require fixed signatures
+    "SLF001",  # private member access - needed for Django internals patching
+    "TRY003",  # raise vanilla args - too strict for a library
+    "EM101",   # raw string in exception - too strict
+    "EM102",   # f-string in exception - too strict
+    "PLC0415", # import outside top level - Django lazy imports pattern
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "S108", "PLR2004", "PLR0913", "INP001"]
+"**/migrations/**" = ["ALL"]
+"example/**" = ["S105", "INP001"]
+"src/live_translations/resolver.py" = ["C901", "PLR0912", "PLR0915"]
+"src/live_translations/strings.py" = ["C901", "PLR0915"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["live_translations"]
+
+[tool.pyrefly]
+project-includes = ["src", "tests"]
+python-version = "3.12"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/live_translations"]

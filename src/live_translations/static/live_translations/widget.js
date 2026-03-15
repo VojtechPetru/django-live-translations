@@ -23,6 +23,10 @@
    * @property {string[]} [languages]        - Language codes enabled for editing (e.g. ["en","cs","de"]).
    * @property {string}   [csrfToken]        - Django CSRF token injected by middleware.
    * @property {boolean}  [activeByDefault]  - Whether new overrides are active immediately.
+   * @property {string}   [shortcutEdit]     - Keyboard shortcut for toggling edit mode.
+   * @property {string}   [shortcutPreview]  - Keyboard shortcut for toggling preview mode.
+   * @property {boolean}  [preview]          - Whether preview mode is active.
+   * @property {Array<{m:string, c:string}>} [previewEntries] - Inactive override entries for preview.
    */
 
   /**
@@ -42,9 +46,10 @@
   /**
    * Single language entry returned by the translations API.
    * @typedef {Object} TranslationEntry
-   * @property {string}  msgstr    - Current translated string.
-   * @property {boolean} fuzzy     - Whether the .po entry is marked fuzzy.
-   * @property {boolean} is_active - Whether the DB override is active.
+   * @property {string}  msgstr       - Current translated string.
+   * @property {boolean} fuzzy        - Whether the .po entry is marked fuzzy.
+   * @property {boolean} is_active    - Whether the DB override is active.
+   * @property {boolean} has_override - Whether a DB override exists.
    */
 
   /**
@@ -75,25 +80,69 @@
    * @property {DiffSegment[]}  diff       - Token-level diff between old and new values.
    */
 
+  /**
+   * Response payload from `POST /translations/save/`.
+   * @typedef {Object} SaveResponse
+   * @property {boolean} ok
+   * @property {{text: string, is_preview_entry: boolean}} [display] - Updated display info.
+   */
+
+  /**
+   * Response payload from `POST /translations/delete/`.
+   * @typedef {Object} DeleteResponse
+   * @property {boolean} ok
+   * @property {number}  deleted - Number of overrides deleted.
+   */
+
+  /**
+   * Response payload from `POST /translations/bulk-activate/`.
+   * @typedef {Object} BulkActivateResponse
+   * @property {boolean} ok
+   * @property {number}  activated - Number of overrides activated.
+   */
+
+  /**
+   * Error thrown by API methods when the server returns a non-OK response.
+   * Extends the standard Error with optional structured per-language details.
+   * @typedef {Error & {details?: Object<string, string[]>|null}} ApiError
+   */
+
+  /**
+   * Drag state tracked during hint bar repositioning.
+   * @typedef {Object} DragState
+   * @property {number}  mouseX - Initial mouse X at drag start.
+   * @property {number}  mouseY - Initial mouse Y at drag start.
+   * @property {number}  barX   - Initial bar left offset at drag start.
+   * @property {number}  barY   - Initial bar top offset at drag start.
+   * @property {boolean} moved  - Whether the drag has passed the movement threshold.
+   */
+
+  /**
+   * Persisted hint bar position in localStorage.
+   * @typedef {Object} HintPosition
+   * @property {number} x
+   * @property {number} y
+   */
+
   // ─── Config (injected by middleware) ─────────────────
   /** @type {LTConfig} */
-  var CONFIG = window.__LT_CONFIG__ || {};
+  const CONFIG = window.__LT_CONFIG__ || {};
   /** @type {string} */
-  var API_BASE = CONFIG.apiBase || "/__live-translations__";
+  const API_BASE = CONFIG.apiBase || "/__live-translations__";
   /** @type {string[]} */
-  var LANGUAGES = CONFIG.languages || [];
+  const LANGUAGES = CONFIG.languages || [];
   /** @type {string} */
-  var CSRF_TOKEN = CONFIG.csrfToken || "";
+  const CSRF_TOKEN = CONFIG.csrfToken || "";
   /** @type {boolean} */
-  var ACTIVE_BY_DEFAULT = CONFIG.activeByDefault !== undefined ? CONFIG.activeByDefault : false;
+  const ACTIVE_BY_DEFAULT = CONFIG.activeByDefault !== undefined ? CONFIG.activeByDefault : false;
   /** @type {string} */
-  var SHORTCUT_EDIT = CONFIG.shortcutEdit || "ctrl+shift+e";
+  const SHORTCUT_EDIT = CONFIG.shortcutEdit || "ctrl+shift+e";
   /** @type {string} */
-  var SHORTCUT_PREVIEW = CONFIG.shortcutPreview || "ctrl+shift+p";
+  const SHORTCUT_PREVIEW = CONFIG.shortcutPreview || "ctrl+shift+p";
   /** @type {boolean} */
-  var PREVIEW = CONFIG.preview || false;
+  const PREVIEW = CONFIG.preview || false;
   /** @type {Array<{m:string, c:string}>} */
-  var PREVIEW_ENTRIES = CONFIG.previewEntries || [];
+  let PREVIEW_ENTRIES = CONFIG.previewEntries || [];
 
   // ─── Shortcut Parsing ────────────────────────────────
 
@@ -103,8 +152,8 @@
    * @returns {{ctrl: boolean, shift: boolean, alt: boolean, meta: boolean, key: string}}
    */
   function _parseShortcut(combo) {
-    var parts = combo.toLowerCase().split("+");
-    var key = parts[parts.length - 1];
+    const parts = combo.toLowerCase().split("+");
+    const key = parts[parts.length - 1];
     return {
       ctrl: parts.indexOf("ctrl") !== -1,
       shift: parts.indexOf("shift") !== -1,
@@ -137,8 +186,8 @@
    * @returns {string}
    */
   function _formatShortcut(sc) {
-    var isMac = navigator.platform ? navigator.platform.indexOf("Mac") !== -1 : false;
-    var parts = [];
+    const isMac = navigator.platform ? navigator.platform.indexOf("Mac") !== -1 : false;
+    const parts = [];
     if (sc.ctrl) parts.push(isMac ? "\u2303" : "Ctrl");
     if (sc.shift) parts.push(isMac ? "\u21E7" : "Shift");
     if (sc.alt) parts.push(isMac ? "\u2325" : "Alt");
@@ -147,12 +196,12 @@
     return parts.join(isMac ? "" : " + ");
   }
 
-  var SC_EDIT = _parseShortcut(SHORTCUT_EDIT);
-  var SC_PREVIEW = _parseShortcut(SHORTCUT_PREVIEW);
+  const SC_EDIT = _parseShortcut(SHORTCUT_EDIT);
+  const SC_PREVIEW = _parseShortcut(SHORTCUT_PREVIEW);
 
   // ─── Language display names & flags ──────────────────
   /** @type {Object<string, LangMeta>} */
-  var LANG_META = {
+  const LANG_META = {
     cs: { flag: "\uD83C\uDDE8\uD83C\uDDFF", name: "Czech" },
     en: { flag: "\uD83C\uDDEC\uD83C\uDDE7", name: "English" },
     de: { flag: "\uD83C\uDDE9\uD83C\uDDEA", name: "German" },
@@ -175,7 +224,7 @@
    * @returns {string} Emoji flag + English name, or uppercased code if unknown.
    */
   function langLabel(code) {
-    var meta = LANG_META[code];
+    const meta = LANG_META[code];
     if (meta) return meta.flag + "  " + meta.name;
     return code.toUpperCase();
   }
@@ -183,23 +232,23 @@
   // ─── Clipboard Copy Helper ───────────────────────────
 
   /** @type {string} */
-  var ICON_COPY_SVG =
+  const ICON_COPY_SVG =
     '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" ' +
     'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' +
     '<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/>' +
     '<path d="M10.5 5.5V3.5a1.5 1.5 0 0 0-1.5-1.5H3.5A1.5 1.5 0 0 0 2 3.5V9a1.5 1.5 0 0 0 1.5 1.5h2"/></svg>';
   /** @type {string} */
-  var ICON_CHECK_SVG =
+  const ICON_CHECK_SVG =
     '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" ' +
     'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
     '<path d="M3.5 8.5l3 3 6-7"/></svg>';
   /** @type {string} */
-  var ICON_CHECKBOX_SVG =
+  const ICON_CHECKBOX_SVG =
     '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" ' +
     'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' +
     '<rect x="2" y="2" width="12" height="12" rx="2"/></svg>';
   /** @type {string} */
-  var ICON_CHECKBOX_CHECKED_SVG =
+  const ICON_CHECKBOX_CHECKED_SVG =
     '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" ' +
     'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' +
     '<rect x="2" y="2" width="12" height="12" rx="2" fill="currentColor" fill-opacity="0.15"/>' +
@@ -218,28 +267,31 @@
    * @returns {void}
    */
   function _makeCopyable(container, iconEl, getText, copiedClass, duration) {
-    var ms = duration || 1500;
+    const ms = duration || 1500;
     iconEl.innerHTML = ICON_COPY_SVG;
     container.style.cursor = "pointer";
-    container.addEventListener("click", function () {
-      var text = getText();
+    container.addEventListener("click", async function () {
+      const text = getText();
       if (!text || container.classList.contains(copiedClass)) return;
-      navigator.clipboard.writeText(text).then(function () {
-        container.classList.add(copiedClass);
-        iconEl.innerHTML = ICON_CHECK_SVG;
-        setTimeout(function () {
-          container.classList.remove(copiedClass);
-          iconEl.innerHTML = ICON_COPY_SVG;
-        }, ms);
-      });
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        return;
+      }
+      container.classList.add(copiedClass);
+      iconEl.innerHTML = ICON_CHECK_SVG;
+      setTimeout(function () {
+        container.classList.remove(copiedClass);
+        iconEl.innerHTML = ICON_COPY_SVG;
+      }, ms);
     });
   }
 
   // ─── State ───────────────────────────────────────────
   /** @type {"inactive"|"active"|"editing"} */
-  var state = "inactive";
+  let state = "inactive";
   /** @type {string} */
-  var _EDIT_MODE_KEY = "lt_edit_mode";
+  const _EDIT_MODE_KEY = "lt_edit_mode";
 
   /**
    * Persist edit-mode flag to sessionStorage and reload the page.
@@ -264,34 +316,34 @@
    */
   function _updateDomInPlace(msgid, context, displayText, isPreviewEntry) {
     // Update inline text spans
-    var spans = document.querySelectorAll(".lt-translatable");
-    for (var i = 0; i < spans.length; i++) {
-      var sp = spans[i];
+    const spans = document.querySelectorAll(".lt-translatable");
+    for (let i = 0; i < spans.length; i++) {
+      const sp = spans[i];
       if (sp.dataset.ltMsgid === msgid && (sp.dataset.ltContext || "") === context) {
         sp.textContent = displayText;
         if (isPreviewEntry) {
           sp.classList.add("lt-preview");
         } else {
           sp.classList.remove("lt-preview", "lt-selected");
-          var idx = selectedElements.indexOf(sp);
+          const idx = selectedElements.indexOf(sp);
           if (idx !== -1) selectedElements.splice(idx, 1);
         }
       }
     }
 
     // Update attribute translations
-    var attrEls = document.querySelectorAll("[data-lt-attrs]");
-    for (var j = 0; j < attrEls.length; j++) {
+    const attrEls = document.querySelectorAll("[data-lt-attrs]");
+    for (let j = 0; j < attrEls.length; j++) {
       try {
-        var attrs = JSON.parse(attrEls[j].dataset.ltAttrs || "[]");
-        for (var k = 0; k < attrs.length; k++) {
+        const attrs = JSON.parse(attrEls[j].dataset.ltAttrs || "[]");
+        for (let k = 0; k < attrs.length; k++) {
           if (attrs[k].m === msgid && (attrs[k].c || "") === context) {
             attrEls[j].setAttribute(attrs[k].a, displayText);
             if (isPreviewEntry) {
               attrEls[j].classList.add("lt-preview");
             } else {
               attrEls[j].classList.remove("lt-preview", "lt-selected");
-              var aidx = selectedElements.indexOf(attrEls[j]);
+              const aidx = selectedElements.indexOf(attrEls[j]);
               if (aidx !== -1) selectedElements.splice(aidx, 1);
             }
             break;
@@ -303,8 +355,8 @@
     // Update PREVIEW_ENTRIES and action bar
     if (PREVIEW) {
       if (isPreviewEntry) {
-        var found = false;
-        for (var p = 0; p < PREVIEW_ENTRIES.length; p++) {
+        let found = false;
+        for (let p = 0; p < PREVIEW_ENTRIES.length; p++) {
           if (PREVIEW_ENTRIES[p].m === msgid && (PREVIEW_ENTRIES[p].c || "") === context) {
             found = true;
             break;
@@ -321,48 +373,51 @@
   }
 
   /** @type {HTMLDialogElement|null} */
-  var dialog = null;
+  let dialog = null;
   /** @type {HTMLElement|null} */
-  var currentSpan = null;
+  let currentSpan = null;
   /** @type {string|null} - HTML attribute name when editing an attribute translation. */
-  var currentAttrName = null;
+  let currentAttrName = null;
   /** @type {boolean} */
-  var historyOpen = false;
+  let historyOpen = false;
+  /** @type {string} */
+  let _iconHistory = "";
+  /** @type {string} */
+  let _iconBack = "";
 
   // ─── Editor State (tabbed editing) ───────────────────
   /** @type {TranslationData|null} - Cached API data for the current edit session. */
-  var _editData = null;
+  let _editData = null;
   /** @type {string} - Currently selected language tab for editing. */
-  var _editLang = "";
+  let _editLang = "";
   /** @type {Object<string, string>} - Accumulated edited text values keyed by language. */
-  var _editedValues = {};
+  let _editedValues = {};
   /** @type {Object<string, boolean>} - Accumulated active flags keyed by language. */
-  var _editedActiveFlags = {};
+  let _editedActiveFlags = {};
   /** @type {Object<string, string>} - Snapshot of initial text values from API (for dirty detection). */
-  var _originalValues = {};
+  let _originalValues = {};
   /** @type {Object<string, boolean>} - Snapshot of initial active flags from API (for dirty detection). */
-  var _originalActiveFlags = {};
+  let _originalActiveFlags = {};
   /** @type {Object<string, boolean>} - Languages marked for override deletion (submitted on Save). */
-  var _deletionsMarked = {};
+  let _deletionsMarked = {};
 
   // ─── API Client ──────────────────────────────────────
 
-  var api = {
+  const api = {
     /**
      * Fetch all language translations for a single msgid.
      * @param {string} msgid  - The gettext message identifier.
      * @param {string} context - The gettext context (empty string if none).
      * @returns {Promise<TranslationData>}
      */
-    getTranslations: function (msgid, context) {
-      var params = new URLSearchParams({ msgid: msgid, context: context });
-      return fetch(API_BASE + "/translations/?" + params, {
+    getTranslations: async function (msgid, context) {
+      const params = new URLSearchParams({ msgid: msgid, context: context });
+      const resp = await fetch(API_BASE + "/translations/?" + params, {
         credentials: "same-origin",
         cache: "no-store",
-      }).then(function (resp) {
-        if (!resp.ok) throw new Error("GET failed: " + resp.status);
-        return resp.json();
       });
+      if (!resp.ok) throw new Error("GET failed: " + resp.status);
+      return resp.json();
     },
 
     /**
@@ -371,10 +426,10 @@
      * @param {string}                context      - The gettext context.
      * @param {Object<string,string>} translations - Map of language code to msgstr value.
      * @param {Object<string,boolean>} activeFlags - Map of language code to active/inactive flag.
-     * @returns {Promise<Object>} Server confirmation payload.
+     * @returns {Promise<SaveResponse>}
      */
-    saveTranslations: function (msgid, context, translations, activeFlags) {
-      return fetch(API_BASE + "/translations/save/", {
+    saveTranslations: async function (msgid, context, translations, activeFlags) {
+      const resp = await fetch(API_BASE + "/translations/save/", {
         method: "POST",
         credentials: "same-origin",
         headers: {
@@ -388,21 +443,19 @@
           active_flags: activeFlags || {},
           page_language: (document.documentElement.lang || "").toLowerCase(),
         }),
-      }).then(function (resp) {
-        if (!resp.ok) {
-          return resp
-            .json()
-            .catch(function () {
-              return {};
-            })
-            .then(function (err) {
-              var e = new Error(err.error || "POST failed: " + resp.status);
-              e.details = err.details || null;
-              throw e;
-            });
-        }
-        return resp.json();
       });
+      if (!resp.ok) {
+        /** @type {Record<string, unknown>} */
+        let errData;
+        try { errData = await resp.json(); } catch { errData = {}; }
+        /** @type {ApiError} */
+        const apiErr = Object.assign(
+          new Error(/** @type {string} */ (errData.error) || "POST failed: " + resp.status),
+          { details: /** @type {Object<string, string[]>|null} */ (errData.details) || null }
+        );
+        throw apiErr;
+      }
+      return /** @type {Promise<SaveResponse>} */ (resp.json());
     },
 
     /**
@@ -411,14 +464,13 @@
      * @param {string} context - The gettext context.
      * @returns {Promise<{history: HistoryEntry[]}>}
      */
-    getHistory: function (msgid, context) {
-      var params = new URLSearchParams({ msgid: msgid, context: context });
-      return fetch(API_BASE + "/translations/history/?" + params, {
+    getHistory: async function (msgid, context) {
+      const params = new URLSearchParams({ msgid: msgid, context: context });
+      const resp = await fetch(API_BASE + "/translations/history/?" + params, {
         credentials: "same-origin",
-      }).then(function (resp) {
-        if (!resp.ok) throw new Error("GET failed: " + resp.status);
-        return resp.json();
       });
+      if (!resp.ok) throw new Error("GET failed: " + resp.status);
+      return resp.json();
     },
 
     /**
@@ -426,16 +478,16 @@
      * @param {string}   msgid     - The gettext message identifier.
      * @param {string}   context   - The gettext context.
      * @param {string[]} languages - Language codes to delete.
-     * @returns {Promise<{ok:boolean, deleted:number}>}
+     * @returns {Promise<DeleteResponse>}
      */
-    deleteTranslation: function (msgid, context, languages) {
-      var payload = {
+    deleteTranslation: async function (msgid, context, languages) {
+      const payload = {
         msgid: msgid,
         context: context,
         page_language: (document.documentElement.lang || "").toLowerCase(),
       };
       if (languages && languages.length) payload.languages = languages;
-      return fetch(API_BASE + "/translations/delete/", {
+      const resp = await fetch(API_BASE + "/translations/delete/", {
         method: "POST",
         credentials: "same-origin",
         headers: {
@@ -443,29 +495,24 @@
           "X-CSRFToken": CSRF_TOKEN,
         },
         body: JSON.stringify(payload),
-      }).then(function (resp) {
-        if (!resp.ok) {
-          return resp
-            .json()
-            .catch(function () {
-              return {};
-            })
-            .then(function (err) {
-              throw new Error(err.error || "POST failed: " + resp.status);
-            });
-        }
-        return resp.json();
       });
+      if (!resp.ok) {
+        /** @type {Record<string, unknown>} */
+        let errData;
+        try { errData = await resp.json(); } catch { errData = {}; }
+        throw new Error(/** @type {string} */ (errData.error) || "POST failed: " + resp.status);
+      }
+      return /** @type {Promise<DeleteResponse>} */ (resp.json());
     },
 
     /**
      * Bulk-activate translations for the given msgid/context pairs for a single language.
      * @param {Array<{msgid:string, context:string}>} msgids - Entries to activate.
      * @param {string} language - Language code to activate for.
-     * @returns {Promise<{ok:boolean, activated:number}>}
+     * @returns {Promise<BulkActivateResponse>}
      */
-    bulkActivate: function (msgids, language) {
-      return fetch(API_BASE + "/translations/bulk-activate/", {
+    bulkActivate: async function (msgids, language) {
+      const resp = await fetch(API_BASE + "/translations/bulk-activate/", {
         method: "POST",
         credentials: "same-origin",
         headers: {
@@ -473,19 +520,14 @@
           "X-CSRFToken": CSRF_TOKEN,
         },
         body: JSON.stringify({ msgids: msgids, language: language }),
-      }).then(function (resp) {
-        if (!resp.ok) {
-          return resp
-            .json()
-            .catch(function () {
-              return {};
-            })
-            .then(function (err) {
-              throw new Error(err.error || "POST failed: " + resp.status);
-            });
-        }
-        return resp.json();
       });
+      if (!resp.ok) {
+        /** @type {Record<string, unknown>} */
+        let errData;
+        try { errData = await resp.json(); } catch { errData = {}; }
+        throw new Error(/** @type {string} */ (errData.error) || "POST failed: " + resp.status);
+      }
+      return /** @type {Promise<BulkActivateResponse>} */ (resp.json());
     },
   };
 
@@ -498,10 +540,10 @@
    */
   function showToast(message, type) {
     type = type || "success";
-    var existing = document.querySelector(".lt-toast");
+    const existing = document.querySelector(".lt-toast");
     if (existing) existing.remove();
 
-    var toast = document.createElement("div");
+    const toast = document.createElement("div");
     toast.className = "lt-toast lt-toast--" + type;
     toast.textContent = message;
     document.body.appendChild(toast);
@@ -530,15 +572,15 @@
 
     dialog = document.createElement("dialog");
     dialog.className = "lt-dialog";
-    var ICON_HISTORY =
+    const ICON_HISTORY =
       '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">' +
       '<path d="M8 3.5V8L10.5 10.5M14 8A6 6 0 1 1 2 8a6 6 0 0 1 12 0Z" ' +
       'stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-    var ICON_BACK =
+    const ICON_BACK =
       '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">' +
       '<path d="M10 12L6 8L10 4" stroke="currentColor" stroke-width="1.5" ' +
       'stroke-linecap="round" stroke-linejoin="round"/></svg>';
-    var ICON_CLOSE =
+    const ICON_CLOSE =
       '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">' +
       '<path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" ' +
       'stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -570,9 +612,9 @@
       '<div class="lt-dialog__loading">Loading translations...</div>' +
       "</div>";
 
-    // Store icon templates on the dialog for toggling
-    dialog._ltIconHistory = ICON_HISTORY;
-    dialog._ltIconBack = ICON_BACK;
+    // Store icon templates for toggling
+    _iconHistory = ICON_HISTORY;
+    _iconBack = ICON_BACK;
 
     document.body.appendChild(dialog);
 
@@ -618,9 +660,9 @@
    *
    * @param {HTMLElement}   element   - The DOM element that was clicked.
    * @param {AttrInfo}      [attrInfo] - Attribute descriptor; omit for inline text.
-   * @returns {void}
+   * @returns {Promise<void>}
    */
-  function openModal(element, attrInfo) {
+  async function openModal(element, attrInfo) {
     createDialog();
     currentSpan = element;
     currentAttrName = attrInfo ? attrInfo.a : null;
@@ -628,25 +670,25 @@
     historyOpen = false;
     _showEditView();
 
-    var msgid = attrInfo ? attrInfo.m : element.dataset.ltMsgid;
-    var context = attrInfo ? attrInfo.c : (element.dataset.ltContext || "");
+    const msgid = attrInfo ? attrInfo.m : element.dataset.ltMsgid;
+    const context = attrInfo ? attrInfo.c : (element.dataset.ltContext || "");
 
     // Show loading state
     dialog.querySelector(".lt-dialog__fields").innerHTML = "";
     dialog.querySelector(".lt-dialog__loading").style.display = "block";
-    var msgidEl = dialog.querySelector(".lt-dialog__msgid");
+    const msgidEl = dialog.querySelector(".lt-dialog__msgid");
     msgidEl.dataset.msgid = msgid;
     msgidEl.innerHTML = "";
 
-    var msgidLabel = document.createElement("span");
+    const msgidLabel = document.createElement("span");
     msgidLabel.className = "lt-dialog__msgid-label";
     msgidLabel.textContent = currentAttrName ? "msgid · " + currentAttrName : "msgid";
 
-    var msgidText = document.createElement("span");
+    const msgidText = document.createElement("span");
     msgidText.className = "lt-dialog__msgid-text";
     msgidText.textContent = msgid;
 
-    var copyIcon = document.createElement("span");
+    const copyIcon = document.createElement("span");
     copyIcon.className = "lt-dialog__msgid-icon";
     copyIcon.title = "Copy msgid";
 
@@ -664,15 +706,13 @@
 
     dialog.showModal();
 
-    api
-      .getTranslations(msgid, context)
-      .then(function (data) {
-        renderFields(data);
-      })
-      .catch(function (err) {
-        showToast("Failed to load translations: " + err.message, "error");
-        closeModal();
-      });
+    try {
+      const data = await api.getTranslations(msgid, context);
+      renderFields(data);
+    } catch (err) {
+      showToast("Failed to load translations: " + err.message, "error");
+      closeModal();
+    }
   }
 
   /**
@@ -686,7 +726,7 @@
     dialog.querySelector(".lt-btn--save").disabled = false;
 
     // Show translator hint if available
-    var hintEl = dialog.querySelector(".lt-dialog__hint");
+    const hintEl = dialog.querySelector(".lt-dialog__hint");
     if (data.hint) {
       hintEl.textContent = data.hint;
       hintEl.style.display = "block";
@@ -702,21 +742,21 @@
     _originalValues = {};
     _originalActiveFlags = {};
 
-    var poDefaults = data.defaults || {};
+    const poDefaults = data.defaults || {};
 
     // Initialize values from API data
-    for (var i = 0; i < LANGUAGES.length; i++) {
-      var lang = LANGUAGES[i];
-      var entry = data.translations[lang] || { msgstr: "", fuzzy: false };
+    for (let i = 0; i < LANGUAGES.length; i++) {
+      const lang = LANGUAGES[i];
+      const entry = data.translations[lang] || { msgstr: "", fuzzy: false };
       _editedValues[lang] = entry.msgstr;
-      var hasOverride = !!entry.has_override;
+      const hasOverride = !!entry.has_override;
       _editedActiveFlags[lang] = hasOverride ? entry.is_active !== false : ACTIVE_BY_DEFAULT;
       _originalValues[lang] = entry.msgstr;
       _originalActiveFlags[lang] = _editedActiveFlags[lang];
     }
 
     // Default edit language: current page language if configured, else first
-    var pageLang = (document.documentElement.lang || "").toLowerCase();
+    const pageLang = (document.documentElement.lang || "").toLowerCase();
     _editLang = LANGUAGES.indexOf(pageLang) !== -1 ? pageLang : LANGUAGES[0];
 
     _renderEditorTabs();
@@ -729,7 +769,7 @@
    * @returns {void}
    */
   function _renderEditorTabs() {
-    var tabBar = dialog.querySelector(".lt-editor__tabs");
+    const tabBar = dialog.querySelector(".lt-editor__tabs");
     tabBar.innerHTML = "";
 
     if (LANGUAGES.length <= 1) {
@@ -739,11 +779,11 @@
 
     tabBar.style.display = "";
 
-    for (var i = 0; i < LANGUAGES.length; i++) {
+    for (let i = 0; i < LANGUAGES.length; i++) {
       (function (lang) {
-        var meta = LANG_META[lang];
-        var entry = (_editData && _editData.translations[lang]) || {};
-        var pill = document.createElement("button");
+        const meta = LANG_META[lang];
+        const entry = (_editData && _editData.translations[lang]) || {};
+        const pill = document.createElement("button");
         pill.type = "button";
         pill.className = "lt-editor__tab" + (_editLang === lang ? " lt-editor__tab--active" : "");
         if (entry.has_override && entry.is_active === false) {
@@ -771,8 +811,8 @@
     _editLang = newLang;
 
     // Update tab active states without full re-render
-    var tabs = dialog.querySelectorAll(".lt-editor__tab");
-    for (var i = 0; i < tabs.length; i++) {
+    const tabs = dialog.querySelectorAll(".lt-editor__tab");
+    for (let i = 0; i < tabs.length; i++) {
       if (tabs[i].dataset.lang === newLang) {
         tabs[i].classList.add("lt-editor__tab--active");
       } else {
@@ -791,11 +831,11 @@
    */
   function _persistCurrentEdit() {
     if (!_editLang || !dialog) return;
-    var textarea = dialog.querySelector("#lt-input-" + _editLang);
+    const textarea = dialog.querySelector("#lt-input-" + _editLang);
     if (textarea) {
       _editedValues[_editLang] = textarea.value;
     }
-    var toggle = dialog.querySelector("#lt-active-" + _editLang);
+    const toggle = dialog.querySelector("#lt-active-" + _editLang);
     if (toggle) {
       _editedActiveFlags[_editLang] = toggle.checked;
     }
@@ -820,16 +860,16 @@
    */
   function _updateTabDirtyDots() {
     if (!dialog || LANGUAGES.length <= 1) return;
-    var tabs = dialog.querySelectorAll(".lt-editor__tab");
-    for (var i = 0; i < tabs.length; i++) {
-      var lang = tabs[i].dataset.lang;
-      var markedForDelete = !!_deletionsMarked[lang];
-      var dirty;
-      var activeNow;
+    const tabs = dialog.querySelectorAll(".lt-editor__tab");
+    for (let i = 0; i < tabs.length; i++) {
+      const lang = tabs[i].dataset.lang;
+      const markedForDelete = !!_deletionsMarked[lang];
+      let dirty;
+      let activeNow;
       if (lang === _editLang) {
         // Read live from DOM for the active tab
-        var ta = dialog.querySelector("#lt-input-" + lang);
-        var cb = dialog.querySelector("#lt-active-" + lang);
+        const ta = dialog.querySelector("#lt-input-" + lang);
+        const cb = dialog.querySelector("#lt-active-" + lang);
         dirty = markedForDelete ||
                 (ta && ta.value !== _originalValues[lang]) ||
                 (cb && cb.checked !== _originalActiveFlags[lang]);
@@ -850,7 +890,7 @@
       } else {
         tabs[i].classList.remove("lt-editor__tab--marked-delete");
         // Amber dot: override exists on server but current active state is off
-        var entry = (_editData && _editData.translations[lang]) || {};
+        const entry = (_editData && _editData.translations[lang]) || {};
         if (entry.has_override && !activeNow) {
           tabs[i].classList.add("lt-editor__tab--inactive-override");
         } else {
@@ -865,16 +905,16 @@
    * @returns {void}
    */
   function _renderEditorPanels() {
-    var container = dialog.querySelector(".lt-dialog__fields");
+    const container = dialog.querySelector(".lt-dialog__fields");
     container.innerHTML = "";
 
-    var wrapper = document.createElement("div");
+    const wrapper = document.createElement("div");
     wrapper.className = "lt-editor__single";
     _renderEditPanel(wrapper);
     container.appendChild(wrapper);
 
     // Focus and auto-resize textarea
-    var ta = container.querySelector("textarea");
+    const ta = container.querySelector("textarea");
     if (ta) {
       ta.focus();
       ta.style.height = "auto";
@@ -892,16 +932,16 @@
    */
   function _renderEditPanel(container) {
     container.innerHTML = "";
-    var lang = _editLang;
-    var entry = (_editData.translations[lang]) || { msgstr: "", fuzzy: false };
-    var poDefaults = _editData.defaults || {};
-    var poDefault = poDefaults[lang] || "";
-    var hasOverride = !!entry.has_override;
-    var markedForDelete = !!_deletionsMarked[lang];
+    const lang = _editLang;
+    const entry = (_editData.translations[lang]) || { msgstr: "", fuzzy: false };
+    const poDefaults = _editData.defaults || {};
+    const poDefault = poDefaults[lang] || "";
+    const hasOverride = !!entry.has_override;
+    const markedForDelete = !!_deletionsMarked[lang];
 
     // Show language label in single-language mode (no tabs to indicate it)
     if (LANGUAGES.length <= 1) {
-      var langLabelEl = document.createElement("label");
+      const langLabelEl = document.createElement("label");
       langLabelEl.className = "lt-field__label";
       langLabelEl.textContent = langLabel(lang);
       langLabelEl.setAttribute("for", "lt-input-" + lang);
@@ -910,24 +950,24 @@
 
     // .po default hint (click to copy)
     if (poDefault) {
-      var poWrap = document.createElement("div");
+      const poWrap = document.createElement("div");
       poWrap.className = "lt-field__po-wrap";
 
-      var poHeader = document.createElement("div");
+      const poHeader = document.createElement("div");
       poHeader.className = "lt-field__po-header";
 
-      var poLabel = document.createElement("span");
+      const poLabel = document.createElement("span");
       poLabel.className = "lt-field__po-label";
       poLabel.textContent = "Default";
 
-      var poCopyIcon = document.createElement("span");
+      const poCopyIcon = document.createElement("span");
       poCopyIcon.className = "lt-field__po-copy";
       poCopyIcon.title = "Copy default";
 
       poHeader.appendChild(poLabel);
       poHeader.appendChild(poCopyIcon);
 
-      var poText = document.createElement("div");
+      const poText = document.createElement("div");
       poText.className = "lt-field__po-default";
       poText.textContent = poDefault;
 
@@ -944,7 +984,7 @@
     }
 
     // Textarea
-    var textarea = document.createElement("textarea");
+    const textarea = document.createElement("textarea");
     textarea.className = "lt-field__input";
     textarea.id = "lt-input-" + lang;
     textarea.name = lang;
@@ -959,25 +999,25 @@
     }
 
     // Active toggle
-    var isActive = _editedActiveFlags[lang];
-    var currentVal = _editedValues[lang] || "";
+    const isActive = _editedActiveFlags[lang];
+    const currentVal = _editedValues[lang] || "";
 
-    var toggleWrap = document.createElement("label");
+    const toggleWrap = document.createElement("label");
     toggleWrap.className = "lt-field__toggle";
     if (markedForDelete || (!hasOverride && currentVal === poDefault)) {
       toggleWrap.style.display = "none";
     }
 
-    var checkbox = document.createElement("input");
+    const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.className = "lt-field__toggle-input";
     checkbox.id = "lt-active-" + lang;
     checkbox.checked = isActive;
 
-    var slider = document.createElement("span");
+    const slider = document.createElement("span");
     slider.className = "lt-field__toggle-slider";
 
-    var toggleLabelEl = document.createElement("span");
+    const toggleLabelEl = document.createElement("span");
     toggleLabelEl.className = "lt-field__toggle-label";
     toggleLabelEl.textContent = isActive ? "Active" : "Inactive";
 
@@ -994,7 +1034,7 @@
     // Show/hide toggle + auto-resize on input
     (function (ta, toggle, defaultVal, cb, defaultActive, hadOverride) {
       function syncToggle() {
-        var differs = ta.value !== defaultVal;
+        const differs = ta.value !== defaultVal;
         toggle.style.display = (differs || hadOverride) ? "" : "none";
         if (!differs && !hadOverride) {
           cb.checked = defaultActive;
@@ -1023,7 +1063,7 @@
    * @returns {void}
    */
   function showDialogError(message, details) {
-    var errorEl = dialog.querySelector(".lt-dialog__error");
+    const errorEl = dialog.querySelector(".lt-dialog__error");
     if (!message) {
       errorEl.innerHTML = "";
       errorEl.style.display = "none";
@@ -1032,10 +1072,10 @@
     errorEl.innerHTML = "";
     if (details) {
       // Structured per-language errors: {lang: ["missing %(key)s", ...]}
-      for (var lang in details) {
-        var line = document.createElement("div");
-        var meta = LANG_META[lang];
-        var label = meta ? meta.flag + " " + meta.name : lang.toUpperCase();
+      for (const lang in details) {
+        const line = document.createElement("div");
+        const meta = LANG_META[lang];
+        const label = meta ? meta.flag + " " + meta.name : lang.toUpperCase();
         line.textContent = label + ": " + details[lang].join(", ");
         errorEl.appendChild(line);
       }
@@ -1053,10 +1093,10 @@
    */
   function _syncDeleteOverride() {
     if (!dialog) return;
-    var btn = dialog.querySelector(".lt-btn--delete-override");
+    const btn = dialog.querySelector(".lt-btn--delete-override");
     if (!btn || !_editData) return;
-    var lang = _editLang;
-    var entry = (_editData.translations[lang]) || {};
+    const lang = _editLang;
+    const entry = (_editData.translations[lang]) || {};
 
     if (!entry.has_override) {
       btn.style.display = "none";
@@ -1064,7 +1104,7 @@
     }
 
     btn.style.display = "";
-    var marked = !!_deletionsMarked[lang];
+    const marked = !!_deletionsMarked[lang];
 
     if (marked) {
       btn.innerHTML = ICON_CHECKBOX_CHECKED_SVG + " Delete Override";
@@ -1082,7 +1122,7 @@
    */
   function handleDeleteOverride() {
     _persistCurrentEdit();
-    var lang = _editLang;
+    const lang = _editLang;
     if (_deletionsMarked[lang]) {
       delete _deletionsMarked[lang];
     } else {
@@ -1092,8 +1132,13 @@
     _updateTabDirtyDots();
   }
 
-  function handleSave() {
-    var saveBtn = dialog.querySelector(".lt-btn--save");
+  /**
+   * Collect all edited values, deletions, and active flags, then persist via API.
+   * Handles both save and delete operations in parallel.
+   * @returns {Promise<void>}
+   */
+  async function handleSave() {
+    const saveBtn = dialog.querySelector(".lt-btn--save");
     saveBtn.disabled = true;
     saveBtn.textContent = "Saving...";
     showDialogError(null);
@@ -1101,30 +1146,26 @@
     // Capture whatever is in the current textarea/toggle before sending
     _persistCurrentEdit();
 
-    var attrData = currentAttrName ? _getAttrInfo(currentSpan, currentAttrName) : null;
-    var msgid = attrData ? attrData.m : currentSpan.dataset.ltMsgid;
-    var context = attrData ? attrData.c : (currentSpan.dataset.ltContext || "");
+    const attrData = currentAttrName ? _getAttrInfo(currentSpan, currentAttrName) : null;
+    const msgid = attrData ? attrData.m : currentSpan.dataset.ltMsgid;
+    const context = attrData ? attrData.c : (currentSpan.dataset.ltContext || "");
 
     // Separate languages into save vs delete groups
-    var translations = {};
-    var activeFlags = {};
-    var activeFlagChanged = false;
-    var langsToDelete = [];
-    for (var i = 0; i < LANGUAGES.length; i++) {
-      var lang = LANGUAGES[i];
+    const translations = {};
+    const activeFlags = {};
+    const langsToDelete = [];
+    for (let i = 0; i < LANGUAGES.length; i++) {
+      const lang = LANGUAGES[i];
       if (_deletionsMarked[lang]) {
         langsToDelete.push(lang);
         continue;
       }
       translations[lang] = _editedValues[lang] !== undefined ? _editedValues[lang] : "";
       activeFlags[lang] = _editedActiveFlags[lang] !== undefined ? _editedActiveFlags[lang] : ACTIVE_BY_DEFAULT;
-      if (activeFlags[lang] !== (_originalActiveFlags[lang] !== undefined ? _originalActiveFlags[lang] : ACTIVE_BY_DEFAULT)) {
-        activeFlagChanged = true;
-      }
     }
 
     // Build parallel work: save non-deleted languages + delete marked ones
-    var work = [];
+    const work = [];
     if (Object.keys(translations).length > 0) {
       work.push(api.saveTranslations(msgid, context, translations, activeFlags));
     }
@@ -1139,25 +1180,24 @@
       return;
     }
 
-    Promise.all(work)
-      .then(function (results) {
-        // Use display from the last response (most current state)
-        var display = null;
-        for (var r = 0; r < results.length; r++) {
-          if (results[r] && results[r].display) display = results[r].display;
-        }
-        if (display) {
-          _updateDomInPlace(msgid, context, display.text, display.is_preview_entry);
-        }
-        saveBtn.disabled = false;
-        saveBtn.textContent = "Save";
-        closeModal();
-      })
-      .catch(function (err) {
-        showDialogError(err.message, err.details || null);
-        saveBtn.disabled = false;
-        saveBtn.textContent = "Save";
-      });
+    try {
+      const results = await Promise.all(work);
+      // Use display from the last response (most current state)
+      let display = null;
+      for (let r = 0; r < results.length; r++) {
+        if (results[r] && results[r].display) display = results[r].display;
+      }
+      if (display) {
+        _updateDomInPlace(msgid, context, display.text, display.is_preview_entry);
+      }
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Save";
+      closeModal();
+    } catch (err) {
+      showDialogError(err.message, err.details || null);
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Save";
+    }
   }
 
   /**
@@ -1168,8 +1208,8 @@
    */
   function _getAttrInfo(element, attrName) {
     try {
-      var attrs = JSON.parse(element.dataset.ltAttrs || "[]");
-      for (var i = 0; i < attrs.length; i++) {
+      const attrs = JSON.parse(element.dataset.ltAttrs || "[]");
+      for (let i = 0; i < attrs.length; i++) {
         if (attrs[i].a === attrName) return attrs[i];
       }
     } catch (e) { /* ignore parse errors */ }
@@ -1179,9 +1219,9 @@
   // ─── History Panel ──────────────────────────────────
 
   /** @type {HistoryEntry[]} - Cached entries from the last history fetch. */
-  var _historyData = [];
+  let _historyData = [];
   /** @type {string} - Active language filter ("" = show all languages). */
-  var _historyLangFilter = "";
+  let _historyLangFilter = "";
 
   /**
    * Read the msgid and context for the element currently being edited,
@@ -1189,7 +1229,7 @@
    * @returns {{msgid: string, context: string}}
    */
   function _getMsgidAndContext() {
-    var attrData = currentAttrName ? _getAttrInfo(currentSpan, currentAttrName) : null;
+    const attrData = currentAttrName ? _getAttrInfo(currentSpan, currentAttrName) : null;
     return {
       msgid: attrData ? attrData.m : currentSpan.dataset.ltMsgid,
       context: attrData ? attrData.c : (currentSpan.dataset.ltContext || ""),
@@ -1216,11 +1256,11 @@
   function _showEditView() {
     if (!dialog) return;
     dialog.querySelector(".lt-dialog__title").textContent = "Edit Translation";
-    var btn = dialog.querySelector(".lt-btn--history");
-    btn.innerHTML = dialog._ltIconHistory;
+    const btn = dialog.querySelector(".lt-btn--history");
+    btn.innerHTML = _iconHistory;
     btn.title = "View edit history";
 
-    var tabBar = dialog.querySelector(".lt-editor__tabs");
+    const tabBar = dialog.querySelector(".lt-editor__tabs");
     if (tabBar) tabBar.style.display = LANGUAGES.length > 1 ? "" : "none";
 
     dialog.querySelector(".lt-dialog__fields").style.display = "";
@@ -1235,19 +1275,19 @@
 
   /**
    * Switch the dialog chrome to show the history timeline, fetching data from the API.
-   * @returns {void}
+   * @returns {Promise<void>}
    */
-  function _showHistoryView() {
+  async function _showHistoryView() {
     if (!dialog) return;
     dialog.querySelector(".lt-dialog__title").textContent = "Edit History";
-    var btn = dialog.querySelector(".lt-btn--history");
-    btn.innerHTML = dialog._ltIconBack;
+    const btn = dialog.querySelector(".lt-btn--history");
+    btn.innerHTML = _iconBack;
     btn.title = "Back to editing";
 
     // Persist current edits before switching views
     _persistCurrentEdit();
 
-    var tabBar = dialog.querySelector(".lt-editor__tabs");
+    const tabBar = dialog.querySelector(".lt-editor__tabs");
     if (tabBar) tabBar.style.display = "none";
 
     dialog.querySelector(".lt-dialog__fields").style.display = "none";
@@ -1255,7 +1295,7 @@
     dialog.querySelector(".lt-dialog__actions").style.display = "none";
     dialog.querySelector(".lt-dialog__error").style.display = "none";
 
-    var historyEl = dialog.querySelector(".lt-dialog__history");
+    const historyEl = dialog.querySelector(".lt-dialog__history");
     historyEl.style.display = "block";
     historyEl.innerHTML =
       '<div class="lt-history__loading">Loading history\u2026</div>';
@@ -1263,21 +1303,19 @@
     _historyLangFilter = "";
     _historyData = [];
 
-    var info = _getMsgidAndContext();
-    api
-      .getHistory(info.msgid, info.context)
-      .then(function (data) {
-        _historyData = data.history || [];
-        _renderHistoryPanel(historyEl);
-      })
-      .catch(function () {
-        historyEl.innerHTML =
-          '<div class="lt-history__empty">Failed to load history.</div>';
-      });
+    const info = _getMsgidAndContext();
+    try {
+      const data = await api.getHistory(info.msgid, info.context);
+      _historyData = data.history || [];
+      _renderHistoryPanel(historyEl);
+    } catch {
+      historyEl.innerHTML =
+        '<div class="lt-history__empty">Failed to load history.</div>';
+    }
   }
 
   /** @type {Object<string, string>} - Human-readable labels for history action types. */
-  var _ACTION_LABELS = {
+  const _ACTION_LABELS = {
     create: "Created",
     update: "Updated",
     "delete": "Deleted",
@@ -1286,7 +1324,7 @@
   };
 
   /** @type {Object<string, string>} - Inline SVG markup for each history action type. */
-  var _ACTION_ICONS = {
+  const _ACTION_ICONS = {
     create: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>',
     update: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 11v2.5H5L13 5.5 10.5 3 2.5 11z"/><path d="M9 4.5l2.5 2.5"/></svg>',
     "delete": '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h10"/><path d="M6.5 4.5V3a.5.5 0 01.5-.5h2a.5.5 0 01.5.5v1.5"/><path d="M5 4.5V13a1 1 0 001 1h4a1 1 0 001-1V4.5"/></svg>',
@@ -1315,10 +1353,11 @@
     }
 
     // ── Language filter pills ──
-    var langs = [];
-    var langSet = {};
-    for (var k = 0; k < _historyData.length; k++) {
-      var l = _historyData[k].language;
+    const langs = [];
+    /** @type {Object<string, boolean>} */
+    const langSet = {};
+    for (let k = 0; k < _historyData.length; k++) {
+      const l = _historyData[k].language;
       if (!langSet[l]) {
         langSet[l] = true;
         langs.push(l);
@@ -1327,10 +1366,10 @@
     langs.sort();
 
     if (langs.length > 1) {
-      var filterBar = document.createElement("div");
+      const filterBar = document.createElement("div");
       filterBar.className = "lt-history__filters";
 
-      var allPill = document.createElement("button");
+      const allPill = document.createElement("button");
       allPill.type = "button";
       allPill.className = "lt-history__filter-pill" + (!_historyLangFilter ? " lt-history__filter-pill--active" : "");
       allPill.textContent = "All";
@@ -1340,10 +1379,10 @@
       });
       filterBar.appendChild(allPill);
 
-      for (var p = 0; p < langs.length; p++) {
+      for (let p = 0; p < langs.length; p++) {
         (function (code) {
-          var meta = LANG_META[code];
-          var pill = document.createElement("button");
+          const meta = LANG_META[code];
+          const pill = document.createElement("button");
           pill.type = "button";
           pill.className = "lt-history__filter-pill" + (_historyLangFilter === code ? " lt-history__filter-pill--active" : "");
           pill.textContent = meta ? meta.flag + " " + meta.name : code.toUpperCase();
@@ -1358,12 +1397,12 @@
     }
 
     // ── Filter entries ──
-    var filtered = _historyLangFilter
+    const filtered = _historyLangFilter
       ? _historyData.filter(function (e) { return e.language === _historyLangFilter; })
       : _historyData;
 
     if (filtered.length === 0) {
-      var emptyMsg = document.createElement("div");
+      const emptyMsg = document.createElement("div");
       emptyMsg.className = "lt-history__empty";
       emptyMsg.textContent = "No history for this language.";
       container.appendChild(emptyMsg);
@@ -1371,38 +1410,39 @@
     }
 
     // ── Timeline ──
-    var timeline = document.createElement("div");
+    const timeline = document.createElement("div");
     timeline.className = "lt-history__timeline";
 
     // Track the newest (current) entry per language to hide its Restore button
-    var newestPerLang = {};
-    for (var n = 0; n < filtered.length; n++) {
+    /** @type {Object<string, number>} */
+    const newestPerLang = {};
+    for (let n = 0; n < filtered.length; n++) {
       if (!newestPerLang[filtered[n].language]) {
         newestPerLang[filtered[n].language] = filtered[n].id;
       }
     }
 
-    for (var i = 0; i < filtered.length; i++) {
-      var entry = filtered[i];
-      var item = document.createElement("div");
+    for (let i = 0; i < filtered.length; i++) {
+      const entry = filtered[i];
+      const item = document.createElement("div");
       item.className = "lt-history__entry lt-history__entry--" + entry.action;
 
-      var header = document.createElement("div");
+      const header = document.createElement("div");
       header.className = "lt-history__entry-header";
 
       // Action icon (colored container — replaces text label)
-      var iconEl = document.createElement("span");
+      const iconEl = document.createElement("span");
       iconEl.className = "lt-history__icon lt-history__icon--" + entry.action;
       iconEl.innerHTML = _ACTION_ICONS[entry.action] || "";
       iconEl.title = _ACTION_LABELS[entry.action] || entry.action;
       header.appendChild(iconEl);
 
       // Flag (only when showing all languages)
-      var hasFlag = false;
+      let hasFlag = false;
       if (!_historyLangFilter) {
-        var langMeta = LANG_META[entry.language];
+        const langMeta = LANG_META[entry.language];
         if (langMeta) {
-          var flag = document.createElement("span");
+          const flag = document.createElement("span");
           flag.className = "lt-history__flag";
           flag.textContent = langMeta.flag;
           header.appendChild(flag);
@@ -1412,13 +1452,13 @@
 
       // Separator between flag and time (only when flag is visible)
       if (hasFlag) {
-        var sep1 = document.createElement("span");
+        const sep1 = document.createElement("span");
         sep1.className = "lt-history__sep";
         sep1.textContent = "\u00b7";
         header.appendChild(sep1);
       }
 
-      var time = document.createElement("span");
+      const time = document.createElement("span");
       time.className = "lt-history__time";
       time.textContent = _formatTime(entry.created_at);
       time.title = new Date(entry.created_at).toLocaleString();
@@ -1426,12 +1466,12 @@
 
       // User
       if (entry.user && entry.user !== "System") {
-        var sep2 = document.createElement("span");
+        const sep2 = document.createElement("span");
         sep2.className = "lt-history__sep";
         sep2.textContent = "\u00b7";
         header.appendChild(sep2);
 
-        var user = document.createElement("span");
+        const user = document.createElement("span");
         user.className = "lt-history__user";
         user.textContent = entry.user;
         header.appendChild(user);
@@ -1440,14 +1480,14 @@
       item.appendChild(header);
 
       // ── Content block ──
-      var isStateChange = entry.action === "activate" || entry.action === "deactivate";
+      const isStateChange = entry.action === "activate" || entry.action === "deactivate";
 
       if (isStateChange) {
-        var statusEl = document.createElement("div");
+        const statusEl = document.createElement("div");
         statusEl.className = "lt-history__status lt-history__status--" + entry.action;
-        var dot = document.createElement("span");
+        const dot = document.createElement("span");
         dot.className = "lt-history__status-dot";
-        var statusText = document.createElement("span");
+        const statusText = document.createElement("span");
         statusText.textContent = entry.action === "activate"
           ? "Translation enabled"
           : "Translation disabled";
@@ -1456,13 +1496,13 @@
         item.appendChild(statusEl);
       } else {
         // Build diff view
-        var diffView = null;
+        let diffView = null;
         if (entry.diff && entry.diff.length > 0) {
           diffView = document.createElement("div");
           diffView.className = "lt-history__diff";
-          for (var j = 0; j < entry.diff.length; j++) {
-            var seg = entry.diff[j];
-            var segSpan = document.createElement("span");
+          for (let j = 0; j < entry.diff.length; j++) {
+            const seg = entry.diff[j];
+            const segSpan = document.createElement("span");
             segSpan.className = "lt-diff lt-diff--" + seg.type;
             segSpan.textContent = seg.text;
             diffView.appendChild(segSpan);
@@ -1470,33 +1510,33 @@
         } else if (entry.action === "create" && entry.new_value) {
           diffView = document.createElement("div");
           diffView.className = "lt-history__diff";
-          var cSpan = document.createElement("span");
+          const cSpan = document.createElement("span");
           cSpan.className = "lt-diff lt-diff--insert";
           cSpan.textContent = entry.new_value;
           diffView.appendChild(cSpan);
         } else if (entry.action === "delete" && entry.old_value) {
           diffView = document.createElement("div");
           diffView.className = "lt-history__diff";
-          var dSpan = document.createElement("span");
+          const dSpan = document.createElement("span");
           dSpan.className = "lt-diff lt-diff--delete";
           dSpan.textContent = entry.old_value;
           diffView.appendChild(dSpan);
         }
 
         if (diffView) {
-          var hasValues = entry.old_value || entry.new_value;
+          const hasValues = entry.old_value || entry.new_value;
           if (hasValues) {
             // Toggle tabs: Diff / Value
-            var tabs = document.createElement("div");
+            const tabs = document.createElement("div");
             tabs.className = "lt-history__content-tabs";
 
-            var tDiff = document.createElement("button");
+            const tDiff = document.createElement("button");
             tDiff.type = "button";
             tDiff.className = "lt-history__content-tab lt-history__content-tab--active";
             tDiff.textContent = "Diff";
             tabs.appendChild(tDiff);
 
-            var tVal = document.createElement("button");
+            const tVal = document.createElement("button");
             tVal.type = "button";
             tVal.className = "lt-history__content-tab";
             tVal.textContent = "Value";
@@ -1506,13 +1546,13 @@
             item.appendChild(diffView);
 
             // Value view (hidden by default)
-            var valView = document.createElement("div");
+            const valView = document.createElement("div");
             valView.className = "lt-history__values";
             valView.style.display = "none";
             _buildValueSections(valView, entry);
             item.appendChild(valView);
 
-            // Toggle handlers (IIFE for var-scoped closure)
+            // Toggle handlers (IIFE for closure)
             (function (dt, vt, dv, vv) {
               dt.addEventListener("click", function () {
                 dt.classList.add("lt-history__content-tab--active");
@@ -1534,7 +1574,7 @@
       }
 
       // ── Restore button (text changes only, skip current state per language) ──
-      var isCurrent = newestPerLang[entry.language] === entry.id;
+      const isCurrent = newestPerLang[entry.language] === entry.id;
       if (!isStateChange && !isCurrent) {
         _appendRestoreControl(header, item, entry);
       }
@@ -1562,11 +1602,11 @@
     // Determine the value to restore:
     // CREATE/UPDATE → new_value (the state after this event)
     // DELETE → old_value (restore what was removed)
-    var restoreValue = entry.action === "delete" ? entry.old_value : entry.new_value;
+    const restoreValue = entry.action === "delete" ? entry.old_value : entry.new_value;
 
     // Restore button sits in the header row, right-aligned (like Revert in edit view).
     // When no lang tag precedes it, it needs margin-left:auto to push right.
-    var restoreBtn = document.createElement("button");
+    const restoreBtn = document.createElement("button");
     restoreBtn.type = "button";
     restoreBtn.className = "lt-history__restore-btn";
     restoreBtn.style.marginLeft = "auto";
@@ -1574,24 +1614,24 @@
     header.appendChild(restoreBtn);
 
     // Confirmation panel (hidden initially, appended to the item below header)
-    var confirm = document.createElement("div");
+    const confirm = document.createElement("div");
     confirm.className = "lt-history__restore-confirm";
     confirm.style.display = "none";
 
-    var confirmActions = document.createElement("div");
+    const confirmActions = document.createElement("div");
     confirmActions.className = "lt-history__restore-actions";
 
-    var activateBtn = document.createElement("button");
+    const activateBtn = document.createElement("button");
     activateBtn.type = "button";
     activateBtn.className = "lt-history__restore-activate";
     activateBtn.textContent = "Restore & activate";
 
-    var inactiveBtn = document.createElement("button");
+    const inactiveBtn = document.createElement("button");
     inactiveBtn.type = "button";
     inactiveBtn.className = "lt-history__restore-inactive";
     inactiveBtn.textContent = "Restore as inactive";
 
-    var cancelBtn = document.createElement("button");
+    const cancelBtn = document.createElement("button");
     cancelBtn.type = "button";
     cancelBtn.className = "lt-history__restore-cancel";
     cancelBtn.textContent = "Cancel";
@@ -1628,32 +1668,29 @@
    * @param {string}      value     - The msgstr value to restore.
    * @param {boolean}     activate  - Whether the restored value should be active.
    * @param {HTMLElement} confirmEl - The confirmation panel (buttons are disabled during request).
-   * @returns {void}
+   * @returns {Promise<void>}
    */
-  function _executeRestore(language, value, activate, confirmEl) {
+  async function _executeRestore(language, value, activate, confirmEl) {
     // Disable buttons during request
-    var buttons = confirmEl.querySelectorAll("button");
-    for (var b = 0; b < buttons.length; b++) buttons[b].disabled = true;
+    const buttons = confirmEl.querySelectorAll("button");
+    for (let b = 0; b < buttons.length; b++) buttons[b].disabled = true;
 
-    var info = _getMsgidAndContext();
-    var translations = {};
+    const info = _getMsgidAndContext();
+    const translations = {};
     translations[language] = value;
-    var activeFlags = {};
+    const activeFlags = {};
     activeFlags[language] = activate;
 
-    api
-      .saveTranslations(info.msgid, info.context, translations, activeFlags)
-      .then(function (data) {
-        if (data && data.display) {
-          _updateDomInPlace(info.msgid, info.context, data.display.text, data.display.is_preview_entry);
-        }
-        closeModal();
-      })
-      .catch(function (err) {
-        // Re-enable buttons on error
-        for (var b = 0; b < buttons.length; b++) buttons[b].disabled = false;
-        showToast("Restore failed: " + err.message, "error");
-      });
+    try {
+      const data = await api.saveTranslations(info.msgid, info.context, translations, activeFlags);
+      if (data && data.display) {
+        _updateDomInPlace(info.msgid, info.context, data.display.text, data.display.is_preview_entry);
+      }
+      closeModal();
+    } catch (err) {
+      for (let b = 0; b < buttons.length; b++) buttons[b].disabled = false;
+      showToast("Restore failed: " + err.message, "error");
+    }
   }
 
   /**
@@ -1664,12 +1701,12 @@
    */
   function _buildValueSections(container, entry) {
     if (entry.old_value) {
-      var sec1 = document.createElement("div");
+      const sec1 = document.createElement("div");
       sec1.className = "lt-history__value-section";
-      var lbl1 = document.createElement("div");
+      const lbl1 = document.createElement("div");
       lbl1.className = "lt-history__value-label";
       lbl1.textContent = "Before";
-      var txt1 = document.createElement("div");
+      const txt1 = document.createElement("div");
       txt1.className = "lt-history__value-text";
       txt1.textContent = entry.old_value;
       sec1.appendChild(lbl1);
@@ -1677,12 +1714,12 @@
       container.appendChild(sec1);
     }
     if (entry.new_value) {
-      var sec2 = document.createElement("div");
+      const sec2 = document.createElement("div");
       sec2.className = "lt-history__value-section";
-      var lbl2 = document.createElement("div");
+      const lbl2 = document.createElement("div");
       lbl2.className = "lt-history__value-label";
       lbl2.textContent = "After";
-      var txt2 = document.createElement("div");
+      const txt2 = document.createElement("div");
       txt2.className = "lt-history__value-text";
       txt2.textContent = entry.new_value;
       sec2.appendChild(lbl2);
@@ -1698,13 +1735,13 @@
    * @returns {string}
    */
   function _formatTime(isoString) {
-    var date = new Date(isoString);
-    var now = new Date();
-    var diffMs = now - date;
-    var diffSec = Math.floor(diffMs / 1000);
-    var diffMins = Math.floor(diffMs / 60000);
-    var diffHours = Math.floor(diffMs / 3600000);
-    var diffDays = Math.floor(diffMs / 86400000);
+    const date = new Date(isoString);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffSec = Math.floor(diffMs / 1000);
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
 
     if (diffSec < 10) return "just now";
     if (diffSec < 60) return diffSec + "s ago";
@@ -1734,7 +1771,7 @@
     _originalActiveFlags = {};
     _deletionsMarked = {};
     if (dialog) {
-      var delBtn = dialog.querySelector(".lt-btn--delete-override");
+      const delBtn = dialog.querySelector(".lt-btn--delete-override");
       if (delBtn) {
         delBtn.style.display = "none";
         delBtn.classList.remove("lt-btn--delete-override--checked");
@@ -1748,11 +1785,11 @@
   // ─── Preview Mode: Multi-select & Action Bar ────────
 
   /** @type {HTMLElement[]} */
-  var selectedElements = [];
+  let selectedElements = [];
   /** @type {HTMLElement|null} */
-  var actionBar = null;
+  let actionBar = null;
   /** @type {boolean} */
-  var actionBarConfirming = false;
+  let actionBarConfirming = false;
 
   /**
    * Toggle an element's selection state for bulk activation.
@@ -1760,7 +1797,7 @@
    * @returns {void}
    */
   function _toggleSelected(el) {
-    var idx = selectedElements.indexOf(el);
+    const idx = selectedElements.indexOf(el);
     if (idx !== -1) {
       selectedElements.splice(idx, 1);
       el.classList.remove("lt-selected");
@@ -1776,7 +1813,7 @@
    * @returns {void}
    */
   function _clearSelection() {
-    for (var i = 0; i < selectedElements.length; i++) {
+    for (let i = 0; i < selectedElements.length; i++) {
       selectedElements[i].classList.remove("lt-selected");
     }
     selectedElements = [];
@@ -1802,7 +1839,7 @@
   function _renderActionBarDefault() {
     if (!actionBar) return;
     actionBarConfirming = false;
-    var count = selectedElements.length;
+    const count = selectedElements.length;
     actionBar.innerHTML =
       '<span class="lt-action-bar__count">' + count + " selected</span>" +
       '<button type="button" class="lt-action-bar__activate">Activate</button>' +
@@ -1817,7 +1854,7 @@
    */
   function _updateActionBar() {
     if (!actionBar) return;
-    var count = selectedElements.length;
+    const count = selectedElements.length;
     if (count === 0) {
       actionBar.classList.remove("lt-action-bar--visible");
       actionBarConfirming = false;
@@ -1836,8 +1873,8 @@
    */
   function _showActivateConfirm() {
     actionBarConfirming = true;
-    var count = selectedElements.length;
-    var lang = (document.documentElement.lang || "").toLowerCase() || "unknown";
+    const count = selectedElements.length;
+    const lang = (document.documentElement.lang || "").toLowerCase() || "unknown";
     actionBar.innerHTML =
       '<span class="lt-action-bar__warning">' +
       "This will activate " + count + " translation(s) for language \"" + lang + "\". Continue?" +
@@ -1852,23 +1889,24 @@
 
   /**
    * Collect selected msgid/context pairs and POST to the bulk-activate endpoint.
-   * @returns {void}
+   * @returns {Promise<void>}
    */
-  function _executeBulkActivate() {
-    var confirmBtn = actionBar.querySelector(".lt-action-bar__confirm");
+  async function _executeBulkActivate() {
+    const confirmBtn = actionBar.querySelector(".lt-action-bar__confirm");
     if (confirmBtn) confirmBtn.disabled = true;
 
-    var msgids = [];
-    var seen = {};
+    const msgids = [];
+    /** @type {Object<string, boolean>} */
+    const seen = {};
 
-    for (var i = 0; i < selectedElements.length; i++) {
-      var el = selectedElements[i];
+    for (let i = 0; i < selectedElements.length; i++) {
+      const el = selectedElements[i];
 
       if (el.dataset.ltMsgid) {
         // Inline text span
-        var msgid = el.dataset.ltMsgid;
-        var context = el.dataset.ltContext || "";
-        var key = msgid + "\x00" + context;
+        const msgid = el.dataset.ltMsgid;
+        const context = el.dataset.ltContext || "";
+        const key = msgid + "\x00" + context;
         if (!seen[key]) {
           seen[key] = true;
           msgids.push({ msgid: msgid, context: context });
@@ -1876,9 +1914,9 @@
       } else if (el.dataset.ltAttrs) {
         // Attribute element — collect all preview entries
         try {
-          var attrs = JSON.parse(el.dataset.ltAttrs);
-          for (var j = 0; j < attrs.length; j++) {
-            var aKey = attrs[j].m + "\x00" + (attrs[j].c || "");
+          const attrs = JSON.parse(el.dataset.ltAttrs);
+          for (let j = 0; j < attrs.length; j++) {
+            const aKey = attrs[j].m + "\x00" + (attrs[j].c || "");
             if (!seen[aKey]) {
               seen[aKey] = true;
               msgids.push({ msgid: attrs[j].m, context: attrs[j].c || "" });
@@ -1894,18 +1932,16 @@
       return;
     }
 
-    var lang = (document.documentElement.lang || "").toLowerCase();
+    const lang = (document.documentElement.lang || "").toLowerCase();
 
-    api
-      .bulkActivate(msgids, lang)
-      .then(function (data) {
-        showToast(data.activated + " translation(s) activated", "success");
-        _reloadPage();
-      })
-      .catch(function (err) {
-        showToast("Bulk activate failed: " + err.message, "error");
-        if (confirmBtn) confirmBtn.disabled = false;
-      });
+    try {
+      const data = await api.bulkActivate(msgids, lang);
+      showToast(data.activated + " translation(s) activated", "success");
+      _reloadPage();
+    } catch (err) {
+      showToast("Bulk activate failed: " + err.message, "error");
+      if (confirmBtn) confirmBtn.disabled = false;
+    }
   }
 
   /**
@@ -1915,29 +1951,30 @@
    */
   function _initPreviewMode() {
     // Build lookup from config
-    var lookup = {};
-    for (var i = 0; i < PREVIEW_ENTRIES.length; i++) {
-      var e = PREVIEW_ENTRIES[i];
+    /** @type {Object<string, boolean>} */
+    const lookup = {};
+    for (let i = 0; i < PREVIEW_ENTRIES.length; i++) {
+      const e = PREVIEW_ENTRIES[i];
       lookup[e.m + "\x00" + (e.c || "")] = true;
     }
 
     // Mark inline text spans
-    var spans = document.querySelectorAll(".lt-translatable");
-    for (var s = 0; s < spans.length; s++) {
-      var sp = spans[s];
-      var spKey = (sp.dataset.ltMsgid || "") + "\x00" + (sp.dataset.ltContext || "");
+    const spans = document.querySelectorAll(".lt-translatable");
+    for (let s = 0; s < spans.length; s++) {
+      const sp = spans[s];
+      const spKey = (sp.dataset.ltMsgid || "") + "\x00" + (sp.dataset.ltContext || "");
       if (lookup[spKey]) {
         sp.classList.add("lt-preview");
       }
     }
 
     // Mark attribute-translatable elements
-    var attrEls = document.querySelectorAll("[data-lt-attrs]");
-    for (var a = 0; a < attrEls.length; a++) {
+    const attrEls = document.querySelectorAll("[data-lt-attrs]");
+    for (let a = 0; a < attrEls.length; a++) {
       try {
-        var attrs = JSON.parse(attrEls[a].dataset.ltAttrs || "[]");
-        for (var j = 0; j < attrs.length; j++) {
-          var aKey = (attrs[j].m || "") + "\x00" + (attrs[j].c || "");
+        const attrs = JSON.parse(attrEls[a].dataset.ltAttrs || "[]");
+        for (let j = 0; j < attrs.length; j++) {
+          const aKey = (attrs[j].m || "") + "\x00" + (attrs[j].c || "");
           if (lookup[aKey]) {
             attrEls[a].classList.add("lt-preview");
             break;
@@ -1977,8 +2014,8 @@
   // ─── Keyboard Handler ───────────────────────────────
 
   document.addEventListener("keydown", function (e) {
-    var tag = document.activeElement ? document.activeElement.tagName : "";
-    var inInput = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+    const tag = document.activeElement ? document.activeElement.tagName : "";
+    const inInput = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 
     // Toggle edit mode
     if (_matchShortcut(e, SC_EDIT)) {
@@ -2012,7 +2049,7 @@
       if (state !== "active") return;
 
       // Check for inline text span first
-      var span = e.target.closest(".lt-translatable");
+      const span = e.target.closest(".lt-translatable");
       if (span) {
         e.preventDefault();
         e.stopPropagation();
@@ -2029,7 +2066,7 @@
       }
 
       // Check for attribute-translatable element
-      var attrEl = e.target.closest("[data-lt-attrs]");
+      const attrEl = e.target.closest("[data-lt-attrs]");
       if (attrEl) {
         e.preventDefault();
         e.stopPropagation();
@@ -2041,7 +2078,7 @@
           return;
         }
 
-        var attrs;
+        let attrs;
         try {
           attrs = JSON.parse(attrEl.dataset.ltAttrs);
         } catch (err) {
@@ -2049,31 +2086,11 @@
         }
         if (!attrs || !attrs.length) return;
 
-        if (attrs.length === 1) {
-          // Single translated attribute — open directly
-          openModal(attrEl, attrs[0]);
-        } else {
-          // Multiple translated attributes — show picker
-          _showAttrPicker(attrEl, attrs);
-        }
+        openModal(attrEl, attrs[0]);
       }
     },
     true
   ); // Use capture phase to intercept before other handlers
-
-  // ─── Attribute Picker (for elements with multiple translated attrs) ──
-
-  /**
-   * Handle elements with multiple translated attributes (e.g. both `title` and
-   * `placeholder`). Currently opens the editor for the first attribute only;
-   * a multi-attribute picker UI is planned for a future release.
-   * @param {HTMLElement} element - The element carrying `data-lt-attrs`.
-   * @param {AttrInfo[]}  attrs   - Parsed array of attribute descriptors.
-   * @returns {void}
-   */
-  function _showAttrPicker(element, attrs) {
-    openModal(element, attrs[0]);
-  }
 
   // ─── Edit Mode Restore After Reload ──────────────────
 
@@ -2100,11 +2117,11 @@
   // ─── Shortcut Hint (sticky bar) ──────────────────────
 
   /** @type {string} */
-  var _HINT_POS_KEY = "lt_hint_pos";
+  const _HINT_POS_KEY = "lt_hint_pos";
   /** @type {HTMLElement|null} */
-  var _hintBar = null;
+  let _hintBar = null;
   /** @type {boolean} - True while a drag gesture is in progress (past threshold). */
-  var _hintDidDrag = false;
+  let _hintDidDrag = false;
 
   /**
    * Show a persistent shortcut hint bar at the bottom of the viewport.
@@ -2113,22 +2130,22 @@
    * @returns {void}
    */
   function _showShortcutHint() {
-    var bar = document.createElement("div");
+    const bar = document.createElement("div");
     bar.className = "lt-hint";
 
     // Brand label
-    var brand = document.createElement("span");
+    const brand = document.createElement("span");
     brand.className = "lt-hint__brand";
     brand.textContent = "Live Translations";
     bar.appendChild(brand);
 
     // Separator after brand
-    var sep0 = document.createElement("span");
+    const sep0 = document.createElement("span");
     sep0.className = "lt-hint__sep";
     bar.appendChild(sep0);
 
     // Edit mode button
-    var editBtn = document.createElement("button");
+    const editBtn = document.createElement("button");
     editBtn.type = "button";
     editBtn.className = "lt-hint__action";
     editBtn.dataset.mode = "edit";
@@ -2147,7 +2164,7 @@
     bar.appendChild(editBtn);
 
     // Preview mode button
-    var previewBtn = document.createElement("button");
+    const previewBtn = document.createElement("button");
     previewBtn.type = "button";
     previewBtn.className = "lt-hint__action";
     previewBtn.dataset.mode = "preview";
@@ -2167,7 +2184,7 @@
     bar.appendChild(previewBtn);
 
     // Preview tip (visible only in preview mode)
-    var tip = document.createElement("span");
+    const tip = document.createElement("span");
     tip.className = "lt-hint__tip";
     tip.title = "Hold Shift and click translated text to select multiple entries";
     tip.innerHTML = '<kbd class="lt-hint__kbd">Shift</kbd><span class="lt-hint__label">click to select</span>';
@@ -2177,15 +2194,16 @@
     _hintBar = bar;
 
     // Restore saved position or use default centered bottom
-    var savedPos = null;
+    /** @type {HintPosition|null} */
+    let savedPos = null;
     try {
-      var raw = localStorage.getItem(_HINT_POS_KEY);
+      const raw = localStorage.getItem(_HINT_POS_KEY);
       if (raw) savedPos = JSON.parse(raw);
     } catch (e) { /* ignore */ }
 
     if (savedPos && typeof savedPos.x === "number" && typeof savedPos.y === "number") {
-      var x = Math.max(0, Math.min(window.innerWidth - bar.offsetWidth, savedPos.x));
-      var y = Math.max(0, Math.min(window.innerHeight - bar.offsetHeight, savedPos.y));
+      const x = Math.max(0, Math.min(window.innerWidth - bar.offsetWidth, savedPos.x));
+      const y = Math.max(0, Math.min(window.innerHeight - bar.offsetHeight, savedPos.y));
       bar.style.left = x + "px";
       bar.style.top = y + "px";
       bar.classList.add("lt-hint--positioned");
@@ -2199,7 +2217,7 @@
   }
 
   /** @type {number} - Pixel threshold to distinguish click from drag. */
-  var _DRAG_THRESHOLD = 3;
+  const _DRAG_THRESHOLD = 3;
 
   /**
    * Make the entire hint bar draggable.
@@ -2209,13 +2227,14 @@
    * @returns {void}
    */
   function _initHintDrag(bar) {
-    var dragState = null;
+    /** @type {DragState|null} */
+    let dragState = null;
 
     bar.addEventListener("mousedown", function (e) {
       if (e.button !== 0) return;
       // Don't prevent default — let clicks reach buttons if no drag happens
 
-      var rect = bar.getBoundingClientRect();
+      const rect = bar.getBoundingClientRect();
       dragState = {
         mouseX: e.clientX,
         mouseY: e.clientY,
@@ -2229,8 +2248,8 @@
     document.addEventListener("mousemove", function (e) {
       if (!dragState) return;
 
-      var dx = e.clientX - dragState.mouseX;
-      var dy = e.clientY - dragState.mouseY;
+      const dx = e.clientX - dragState.mouseX;
+      const dy = e.clientY - dragState.mouseY;
 
       // Only start dragging after passing the threshold
       if (!dragState.moved) {
@@ -2248,17 +2267,17 @@
         bar.classList.add("lt-hint--dragging");
       }
 
-      var newX = dragState.barX + dx;
-      var newY = dragState.barY + dy;
-      var maxX = window.innerWidth - bar.offsetWidth;
-      var maxY = window.innerHeight - bar.offsetHeight;
+      const newX = dragState.barX + dx;
+      const newY = dragState.barY + dy;
+      const maxX = window.innerWidth - bar.offsetWidth;
+      const maxY = window.innerHeight - bar.offsetHeight;
       bar.style.left = Math.max(0, Math.min(maxX, newX)) + "px";
       bar.style.top = Math.max(0, Math.min(maxY, newY)) + "px";
     });
 
     document.addEventListener("mouseup", function () {
       if (!dragState) return;
-      var wasDrag = dragState.moved;
+      const wasDrag = dragState.moved;
       dragState = null;
       bar.classList.remove("lt-hint--dragging");
 
@@ -2284,9 +2303,9 @@
    */
   function _updateHintActiveState() {
     if (!_hintBar) return;
-    var editEl = _hintBar.querySelector('[data-mode="edit"]');
-    var previewEl = _hintBar.querySelector('[data-mode="preview"]');
-    var tipEl = _hintBar.querySelector(".lt-hint__tip");
+    const editEl = _hintBar.querySelector('[data-mode="edit"]');
+    const previewEl = _hintBar.querySelector('[data-mode="preview"]');
+    const tipEl = _hintBar.querySelector(".lt-hint__tip");
     if (editEl) {
       if (state === "active" || state === "editing") {
         editEl.classList.add("lt-hint__action--active");

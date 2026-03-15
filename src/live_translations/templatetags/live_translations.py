@@ -35,8 +35,7 @@ register.tags.update(_i18n_lib.tags)
 
 
 def _resolve_message_context(
-    node: django.templatetags.i18n.TranslateNode
-    | django.templatetags.i18n.BlockTranslateNode,
+    node: django.templatetags.i18n.TranslateNode | django.templatetags.i18n.BlockTranslateNode,
     context: django.template.context.Context,
 ) -> str:
     """Extract the gettext context string from a node, or '' if none."""
@@ -74,7 +73,7 @@ def _wrap_marker(
 class LiveTranslateNode(django.template.Node):
     """Wraps a standard TranslateNode, producing markers for superusers."""
 
-    child_nodelists: t.ClassVar[list[str]] = []
+    child_nodelists: t.ClassVar[list[str]] = []  # type: ignore[bad-override]
 
     def __init__(
         self,
@@ -87,11 +86,7 @@ class LiveTranslateNode(django.template.Node):
         rendered: str = self.original_node.render(context)
 
         # Never wrap asvar or noop — they don't produce direct output
-        if (
-            (not strings.lt_active.get(False))
-            or self.original_node.asvar
-            or self.original_node.noop
-        ):
+        if (not strings.lt_active.get(False)) or self.original_node.asvar or self.original_node.noop:
             return rendered
 
         msgid = _extract_trans_msgid(self.original_node)
@@ -103,7 +98,7 @@ class LiveTranslateNode(django.template.Node):
 class LiveBlockTranslateNode(django.template.Node):
     """Wraps a standard BlockTranslateNode, producing markers for superusers."""
 
-    child_nodelists: t.ClassVar[list[str]] = []
+    child_nodelists: t.ClassVar[list[str]] = []  # type: ignore[bad-override]
 
     def __init__(
         self,
@@ -117,9 +112,7 @@ class LiveBlockTranslateNode(django.template.Node):
         BlockTranslateNode.render_token_list() returns (msg, sentinel_set).
         The msg is the gettext-ready msgid with %(var)s placeholders.
         """
-        msg, _sentinels = self.original_node.render_token_list(
-            self.original_node.singular
-        )
+        msg, _sentinels = self.original_node.render_token_list(self.original_node.singular)
         return msg
 
     @t.override
@@ -145,9 +138,7 @@ def do_live_translate(
     token: django.template.base.Token,
 ) -> LiveTranslateNode:
     """Parse with Django's do_translate, then wrap in LiveTranslateNode."""
-    original_node: django.templatetags.i18n.TranslateNode = (
-        django.templatetags.i18n.do_translate(parser, token)
-    )
+    original_node: django.templatetags.i18n.TranslateNode = django.templatetags.i18n.do_translate(parser, token)
     return LiveTranslateNode(original_node)
 
 
@@ -158,7 +149,7 @@ def do_live_block_translate(
     token: django.template.base.Token,
 ) -> LiveBlockTranslateNode:
     """Parse with Django's do_block_translate, then wrap in LiveBlockTranslateNode."""
-    original_node: django.templatetags.i18n.BlockTranslateNode = (
-        django.templatetags.i18n.do_block_translate(parser, token)
+    original_node: django.templatetags.i18n.BlockTranslateNode = django.templatetags.i18n.do_block_translate(
+        parser, token
     )
     return LiveBlockTranslateNode(original_node)

@@ -23,9 +23,7 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "language",
-                    models.CharField(
-                        db_index=True, max_length=10, verbose_name="Language"
-                    ),
+                    models.CharField(db_index=True, max_length=10, verbose_name="Language"),
                 ),
                 ("msgid", models.TextField(verbose_name="Message ID")),
                 (

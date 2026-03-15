@@ -1,6 +1,7 @@
 """Tests for the is_active field on TranslationEntry."""
 
 import json
+import pathlib
 import typing as t
 import unittest.mock
 
@@ -8,12 +9,13 @@ import pytest
 
 from live_translations import conf, models
 from live_translations.backends import base, db
+from live_translations.types import MsgKey
 
 if t.TYPE_CHECKING:
     from pytest_django.fixtures import SettingsWrapper
 
 
-@pytest.fixture()
+@pytest.fixture
 def _db_setup(db):
     """Ensure DB is available for tests that need it."""
 
@@ -21,59 +23,43 @@ def _db_setup(db):
 @pytest.mark.django_db
 class TestTranslationEntryModel:
     def test_is_active_field_exists(self):
-        entry = models.TranslationEntry(
-            language="en", msgid="hello", msgstr="Hello", context=""
-        )
+        entry = models.TranslationEntry(language="en", msgid="hello", msgstr="Hello", context="")
         assert hasattr(entry, "is_active")
 
     def test_is_active_defaults_to_false(self):
-        entry = models.TranslationEntry.objects.create(
-            language="en", msgid="hello", msgstr="Hello", context=""
-        )
+        entry = models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hello", context="")
         entry.refresh_from_db()
         assert entry.is_active is False
 
     def test_active_queryset_filter(self):
-        models.TranslationEntry.objects.create(
-            language="en", msgid="active_msg", msgstr="Active", is_active=True
-        )
-        models.TranslationEntry.objects.create(
-            language="en", msgid="inactive_msg", msgstr="Inactive", is_active=False
-        )
+        models.TranslationEntry.objects.create(language="en", msgid="active_msg", msgstr="Active", is_active=True)
+        models.TranslationEntry.objects.create(language="en", msgid="inactive_msg", msgstr="Inactive", is_active=False)
         active_qs = models.TranslationEntry.objects.qs.active()
         assert active_qs.count() == 1
-        assert active_qs.first().msgid == "active_msg"
+        entry = active_qs.first()
+        assert entry is not None
+        assert entry.msgid == "active_msg"
 
     def test_active_manager_method(self):
-        models.TranslationEntry.objects.create(
-            language="en", msgid="msg1", msgstr="M1", is_active=True
-        )
-        models.TranslationEntry.objects.create(
-            language="en", msgid="msg2", msgstr="M2", is_active=False
-        )
+        models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=True)
+        models.TranslationEntry.objects.create(language="en", msgid="msg2", msgstr="M2", is_active=False)
         assert models.TranslationEntry.objects.qs.active().count() == 1
 
 
 class TestBaseDataclass:
     def test_is_active_defaults_to_true(self):
-        entry = base.TranslationEntry(
-            language="en", msgid="hello", msgstr="Hello", context=""
-        )
+        entry = base.TranslationEntry(language="en", msgid="hello", msgstr="Hello", context="")
         assert entry.is_active is True
 
     def test_is_active_can_be_set_false(self):
-        entry = base.TranslationEntry(
-            language="en", msgid="hello", msgstr="Hello", context="", is_active=False
-        )
+        entry = base.TranslationEntry(language="en", msgid="hello", msgstr="Hello", context="", is_active=False)
         assert entry.is_active is False
 
 
 @pytest.mark.django_db
 class TestInjectOverrides:
     def test_only_active_overrides_injected(self):
-        models.TranslationEntry.objects.create(
-            language="en", msgid="active_key", msgstr="Active Value", is_active=True
-        )
+        models.TranslationEntry.objects.create(language="en", msgid="active_key", msgstr="Active Value", is_active=True)
         models.TranslationEntry.objects.create(
             language="en",
             msgid="inactive_key",
@@ -81,18 +67,20 @@ class TestInjectOverrides:
             is_active=False,
         )
 
-        backend = db.DatabaseBackend(locale_dir="/tmp", domain="django")
-        with unittest.mock.patch.object(backend, "_get_po_backend"):
-            # Mock the translation object and catalog
-            mock_catalog = {}
-            mock_trans = unittest.mock.MagicMock()
-            mock_trans._catalog = mock_catalog
+        backend = db.DatabaseBackend(locale_dir=pathlib.Path("/tmp"), domain="django")
+        # Mock the translation object and catalog
+        mock_catalog = {}
+        mock_trans = unittest.mock.MagicMock()
+        mock_trans._catalog = mock_catalog
 
-            with unittest.mock.patch(
+        with (
+            unittest.mock.patch.object(backend, "_get_po_backend"),
+            unittest.mock.patch(
                 "django.utils.translation.trans_real.translation",
                 return_value=mock_trans,
-            ):
-                backend.inject_overrides()
+            ),
+        ):
+            backend.inject_overrides()
 
         assert "active_key" in mock_catalog
         assert mock_catalog["active_key"] == "Active Value"
@@ -102,14 +90,10 @@ class TestInjectOverrides:
 @pytest.mark.django_db
 class TestGetTranslations:
     def test_returns_is_active_for_db_override(self):
-        models.TranslationEntry.objects.create(
-            language="en", msgid="hello", msgstr="Hi", context="", is_active=False
-        )
+        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="", is_active=False)
 
-        backend = db.DatabaseBackend(locale_dir="/tmp", domain="django")
-        po_entry = base.TranslationEntry(
-            language="en", msgid="hello", msgstr="Hello", context=""
-        )
+        backend = db.DatabaseBackend(locale_dir=pathlib.Path("/tmp"), domain="django")
+        po_entry = base.TranslationEntry(language="en", msgid="hello", msgstr="Hello", context="")
         with unittest.mock.patch.object(
             backend,
             "_get_po_backend",
@@ -117,16 +101,14 @@ class TestGetTranslations:
                 get_translations=unittest.mock.MagicMock(return_value={"en": po_entry})
             ),
         ):
-            result = backend.get_translations("hello", ["en"], context="")
+            result = backend.get_translations(MsgKey("hello", ""), ["en"])
 
         assert result["en"].is_active is False
         assert result["en"].msgstr == "Hi"
 
     def test_po_only_entry_has_is_active_true(self):
-        backend = db.DatabaseBackend(locale_dir="/tmp", domain="django")
-        po_entry = base.TranslationEntry(
-            language="en", msgid="hello", msgstr="Hello", context=""
-        )
+        backend = db.DatabaseBackend(locale_dir=pathlib.Path("/tmp"), domain="django")
+        po_entry = base.TranslationEntry(language="en", msgid="hello", msgstr="Hello", context="")
         with unittest.mock.patch.object(
             backend,
             "_get_po_backend",
@@ -134,7 +116,7 @@ class TestGetTranslations:
                 get_translations=unittest.mock.MagicMock(return_value={"en": po_entry})
             ),
         ):
-            result = backend.get_translations("hello", ["en"], context="")
+            result = backend.get_translations(MsgKey("hello", ""), ["en"])
 
         assert result["en"].is_active is True
         assert result["en"].msgstr == "Hello"
@@ -143,7 +125,7 @@ class TestGetTranslations:
 @pytest.mark.django_db
 class TestSaveTranslations:
     def _make_backend(self):
-        backend = db.DatabaseBackend(locale_dir="/tmp", domain="django")
+        backend = db.DatabaseBackend(locale_dir=pathlib.Path("/tmp"), domain="django")
         # Mock PO defaults to return empty (no .po match)
         mock_po = unittest.mock.MagicMock()
         mock_po.get_translations.return_value = {}
@@ -158,9 +140,11 @@ class TestSaveTranslations:
         conf.get_settings.cache_clear()
 
         backend = self._make_backend()
-        with unittest.mock.patch.object(backend, "get_defaults", return_value={}):
-            with unittest.mock.patch.object(backend, "bump_catalog_version"):
-                backend.save_translations("hello", {"en": "Hi"}, context="")
+        with (
+            unittest.mock.patch.object(backend, "get_defaults", return_value={}),
+            unittest.mock.patch.object(backend, "bump_catalog_version"),
+        ):
+            backend.save_translations(MsgKey("hello", ""), {"en": "Hi"})
 
         entry = models.TranslationEntry.objects.get(language="en", msgid="hello")
         assert entry.is_active is active_default
@@ -171,11 +155,11 @@ class TestSaveTranslations:
         conf.get_settings.cache_clear()
 
         backend = self._make_backend()
-        with unittest.mock.patch.object(backend, "get_defaults", return_value={}):
-            with unittest.mock.patch.object(backend, "bump_catalog_version"):
-                backend.save_translations(
-                    "hello", {"en": "Hi"}, context="", active_flags={"en": True}
-                )
+        with (
+            unittest.mock.patch.object(backend, "get_defaults", return_value={}),
+            unittest.mock.patch.object(backend, "bump_catalog_version"),
+        ):
+            backend.save_translations(MsgKey("hello", ""), {"en": "Hi"}, active_flags={"en": True})
 
         entry = models.TranslationEntry.objects.get(language="en", msgid="hello")
         assert entry.is_active is True
@@ -186,16 +170,14 @@ class TestSaveTranslations:
         conf.get_settings.cache_clear()
 
         # Pre-create an active entry
-        models.TranslationEntry.objects.create(
-            language="en", msgid="hello", msgstr="Old", context="", is_active=True
-        )
+        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Old", context="", is_active=True)
 
         backend = self._make_backend()
-        with unittest.mock.patch.object(backend, "get_defaults", return_value={}):
-            with unittest.mock.patch.object(backend, "bump_catalog_version"):
-                backend.save_translations(
-                    "hello", {"en": "New"}, context="", active_flags={"en": False}
-                )
+        with (
+            unittest.mock.patch.object(backend, "get_defaults", return_value={}),
+            unittest.mock.patch.object(backend, "bump_catalog_version"),
+        ):
+            backend.save_translations(MsgKey("hello", ""), {"en": "New"}, active_flags={"en": False})
 
         entry = models.TranslationEntry.objects.get(language="en", msgid="hello")
         assert entry.msgstr == "New"
@@ -206,14 +188,14 @@ class TestSaveTranslations:
         settings.LIVE_TRANSLATIONS = {"TRANSLATION_ACTIVE_BY_DEFAULT": False}
         conf.get_settings.cache_clear()
 
-        models.TranslationEntry.objects.create(
-            language="en", msgid="hello", msgstr="Old", context="", is_active=True
-        )
+        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Old", context="", is_active=True)
 
         backend = self._make_backend()
-        with unittest.mock.patch.object(backend, "get_defaults", return_value={}):
-            with unittest.mock.patch.object(backend, "bump_catalog_version"):
-                backend.save_translations("hello", {"en": "New"}, context="")
+        with (
+            unittest.mock.patch.object(backend, "get_defaults", return_value={}),
+            unittest.mock.patch.object(backend, "bump_catalog_version"),
+        ):
+            backend.save_translations(MsgKey("hello", ""), {"en": "New"})
 
         entry = models.TranslationEntry.objects.get(language="en", msgid="hello")
         assert entry.msgstr == "New"
@@ -232,7 +214,8 @@ class TestSaveTranslationsView:
         conf.get_settings.cache_clear()
 
         request = make_request(
-            "post", "/__live-translations__/translations/save/",
+            "post",
+            "/__live-translations__/translations/save/",
             data={"msgid": "hello", "context": "", "translations": {"en": "Hi"}},
             has_permission=False,
         )
@@ -266,12 +249,8 @@ class TestAdminActions:
     """
 
     def test_bulk_activate(self):
-        e1 = models.TranslationEntry.objects.create(
-            language="en", msgid="msg1", msgstr="M1", is_active=False
-        )
-        e2 = models.TranslationEntry.objects.create(
-            language="en", msgid="msg2", msgstr="M2", is_active=False
-        )
+        e1 = models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=False)
+        e2 = models.TranslationEntry.objects.create(language="en", msgid="msg2", msgstr="M2", is_active=False)
 
         qs = models.TranslationEntry.objects.all()
         updated = qs.filter(is_active=False).update(is_active=True)
@@ -283,12 +262,8 @@ class TestAdminActions:
         assert e2.is_active is True
 
     def test_bulk_deactivate(self):
-        e1 = models.TranslationEntry.objects.create(
-            language="en", msgid="msg1", msgstr="M1", is_active=True
-        )
-        e2 = models.TranslationEntry.objects.create(
-            language="en", msgid="msg2", msgstr="M2", is_active=True
-        )
+        e1 = models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=True)
+        e2 = models.TranslationEntry.objects.create(language="en", msgid="msg2", msgstr="M2", is_active=True)
 
         qs = models.TranslationEntry.objects.all()
         updated = qs.filter(is_active=True).update(is_active=False)
@@ -301,9 +276,7 @@ class TestAdminActions:
 
     def test_activate_noop_returns_zero(self):
         """If all selected translations are already active, update returns 0."""
-        models.TranslationEntry.objects.create(
-            language="en", msgid="msg1", msgstr="M1", is_active=True
-        )
+        models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=True)
 
         qs = models.TranslationEntry.objects.all()
         updated = qs.filter(is_active=False).update(is_active=True)
@@ -324,11 +297,13 @@ class TestGetTranslationsView:
         conf.get_permission_checker.cache_clear()
 
     def test_response_includes_is_active(self, make_request):
-        models.TranslationEntry.objects.create(
-            language="en", msgid="hello", msgstr="Hi", context="", is_active=False
-        )
+        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="", is_active=False)
 
-        request = make_request("get", "/__live-translations__/translations/", data={"msgid": "hello", "context": ""})
+        request = make_request(
+            "get",
+            "/__live-translations__/translations/",
+            data={"msgid": "hello", "context": ""},
+        )
 
         from live_translations import views
 
@@ -336,12 +311,10 @@ class TestGetTranslationsView:
         backend = conf.get_backend_instance()
         mock_po = unittest.mock.MagicMock()
         mock_po.get_translations.return_value = {
-            "en": base.TranslationEntry(
-                language="en", msgid="hello", msgstr="Hello", context=""
-            )
+            "en": base.TranslationEntry(language="en", msgid="hello", msgstr="Hello", context="")
         }
         mock_po.get_hint.return_value = ""
-        backend._po_backend = mock_po
+        backend._po_backend = mock_po  # type: ignore[missing-attribute]
 
         response = views.get_translations(request)
         data = json.loads(response.content)
@@ -351,7 +324,10 @@ class TestGetTranslationsView:
 
     def test_requires_permission(self, make_request) -> None:
         request = make_request(
-            "get", "/__live-translations__/translations/", data={"msgid": "hello", "context": ""}, has_permission=False
+            "get",
+            "/__live-translations__/translations/",
+            data={"msgid": "hello", "context": ""},
+            has_permission=False,
         )
 
         from live_translations import views
@@ -363,13 +339,9 @@ class TestGetTranslationsView:
 @pytest.mark.django_db
 class TestHasOverride:
     def test_db_entry_has_override_true(self):
-        models.TranslationEntry.objects.create(
-            language="en", msgid="hello", msgstr="Hello", context="", is_active=True
-        )
-        backend = db.DatabaseBackend(locale_dir="/tmp", domain="django")
-        po_entry = base.TranslationEntry(
-            language="en", msgid="hello", msgstr="Hello", context=""
-        )
+        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hello", context="", is_active=True)
+        backend = db.DatabaseBackend(locale_dir=pathlib.Path("/tmp"), domain="django")
+        po_entry = base.TranslationEntry(language="en", msgid="hello", msgstr="Hello", context="")
         with unittest.mock.patch.object(
             backend,
             "_get_po_backend",
@@ -377,14 +349,12 @@ class TestHasOverride:
                 get_translations=unittest.mock.MagicMock(return_value={"en": po_entry})
             ),
         ):
-            result = backend.get_translations("hello", ["en"], context="")
+            result = backend.get_translations(MsgKey("hello", ""), ["en"])
         assert result["en"].has_override is True
 
     def test_po_only_has_override_false(self):
-        backend = db.DatabaseBackend(locale_dir="/tmp", domain="django")
-        po_entry = base.TranslationEntry(
-            language="en", msgid="hello", msgstr="Hello", context=""
-        )
+        backend = db.DatabaseBackend(locale_dir=pathlib.Path("/tmp"), domain="django")
+        po_entry = base.TranslationEntry(language="en", msgid="hello", msgstr="Hello", context="")
         with unittest.mock.patch.object(
             backend,
             "_get_po_backend",
@@ -392,7 +362,7 @@ class TestHasOverride:
                 get_translations=unittest.mock.MagicMock(return_value={"en": po_entry})
             ),
         ):
-            result = backend.get_translations("hello", ["en"], context="")
+            result = backend.get_translations(MsgKey("hello", ""), ["en"])
         assert result["en"].has_override is False
 
 
@@ -413,26 +383,18 @@ class TestDeleteTranslationView:
         mock_po = unittest.mock.MagicMock()
         mock_po.get_translations.return_value = {}
         mock_po.get_hint.return_value = ""
-        backend._po_backend = mock_po
+        backend._po_backend = mock_po  # type: ignore[missing-attribute]
 
     _URL = "/__live-translations__/translations/delete/"
 
     def test_deletes_all_languages(self, make_request):
-        models.TranslationEntry.objects.create(
-            language="en", msgid="hello", msgstr="Hi", context=""
-        )
-        models.TranslationEntry.objects.create(
-            language="cs", msgid="hello", msgstr="Ahoj", context=""
-        )
+        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="")
+        models.TranslationEntry.objects.create(language="cs", msgid="hello", msgstr="Ahoj", context="")
 
         from live_translations import views
 
-        with unittest.mock.patch.object(
-            conf.get_backend_instance(), "bump_catalog_version"
-        ):
-            response = views.delete_translation(
-                make_request("post", self._URL, data={"msgid": "hello", "context": ""})
-            )
+        with unittest.mock.patch.object(conf.get_backend_instance(), "bump_catalog_version"):
+            response = views.delete_translation(make_request("post", self._URL, data={"msgid": "hello", "context": ""}))
 
         data = json.loads(response.content)
         assert data["ok"] is True
@@ -440,18 +402,12 @@ class TestDeleteTranslationView:
         assert models.TranslationEntry.objects.count() == 0
 
     def test_records_history(self, make_request):
-        models.TranslationEntry.objects.create(
-            language="en", msgid="hello", msgstr="Hi", context=""
-        )
+        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="")
 
         from live_translations import views
 
-        with unittest.mock.patch.object(
-            conf.get_backend_instance(), "bump_catalog_version"
-        ):
-            views.delete_translation(
-                make_request("post", self._URL, data={"msgid": "hello", "context": ""})
-            )
+        with unittest.mock.patch.object(conf.get_backend_instance(), "bump_catalog_version"):
+            views.delete_translation(make_request("post", self._URL, data={"msgid": "hello", "context": ""}))
 
         h = models.TranslationHistory.objects.get()
         assert h.action == "delete"
@@ -459,20 +415,18 @@ class TestDeleteTranslationView:
         assert h.new_value == ""
 
     def test_deletes_single_language(self, make_request):
-        models.TranslationEntry.objects.create(
-            language="en", msgid="hello", msgstr="Hi", context=""
-        )
-        models.TranslationEntry.objects.create(
-            language="cs", msgid="hello", msgstr="Ahoj", context=""
-        )
+        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="")
+        models.TranslationEntry.objects.create(language="cs", msgid="hello", msgstr="Ahoj", context="")
 
         from live_translations import views
 
-        with unittest.mock.patch.object(
-            conf.get_backend_instance(), "bump_catalog_version"
-        ):
+        with unittest.mock.patch.object(conf.get_backend_instance(), "bump_catalog_version"):
             response = views.delete_translation(
-                make_request("post", self._URL, data={"msgid": "hello", "context": "", "language": "cs"})
+                make_request(
+                    "post",
+                    self._URL,
+                    data={"msgid": "hello", "context": "", "language": "cs"},
+                )
             )
 
         data = json.loads(response.content)
@@ -483,12 +437,8 @@ class TestDeleteTranslationView:
         assert models.TranslationEntry.objects.get().language == "en"
 
     def test_deletes_multiple_languages(self, make_request):
-        models.TranslationEntry.objects.create(
-            language="en", msgid="hello", msgstr="Hi", context=""
-        )
-        models.TranslationEntry.objects.create(
-            language="cs", msgid="hello", msgstr="Ahoj", context=""
-        )
+        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="")
+        models.TranslationEntry.objects.create(language="cs", msgid="hello", msgstr="Ahoj", context="")
         models.TranslationEntry.objects.create(
             language="de",
             msgid="hello",
@@ -498,11 +448,13 @@ class TestDeleteTranslationView:
 
         from live_translations import views
 
-        with unittest.mock.patch.object(
-            conf.get_backend_instance(), "bump_catalog_version"
-        ):
+        with unittest.mock.patch.object(conf.get_backend_instance(), "bump_catalog_version"):
             response = views.delete_translation(
-                make_request("post", self._URL, data={"msgid": "hello", "context": "", "languages": ["cs", "de"]})
+                make_request(
+                    "post",
+                    self._URL,
+                    data={"msgid": "hello", "context": "", "languages": ["cs", "de"]},
+                )
             )
 
         data = json.loads(response.content)
@@ -520,7 +472,12 @@ class TestDeleteTranslationView:
     def test_requires_permission(self, make_request) -> None:
         from live_translations import views
 
-        request = make_request("post", self._URL, data={"msgid": "hello", "context": ""}, has_permission=False)
+        request = make_request(
+            "post",
+            self._URL,
+            data={"msgid": "hello", "context": ""},
+            has_permission=False,
+        )
         response = views.delete_translation(request)
         assert response.status_code == 403
 
@@ -544,14 +501,16 @@ class TestBulkActivateView:
         models.TranslationEntry.objects.create(
             language="en", msgid="hello", msgstr="Hello", context="", is_active=False
         )
-        models.TranslationEntry.objects.create(
-            language="cs", msgid="hello", msgstr="Ahoj", context="", is_active=False
-        )
+        models.TranslationEntry.objects.create(language="cs", msgid="hello", msgstr="Ahoj", context="", is_active=False)
 
         from live_translations import views
 
         response = views.bulk_activate(
-            make_request("post", self._URL, data={"language": "en", "msgids": [{"msgid": "hello", "context": ""}]})
+            make_request(
+                "post",
+                self._URL,
+                data={"language": "en", "msgids": [{"msgid": "hello", "context": ""}]},
+            )
         )
         data = json.loads(response.content)
 
@@ -578,7 +537,11 @@ class TestBulkActivateView:
         from live_translations import views
 
         response = views.bulk_activate(
-            make_request("post", self._URL, data={"language": "", "msgids": [{"msgid": "hello", "context": ""}]})
+            make_request(
+                "post",
+                self._URL,
+                data={"language": "", "msgids": [{"msgid": "hello", "context": ""}]},
+            )
         )
         assert response.status_code == 400
 
@@ -586,7 +549,8 @@ class TestBulkActivateView:
         from live_translations import views
 
         request = make_request(
-            "post", self._URL,
+            "post",
+            self._URL,
             data={"language": "en", "msgids": [{"msgid": "hello", "context": ""}]},
             has_permission=False,
         )

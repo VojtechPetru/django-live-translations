@@ -2,8 +2,8 @@
 
 import base64
 import logging
-import typing as t
 import pathlib
+import typing as t
 
 import django.utils.translation.reloader
 import polib
@@ -48,9 +48,7 @@ def _set_pending(entry: polib.POEntry, value: str) -> None:
     _clear_pending(entry)
     encoded = base64.b64encode(value.encode()).decode()
     pending_line = f"{LT_PENDING_PREFIX}{encoded}"
-    entry.comment = (
-        f"{entry.comment}\n{pending_line}" if entry.comment else pending_line
-    )
+    entry.comment = f"{entry.comment}\n{pending_line}" if entry.comment else pending_line
 
 
 def _clear_pending(entry: polib.POEntry) -> None:
@@ -110,38 +108,36 @@ class POFileBackend(base.TranslationBackend):
     def _find_entry(
         self,
         po: polib.POFile,
-        msgid: str,
-        context: str,
+        key: MsgKey,
     ) -> polib.POEntry | None:
-        return po.find(msgid, msgctxt=context or False)
+        return po.find(key.msgid, msgctxt=key.context or False)
 
     @t.override
     def get_translations(
         self,
-        msgid: str,
+        key: MsgKey,
         languages: list[LanguageCode],
-        context: str = "",
     ) -> dict[LanguageCode, base.TranslationEntry]:
         result: dict[str, base.TranslationEntry] = {}
         for lang in languages:
             try:
                 po = self._load_po(lang)
-                entry = self._find_entry(po, msgid, context)
+                entry = self._find_entry(po, key)
                 if entry is None:
                     result[lang] = base.TranslationEntry(
                         language=lang,
-                        msgid=msgid,
+                        msgid=key.msgid,
                         msgstr="",
-                        context=context,
+                        context=key.context,
                     )
                     continue
                 pending = _get_pending(entry)
                 is_active = pending is None
                 result[lang] = base.TranslationEntry(
                     language=lang,
-                    msgid=msgid,
+                    msgid=key.msgid,
                     msgstr=pending if pending is not None else entry.msgstr,
-                    context=context,
+                    context=key.context,
                     fuzzy="fuzzy" in entry.flags,
                     is_active=is_active,
                 )
@@ -149,9 +145,9 @@ class POFileBackend(base.TranslationBackend):
                 logger.warning("PO file not found for language '%s'", lang)
                 result[lang] = base.TranslationEntry(
                     language=lang,
-                    msgid=msgid,
+                    msgid=key.msgid,
                     msgstr="",
-                    context=context,
+                    context=key.context,
                 )
         return result
 
@@ -171,9 +167,8 @@ class POFileBackend(base.TranslationBackend):
     @t.override
     def save_translations(
         self,
-        msgid: str,
+        key: MsgKey,
         translations: dict[LanguageCode, str],
-        context: str = "",
         active_flags: dict[LanguageCode, bool] | None = None,
     ) -> None:
         fallback_active = conf.get_settings().translation_active_by_default
@@ -184,13 +179,9 @@ class POFileBackend(base.TranslationBackend):
         new_active_states: dict[str, bool] = {}
         for lang, msgstr in translations.items():
             po = self._load_po(lang)
-            entry = self._find_entry(po, msgid, context)
+            entry = self._find_entry(po, key)
 
-            is_active = (
-                active_flags.get(lang, fallback_active)
-                if active_flags
-                else fallback_active
-            )
+            is_active = active_flags.get(lang, fallback_active) if active_flags else fallback_active
             new_active_states[lang] = is_active
 
             if entry is not None:
@@ -200,9 +191,9 @@ class POFileBackend(base.TranslationBackend):
 
             if entry is None:
                 entry = polib.POEntry(
-                    msgid=msgid,
+                    msgid=key.msgid,
                     msgstr="" if not is_active else msgstr,
-                    msgctxt=context if context else None,
+                    msgctxt=key.context or None,
                 )
                 if not is_active:
                     _set_pending(entry, msgstr)
@@ -231,22 +222,18 @@ class POFileBackend(base.TranslationBackend):
             self._po_cache.pop(self._po_path(lang), None)
 
         history.record_text_changes(
-            msgid=msgid,
-            context=context,
+            key=key,
             old_entries=old_entries,
             new_entries=translations,
         )
         history.record_active_changes(
-            msgid=msgid,
-            context=context,
+            key=key,
             old_states=old_active_states,
             new_states=new_active_states,
         )
 
         if mo_path is not None:
-            django.utils.translation.reloader.translation_file_changed(
-                sender=None, file_path=pathlib.Path(mo_path)
-            )
+            django.utils.translation.reloader.translation_file_changed(sender=None, file_path=pathlib.Path(mo_path))
 
     @t.override
     def bulk_activate(
@@ -261,7 +248,7 @@ class POFileBackend(base.TranslationBackend):
 
         activated: list[MsgKey] = []
         for key in msgids:
-            entry = self._find_entry(po, key.msgid, key.context)
+            entry = self._find_entry(po, key)
             if entry is None:
                 continue
             pending = _get_pending(entry)
@@ -278,24 +265,21 @@ class POFileBackend(base.TranslationBackend):
             mo_path = self._mo_path(language)
             po.save_as_mofile(str(mo_path))
             self._po_cache.pop(self._po_path(language), None)
-            django.utils.translation.reloader.translation_file_changed(
-                sender=None, file_path=pathlib.Path(mo_path)
-            )
+            django.utils.translation.reloader.translation_file_changed(sender=None, file_path=pathlib.Path(mo_path))
 
         return activated
 
     @t.override
     def get_defaults(
         self,
-        msgid: str,
+        key: MsgKey,
         languages: list[LanguageCode],
-        context: str = "",
     ) -> dict[LanguageCode, str]:
         result: dict[LanguageCode, str] = {}
         for lang in languages:
             try:
                 po = self._load_po(lang)
-                entry = self._find_entry(po, msgid, context)
+                entry = self._find_entry(po, key)
                 if entry:
                     result[lang] = entry.msgstr
             except FileNotFoundError:
@@ -303,5 +287,5 @@ class POFileBackend(base.TranslationBackend):
         return result
 
     @t.override
-    def get_hint(self, msgid: str, context: str = "") -> str:
-        return _clean_comment(super().get_hint(msgid, context))
+    def get_hint(self, key: MsgKey) -> str:
+        return _clean_comment(super().get_hint(key))

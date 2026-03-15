@@ -5,6 +5,8 @@ import typing as t
 import django.conf
 import django.db.models
 
+from live_translations.types import MsgKey
+
 __all__ = [
     "TranslationEntry",
     "TranslationEntryManager",
@@ -20,16 +22,14 @@ class TranslationEntryQuerySet(django.db.models.QuerySet["TranslationEntry"]):
     ) -> t.Self:
         return self.filter(language__in=languages)
 
-    def for_msgid(
+    def for_key(
         self,
-        msgid: str,
+        key: MsgKey,
         /,
-        *,
-        context: str = "",
     ) -> t.Self:
-        return self.filter(msgid=msgid, context=context)
+        return self.filter(msgid=key.msgid, context=key.context)
 
-    def active(self, active: bool = True, /) -> t.Self:
+    def active(self, *, active: bool = True) -> t.Self:
         return self.filter(is_active=active)
 
 
@@ -96,6 +96,10 @@ class TranslationEntry(django.db.models.Model):
         ctx = f" [{self.context}]" if self.context else ""
         return f"{self.language}: {self.msgid}{ctx}"
 
+    @property
+    def key(self) -> MsgKey:
+        return MsgKey(self.msgid, self.context)
+
 
 class TranslationHistory(django.db.models.Model):
     """Audit log entry for a translation change."""
@@ -110,7 +114,7 @@ class TranslationHistory(django.db.models.Model):
     language = django.db.models.CharField(max_length=10, db_index=True)
     msgid = django.db.models.TextField()
     context = django.db.models.CharField(max_length=255, default="", blank=True)
-    action = django.db.models.CharField(max_length=10, choices=Action.choices)
+    action = django.db.models.CharField(max_length=10, choices=Action)
     old_value = django.db.models.TextField(blank=True, default="")
     new_value = django.db.models.TextField(blank=True, default="")
     user = django.db.models.ForeignKey(

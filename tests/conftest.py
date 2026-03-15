@@ -12,9 +12,7 @@ from live_translations import conf
 
 def pytest_configure() -> None:
     django.conf.settings.configure(
-        DATABASES={
-            "default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}
-        },
+        DATABASES={"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}},
         INSTALLED_APPS=[
             "django.contrib.contenttypes",
             "django.contrib.auth",
@@ -36,7 +34,7 @@ def _clear_conf_caches():
     conf.get_permission_checker.cache_clear()
 
 
-@pytest.fixture()
+@pytest.fixture
 def make_request():
     def _make(method: t.Literal["get", "post"], path: str, *, data: dict | None = None, has_permission: bool = True):
         factory = django.test.RequestFactory(enforce_csrf_checks=False)
@@ -44,7 +42,7 @@ def make_request():
             request = factory.get(path, data or {})
         else:
             request = factory.post(path, data=json.dumps(data or {}), content_type="application/json")
-            request._dont_enforce_csrf_checks = True
+            request._dont_enforce_csrf_checks = True  # type: ignore[missing-attribute]
         request.user = unittest.mock.MagicMock(is_authenticated=has_permission, is_superuser=has_permission)
         return request
 

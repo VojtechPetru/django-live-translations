@@ -1,7 +1,7 @@
 import dataclasses
 import functools
-import typing as t
 import pathlib
+import typing as t
 
 import django.conf
 import django.http
@@ -24,12 +24,19 @@ __all__ = [
     "is_preview_request",
 ]
 
-PermissionCheck: t.TypeAlias = t.Callable[[django.http.HttpRequest], bool]
+type PermissionCheck = t.Callable[[django.http.HttpRequest], bool]
 
 API_PREFIX = "/__live-translations__"
 
+_DEFAULT_BACKEND = "live_translations.backends.po.POFileBackend"
+_DEFAULT_CACHE = "default"
+_DEFAULT_DOMAIN = "django"
+_DEFAULT_PERMISSION_CHECK = "live_translations.conf.default_permission_check"
+_DEFAULT_SHORTCUT_EDIT = "ctrl+shift+e"
+_DEFAULT_SHORTCUT_PREVIEW = "ctrl+shift+p"
 
-def _to_dotted_path(value: str | type) -> str:
+
+def _to_dotted_path(value: str | type | t.Callable[..., t.Any]) -> str:
     """Convert a class or callable to its dotted import path, or pass through strings."""
     if isinstance(value, str):
         return value
@@ -93,52 +100,38 @@ class LiveTranslationsSettings(t.TypedDict, total=False):
     Same format as ``SHORTCUT_EDIT``.  Default: ``"ctrl+shift+p"``."""
 
 
-_DEFAULTS: LiveTranslationsSettings = {
-    "BACKEND": "live_translations.backends.po.POFileBackend",
-    "CACHE": "default",
-    "DOMAIN": "django",
-    "PERMISSION_CHECK": "live_translations.conf.default_permission_check",
-}
-
-
 @dataclasses.dataclass(frozen=True, slots=True)
 class LiveTranslationsConf:
     """Resolved configuration for live_translations."""
 
     languages: list[LanguageCode] = dataclasses.field(default_factory=list)
-    backend: str = _DEFAULTS["BACKEND"]  # type: ignore[assignment]
-    cache: str = _DEFAULTS["CACHE"]
+    backend: str = _DEFAULT_BACKEND
+    cache: str = _DEFAULT_CACHE
     locale_dir: pathlib.Path = pathlib.Path()
-    domain: str = _DEFAULTS["DOMAIN"]
-    permission_check: str = _DEFAULTS["PERMISSION_CHECK"]  # type: ignore[assignment]
+    domain: str = _DEFAULT_DOMAIN
+    permission_check: str = _DEFAULT_PERMISSION_CHECK
     translation_active_by_default: bool = False
-    shortcut_edit: str = "ctrl+shift+e"
-    shortcut_preview: str = "ctrl+shift+p"
+    shortcut_edit: str = _DEFAULT_SHORTCUT_EDIT
+    shortcut_preview: str = _DEFAULT_SHORTCUT_PREVIEW
 
 
 def default_permission_check(request: django.http.HttpRequest) -> bool:
     """Default: only authenticated superusers see the live translation UI."""
     return bool(
-        hasattr(request, "user")
-        and request.user.is_authenticated
-        and request.user.is_superuser
+        hasattr(request, "user") and request.user.is_authenticated and request.user.is_superuser  # type: ignore[missing-attribute]
     )
 
 
 @functools.cache
 def get_settings() -> LiveTranslationsConf:
     """Read LIVE_TRANSLATIONS from Django settings and merge with defaults (cached)."""
-    raw: LiveTranslationsSettings = getattr(
-        django.conf.settings, "LIVE_TRANSLATIONS", {}
-    )
+    raw: LiveTranslationsSettings = getattr(django.conf.settings, "LIVE_TRANSLATIONS", {})  # type: ignore[bad-assignment]
 
     languages: list[str] = raw.get("LANGUAGES", [])
     if not languages:
         # If languages not set in the plugin settings, fallback to settings.LANGUAGES.
         # If settings.LANGUAGES is also not set, fallback to settings.LANGUAGE_CODE.
-        languages = [
-            code for code, _name in getattr(django.conf.settings, "LANGUAGES", [])
-        ]
+        languages = [code for code, _name in getattr(django.conf.settings, "LANGUAGES", [])]
         if not languages and django.conf.settings.LANGUAGE_CODE:
             languages = [django.conf.settings.LANGUAGE_CODE]
 
@@ -155,16 +148,14 @@ def get_settings() -> LiveTranslationsConf:
 
     return LiveTranslationsConf(
         languages=languages,
-        backend=_to_dotted_path(raw.get("BACKEND", _DEFAULTS["BACKEND"])),
-        cache=raw.get("CACHE", _DEFAULTS["CACHE"]),
+        backend=_to_dotted_path(raw.get("BACKEND", _DEFAULT_BACKEND)),
+        cache=raw.get("CACHE", _DEFAULT_CACHE),
         locale_dir=locale_dir,
-        domain=raw.get("DOMAIN", _DEFAULTS["DOMAIN"]),
-        permission_check=_to_dotted_path(
-            raw.get("PERMISSION_CHECK", _DEFAULTS["PERMISSION_CHECK"])
-        ),
+        domain=raw.get("DOMAIN", _DEFAULT_DOMAIN),
+        permission_check=_to_dotted_path(raw.get("PERMISSION_CHECK", _DEFAULT_PERMISSION_CHECK)),
         translation_active_by_default=raw.get("TRANSLATION_ACTIVE_BY_DEFAULT", False),
-        shortcut_edit=raw.get("SHORTCUT_EDIT", "ctrl+shift+e"),
-        shortcut_preview=raw.get("SHORTCUT_PREVIEW", "ctrl+shift+p"),
+        shortcut_edit=raw.get("SHORTCUT_EDIT", _DEFAULT_SHORTCUT_EDIT),
+        shortcut_preview=raw.get("SHORTCUT_PREVIEW", _DEFAULT_SHORTCUT_PREVIEW),
     )
 
 
@@ -172,7 +163,7 @@ def get_settings() -> LiveTranslationsConf:
 def get_permission_checker() -> PermissionCheck:
     """Import and return the configured permission check callable (cached)."""
     settings = get_settings()
-    return django.utils.module_loading.import_string(settings.permission_check)  # type: ignore[return-value]
+    return t.cast("PermissionCheck", django.utils.module_loading.import_string(settings.permission_check))
 
 
 def is_preview_request(request: django.http.HttpRequest) -> bool:
@@ -183,9 +174,7 @@ def is_preview_request(request: django.http.HttpRequest) -> bool:
 def get_backend_instance() -> "TranslationBackend":
     """Get or create the configured translation backend (cached singleton)."""
     settings = get_settings()
-    cls: type[TranslationBackend] = django.utils.module_loading.import_string(
-        settings.backend
-    )
+    cls: type[TranslationBackend] = django.utils.module_loading.import_string(settings.backend)
     return cls(
         locale_dir=settings.locale_dir,
         domain=settings.domain,

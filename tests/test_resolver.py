@@ -9,8 +9,8 @@ import re
 
 import pytest
 
-from live_translations import resolver as resolver_mod, strings
-
+from live_translations import resolver as resolver_mod
+from live_translations import strings
 
 # ── Fixtures ───────────────────────────────────────────────────
 
@@ -18,15 +18,11 @@ from live_translations import resolver as resolver_mod, strings
 def _html_escape(s: str) -> str:
     """Minimal HTML escape matching django.utils.html.escape behavior."""
     return (
-        s.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-        .replace("'", "&#x27;")
+        s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace("'", "&#x27;")
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 def resolver() -> resolver_mod.MarkerResolver:
     return resolver_mod.MarkerResolver(
         marker_re=strings.MARKER_RE,
@@ -200,16 +196,18 @@ class TestResolverTextContent:
         self,
         resolver: resolver_mod.MarkerResolver,
     ) -> None:
-        html = f"<p>{_marker('\u4f60\u597d', 'Hello')}</p>"
-        expected = f"<p>{_span('\u4f60\u597d', 'Hello')}</p>"
+        cjk = "\u4f60\u597d"
+        html = f"<p>{_marker(cjk, 'Hello')}</p>"
+        expected = f"<p>{_span(cjk, 'Hello')}</p>"
         assert resolver.resolve(html) == expected
 
     def test_emoji_content(
         self,
         resolver: resolver_mod.MarkerResolver,
     ) -> None:
-        html = f"<p>{_marker('Hello \U0001f44b', 'wave')}</p>"
-        expected = f"<p>{_span('Hello \U0001f44b', 'wave')}</p>"
+        wave = "Hello \U0001f44b"
+        html = f"<p>{_marker(wave, 'wave')}</p>"
+        expected = f"<p>{_span(wave, 'wave')}</p>"
         assert resolver.resolve(html) == expected
 
     def test_marker_at_top_level(
@@ -226,8 +224,9 @@ class TestResolverTextContent:
         resolver: resolver_mod.MarkerResolver,
     ) -> None:
         """msgid with <, >, " must be escaped in data-lt-msgid attribute."""
-        html = f"<p>{_marker('translated', 'say "hello" <world>')}</p>"
-        expected = f"<p>{_span('translated', 'say "hello" <world>')}</p>"
+        msgid = 'say "hello" <world>'
+        html = f"<p>{_marker('translated', msgid)}</p>"
+        expected = f"<p>{_span('translated', msgid)}</p>"
         assert resolver.resolve(html) == expected
 
 
@@ -307,7 +306,8 @@ class TestResolverAttributes:
         resolver: resolver_mod.MarkerResolver,
     ) -> None:
         """Single quote in msgid must be escaped in data-lt-attrs (which uses single-quote delimiters)."""
-        html = f'<p title="{_marker("It works", "it's a test")}">text</p>'
+        msgid = "it's a test"
+        html = f'<p title="{_marker("It works", msgid)}">text</p>'
         result = resolver.resolve(html)
         # The data-lt-attrs value must not break
         match = re.search(r"data-lt-attrs='([^']*(?:&#39;[^']*)*)'", result)
@@ -453,9 +453,7 @@ class TestResolverEdgeCases:
         self,
         resolver: resolver_mod.MarkerResolver,
     ) -> None:
-        html = (
-            f'<input disabled type="text" placeholder="{_marker("Name", "name_ph")}"/>'
-        )
+        html = f'<input disabled type="text" placeholder="{_marker("Name", "name_ph")}"/>'
         result = resolver.resolve(html)
         assert "data-lt-attrs=" in result
 
@@ -506,8 +504,7 @@ class TestResolverEdgeCases:
         resolver: resolver_mod.MarkerResolver,
     ) -> None:
         html = (
-            f'<a href="/page" class="link" id="main-link" '
-            f'data-value="42" title="{_marker("Go", "go_title")}">click</a>'
+            f'<a href="/page" class="link" id="main-link" data-value="42" title="{_marker("Go", "go_title")}">click</a>'
         )
         result = resolver.resolve(html)
         assert "data-lt-attrs=" in result
@@ -645,9 +642,7 @@ class TestResolverMalformedHTML:
         resolver: resolver_mod.MarkerResolver,
     ) -> None:
         """CDATA section — not common in HTML5 but shouldn't crash."""
-        html = (
-            f"<![CDATA[ {_marker('data', 'data')} ]]><p>{_marker('Hello', 'Hello')}</p>"
-        )
+        html = f"<![CDATA[ {_marker('data', 'data')} ]]><p>{_marker('Hello', 'Hello')}</p>"
         result = resolver.resolve(html)
         assert isinstance(result, str)
 
@@ -692,9 +687,7 @@ class TestResolverPerformance:
 
 class TestAttrsJson:
     def test_single_entry(self) -> None:
-        result = resolver_mod.MarkerResolver._attrs_json(
-            [{"a": "title", "m": "Hello", "c": ""}]
-        )
+        result = resolver_mod.MarkerResolver._attrs_json([{"a": "title", "m": "Hello", "c": ""}])
         assert result.startswith(" data-lt-attrs='")
         assert result.endswith("'")
         inner = result[len(" data-lt-attrs='") : -1]
@@ -712,9 +705,7 @@ class TestAttrsJson:
         assert len(parsed) == 2
 
     def test_single_quote_in_value_escaped(self) -> None:
-        result = resolver_mod.MarkerResolver._attrs_json(
-            [{"a": "title", "m": "it's", "c": ""}]
-        )
+        result = resolver_mod.MarkerResolver._attrs_json([{"a": "title", "m": "it's", "c": ""}])
         # Must not contain unescaped single quote inside the attr value
         inner = result[len(" data-lt-attrs='") : -1]
         assert "'" not in inner  # all real quotes are escaped

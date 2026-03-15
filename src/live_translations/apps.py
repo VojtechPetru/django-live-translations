@@ -1,3 +1,4 @@
+import contextlib
 import typing as t
 
 import django.apps
@@ -11,7 +12,7 @@ __all__ = ["LiveTranslationsConfig"]
 
 class LiveTranslationsConfig(django.apps.AppConfig):
     name: str = "live_translations"
-    verbose_name: str = "Live Translations"
+    verbose_name: str = "Live Translations"  # type: ignore[bad-override]
     default_auto_field: str = "django.db.models.BigAutoField"
 
     @t.override
@@ -26,8 +27,8 @@ def _register_checks() -> None:
     def check_settings(
         app_configs: t.Any,
         **kwargs: t.Any,
-    ) -> list[django.core.checks.Error | django.core.checks.Warning]:
-        errors: list[django.core.checks.Error | django.core.checks.Warning] = []
+    ) -> list[django.core.checks.CheckMessage]:
+        errors: list[django.core.checks.CheckMessage] = []
 
         raw: dict[str, t.Any] = getattr(django.conf.settings, "LIVE_TRANSLATIONS", {})
         valid_keys = set(conf.LiveTranslationsSettings.__annotations__)
@@ -67,10 +68,8 @@ def _register_checks() -> None:
                 )
             )
 
-        try:
+        with contextlib.suppress(Exception):
             errors.extend(conf.get_backend_instance().check())
-        except Exception:
-            pass
 
         return errors
 
@@ -92,9 +91,5 @@ def _patch_i18n_tags() -> None:
 
     django.templatetags.i18n.register.tags["trans"] = lt_tags.do_live_translate
     django.templatetags.i18n.register.tags["translate"] = lt_tags.do_live_translate
-    django.templatetags.i18n.register.tags["blocktrans"] = (
-        lt_tags.do_live_block_translate
-    )
-    django.templatetags.i18n.register.tags["blocktranslate"] = (
-        lt_tags.do_live_block_translate
-    )
+    django.templatetags.i18n.register.tags["blocktrans"] = lt_tags.do_live_block_translate
+    django.templatetags.i18n.register.tags["blocktranslate"] = lt_tags.do_live_block_translate

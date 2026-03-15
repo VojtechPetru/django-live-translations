@@ -3,14 +3,22 @@
 import typing as t
 
 __all__ = [
+    "BulkActivateResult",
     "DbOverride",
+    "DeleteResult",
     "DiffSegment",
+    "DisplayResult",
+    "HistoryItem",
+    "HistoryResult",
     "LanguageCode",
     "MsgKey",
     "OverrideMap",
+    "SaveResult",
+    "TranslationInfo",
+    "TranslationsResult",
 ]
 
-LanguageCode: t.TypeAlias = str
+type LanguageCode = str
 
 
 class MsgKey(t.NamedTuple):
@@ -18,7 +26,7 @@ class MsgKey(t.NamedTuple):
     context: str
 
 
-OverrideMap: t.TypeAlias = dict[MsgKey, str]
+type OverrideMap = dict[MsgKey, str]
 
 
 class DbOverride(t.NamedTuple):
@@ -29,3 +37,54 @@ class DbOverride(t.NamedTuple):
 class DiffSegment(t.TypedDict):
     type: str
     text: str
+
+
+class TranslationInfo(t.TypedDict):
+    msgstr: str
+    fuzzy: bool
+    is_active: bool
+    has_override: bool
+
+
+class DisplayResult(t.TypedDict):
+    text: str
+    is_preview_entry: bool
+
+
+class TranslationsResult(t.TypedDict):
+    msgid: str
+    context: str
+    translations: dict[LanguageCode, TranslationInfo]
+    defaults: dict[LanguageCode, str]
+    hint: str
+
+
+class SaveResult(t.TypedDict):
+    ok: bool
+    display: DisplayResult
+
+
+class DeleteResult(t.TypedDict):
+    ok: bool
+    deleted: int
+    display: DisplayResult
+
+
+class HistoryItem(t.TypedDict):
+    id: int
+    language: str
+    action: str
+    old_value: str
+    new_value: str
+    user: str
+    created_at: str
+    diff: t.NotRequired[list[DiffSegment]]
+
+
+class HistoryResult(t.TypedDict):
+    history: list[HistoryItem]
+
+
+class BulkActivateResult(t.TypedDict):
+    ok: bool
+    activated: int

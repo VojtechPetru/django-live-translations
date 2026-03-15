@@ -54,9 +54,7 @@ class LiveTranslationsMiddleware:
         # including API dispatch and admin saves).
         raw_user = getattr(request, "user", None)
         user_token = strings.lt_current_user.set(
-            raw_user
-            if raw_user and getattr(raw_user, "is_authenticated", False)
-            else None
+            raw_user if raw_user and getattr(raw_user, "is_authenticated", False) else None
         )
         try:
             return self._handle_request(request)
@@ -113,9 +111,7 @@ class LiveTranslationsMiddleware:
         request: django.http.HttpRequest,
         view_name: str,
     ) -> django.http.HttpResponse:
-        view: t.Callable[[django.http.HttpRequest], django.http.HttpResponse] = getattr(
-            views, view_name
-        )
+        view: t.Callable[[django.http.HttpRequest], django.http.HttpResponse] = getattr(views, view_name)
         return view(request)
 
     @staticmethod
@@ -150,9 +146,7 @@ class LiveTranslationsMiddleware:
         css_url = django.templatetags.static.static("live_translations/widget.css")
         js_url = django.templatetags.static.static("live_translations/widget.js")
 
-        active_by_default = (
-            "true" if settings.translation_active_by_default else "false"
-        )
+        active_by_default = "true" if settings.translation_active_by_default else "false"
 
         preview_config = ""
         if preview_entries is not None:
@@ -179,9 +173,7 @@ class LiveTranslationsMiddleware:
             f'<script src="{js_url}"></script>'
         )
 
-        response.content = (
-            content[:body_close_idx] + snippet + content[body_close_idx:]
-        ).encode(response.charset)
+        response.content = (content[:body_close_idx] + snippet + content[body_close_idx:]).encode(response.charset)
 
         if "Content-Length" in response:
             response["Content-Length"] = len(response.content)

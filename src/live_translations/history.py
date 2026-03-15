@@ -6,10 +6,11 @@ import re
 import django.db.models
 
 from live_translations import models, strings
-from live_translations.types import DiffSegment, LanguageCode
+from live_translations.types import DiffSegment, LanguageCode, MsgKey
 
 __all__ = [
     "compute_diff",
+    "get_user",
     "record_active_changes",
     "record_bulk_action",
     "record_change",
@@ -17,7 +18,7 @@ __all__ = [
 ]
 
 
-def _get_user() -> django.db.models.Model | None:
+def get_user() -> django.db.models.Model | None:
     """Read the current user from the contextvar, returning None for anonymous."""
     user = strings.lt_current_user.get(None)
     if user is not None and not getattr(user, "is_authenticated", False):
@@ -28,28 +29,26 @@ def _get_user() -> django.db.models.Model | None:
 def record_change(
     *,
     language: LanguageCode,
-    msgid: str,
-    context: str,
-    action: str,
+    key: MsgKey,
+    action: models.TranslationHistory.Action,
     old_value: str = "",
     new_value: str = "",
 ) -> models.TranslationHistory:
     """Create a single TranslationHistory entry, reading user from contextvar."""
     return models.TranslationHistory.objects.create(
         language=language,
-        msgid=msgid,
-        context=context,
+        msgid=key.msgid,
+        context=key.context,
         action=action,
         old_value=old_value,
         new_value=new_value,
-        user=_get_user(),
+        user=get_user(),
     )
 
 
 def record_text_changes(
     *,
-    msgid: str,
-    context: str,
+    key: MsgKey,
     old_entries: dict[LanguageCode, str],
     new_entries: dict[LanguageCode, str],
     defaults: dict[LanguageCode, str] | None = None,
@@ -66,8 +65,7 @@ def record_text_changes(
         if not old_msgstr:
             record_change(
                 language=lang,
-                msgid=msgid,
-                context=context,
+                key=key,
                 action=models.TranslationHistory.Action.CREATE,
                 old_value=(defaults or {}).get(lang, ""),
                 new_value=new_msgstr,
@@ -75,8 +73,7 @@ def record_text_changes(
         elif old_msgstr != new_msgstr:
             record_change(
                 language=lang,
-                msgid=msgid,
-                context=context,
+                key=key,
                 action=models.TranslationHistory.Action.UPDATE,
                 old_value=old_msgstr,
                 new_value=new_msgstr,
@@ -85,8 +82,7 @@ def record_text_changes(
 
 def record_active_changes(
     *,
-    msgid: str,
-    context: str,
+    key: MsgKey,
     old_states: dict[LanguageCode, bool],
     new_states: dict[LanguageCode, bool],
 ) -> None:
@@ -99,8 +95,7 @@ def record_active_changes(
         if old_active is not None and old_active != new_active:
             record_change(
                 language=lang,
-                msgid=msgid,
-                context=context,
+                key=key,
                 action=(
                     models.TranslationHistory.Action.ACTIVATE
                     if new_active
@@ -113,31 +108,31 @@ def record_active_changes(
 
 def record_bulk_action(
     *,
-    entries: list[tuple[str, str, str]],
-    action: str,
+    entries: list[tuple[LanguageCode, MsgKey]],
+    action: models.TranslationHistory.Action,
     old_value: str,
     new_value: str,
 ) -> None:
     """Bulk-create history entries for admin actions (activate/deactivate/delete).
 
-    ``entries`` is a list of (language, msgid, context) tuples, materialized
+    ``entries`` is a list of (language, key) tuples, materialized
     before the bulk update so the queryset is not re-evaluated.
     """
     if not entries:
         return
-    user = _get_user()
+    user = get_user()
     models.TranslationHistory.objects.bulk_create(
         [
             models.TranslationHistory(
                 language=lang,
-                msgid=mid,
-                context=ctx,
+                msgid=key.msgid,
+                context=key.context,
                 action=action,
                 old_value=old_value,
                 new_value=new_value,
                 user=user,
             )
-            for lang, mid, ctx in entries
+            for lang, key in entries
         ]
     )
 

@@ -89,7 +89,7 @@ def make_marker(
         escaped: True if content is already HTML-escaped (from template tags).
     """
     flag = "e" if escaped else "r"
-    return django.utils.safestring.mark_safe(  # type: ignore[return-value]
+    return django.utils.safestring.mark_safe(  # noqa: S308  # type: ignore[return-value]
         MARKER_START
         + _b64e(msgid)
         + MARKER_SEP
@@ -104,24 +104,22 @@ def make_marker(
 
 # Per-request flag controlling whether TranslatableString produces wrapping spans.
 # Set by LiveTranslationsMiddleware, reset in its finally block.
-lt_active: contextvars.ContextVar[bool] = contextvars.ContextVar(
-    "lt_active", default=False
-)
+lt_active: contextvars.ContextVar[bool] = contextvars.ContextVar("lt_active", default=False)
 
 if t.TYPE_CHECKING:
     from django.contrib.auth.models import AbstractBaseUser
 
 # Per-request user reference for history tracking.
 # Set by LiveTranslationsMiddleware, used by history.record_change().
-lt_current_user: "contextvars.ContextVar[AbstractBaseUser | None]" = (
-    contextvars.ContextVar("lt_current_user", default=None)
+lt_current_user: "contextvars.ContextVar[AbstractBaseUser | None]" = contextvars.ContextVar(
+    "lt_current_user", default=None
 )
 
 # Per-request preview overrides: maps (msgid, context) -> msgstr for inactive
 # translations that should be shown in preview mode. Set by the middleware when
 # the lt_preview cookie is present, reset in its finally block.
-lt_preview_overrides: contextvars.ContextVar[OverrideMap | None] = (
-    contextvars.ContextVar("lt_preview_overrides", default=None)
+lt_preview_overrides: contextvars.ContextVar[OverrideMap | None] = contextvars.ContextVar(
+    "lt_preview_overrides", default=None
 )
 
 
@@ -132,6 +130,8 @@ class TranslatableString(str):
     autoescaping, where __html__() produces a <span> wrapper when
     the lt_active contextvar is True.
     """
+
+    __slots__ = ("_lt_context", "_lt_msgid")
 
     _lt_msgid: str
     _lt_context: str
@@ -157,14 +157,12 @@ class TranslatableString(str):
         if not lt_active.get(False):
             return django.utils.html.escape(str.__str__(self))
 
-        return make_marker(
-            str.__str__(self), self._lt_msgid, self._lt_context, escaped=False
-        )
+        return make_marker(str.__str__(self), self._lt_msgid, self._lt_context, escaped=False)
 
-    def __mod__(
+    def __mod__(  # type: ignore[bad-override]
         self,
         args: t.Any,
-    ) -> str:  # type: ignore[override]
+    ) -> str:
         """Support %-formatting (used by gettext for %(var)s placeholders).
 
         Returns a plain str since the formatted result may not match the msgid.
@@ -199,9 +197,7 @@ def install_gettext_patch() -> None:
     try:
         _orig_gettext = _trans.gettext  # type: ignore[union-attr]
     except AttributeError:
-        logger.warning(
-            "Could not access _trans.gettext -- live translation patching skipped"
-        )
+        logger.warning("Could not access _trans.gettext -- live translation patching skipped")
         return
 
     try:
@@ -210,9 +206,9 @@ def install_gettext_patch() -> None:
         _orig_pgettext = None
 
     def _patched_gettext(message: str) -> str:
-        result = _orig_gettext(message)
+        result: str = _orig_gettext(message)
         if not lt_active.get(False):
-            return result  # type: ignore[no-any-return]
+            return result
         # Django may pass lazy proxy objects; force to str once upfront.
         message = str(message)
         try:
@@ -224,19 +220,15 @@ def install_gettext_patch() -> None:
             return TranslatableString(result, msgid=message)
         except Exception:
             logger.exception("Failed to wrap gettext result in TranslatableString")
-            return result  # type: ignore[no-any-return]
+            return result
 
     def _patched_pgettext(
         context: str,
         message: str,
     ) -> str:
-        result = (
-            _orig_pgettext(context, message)
-            if _orig_pgettext is not None
-            else _orig_gettext(message)
-        )
+        result: str = _orig_pgettext(context, message) if _orig_pgettext is not None else _orig_gettext(message)
         if not lt_active.get(False):
-            return result  # type: ignore[no-any-return]
+            return result
         # Django may pass lazy proxy objects; force to str once upfront.
         message = str(message)
         context = str(context)
@@ -249,7 +241,7 @@ def install_gettext_patch() -> None:
             return TranslatableString(result, msgid=message, context=context)
         except Exception:
             logger.exception("Failed to wrap pgettext result in TranslatableString")
-            return result  # type: ignore[no-any-return]
+            return result
 
     _trans.gettext = _patched_gettext  # type: ignore[union-attr]
     if _orig_pgettext is not None:
@@ -286,11 +278,7 @@ def install_gettext_patch() -> None:
         # Django may pass lazy proxy objects; force to str once upfront.
         message = str(message)
         context = str(context)
-        result = (
-            _orig_pgettext(context, message)
-            if _orig_pgettext is not None
-            else _orig_gettext(message)
-        )
+        result = _orig_pgettext(context, message) if _orig_pgettext is not None else _orig_gettext(message)
         try:
             preview = lt_preview_overrides.get(None)
             if preview is not None:
@@ -303,11 +291,13 @@ def install_gettext_patch() -> None:
             return result  # type: ignore[return-value]
 
     django.utils.translation.gettext_lazy = django.utils.functional.lazy(  # type: ignore[assignment]
-        _gettext_translatable, TranslatableString
+        _gettext_translatable,  # type: ignore[bad-argument-type]
+        TranslatableString,
     )
     if _orig_pgettext is not None:
         django.utils.translation.pgettext_lazy = django.utils.functional.lazy(  # type: ignore[assignment]
-            _pgettext_translatable, TranslatableString
+            _pgettext_translatable,  # type: ignore[bad-argument-type]
+            TranslatableString,
         )
 
     # -- Template rendering patch --
@@ -325,18 +315,18 @@ def install_gettext_patch() -> None:
         value: t.Any,
         context: t.Any,
     ) -> str:
-        value = _tpl.template_localtime(value, use_tz=context.use_tz)
+        value = _tpl.template_localtime(value, use_tz=context.use_tz)  # type: ignore[missing-attribute]
         value = django.utils.formats.localize(value, use_l10n=context.use_l10n)
         if context.autoescape:
             if hasattr(value, "__html__"):
                 try:
-                    return value.__html__()  # type: ignore[no-any-return]
+                    return t.cast("str", value.__html__())
                 except Exception:
                     logger.exception("Failed to call __html__() on value")
-                    return _orig_render_value(value, context)  # type: ignore[no-any-return]
+                    return t.cast("str", _orig_render_value(value, context))
             if not issubclass(type(value), str):
                 value = str(value)
-            return django.utils.html.conditional_escape(value)  # type: ignore[no-any-return]
+            return t.cast("str", django.utils.html.conditional_escape(value))
         return str(value)
 
     _tpl.render_value_in_context = _patched_render_value_in_context

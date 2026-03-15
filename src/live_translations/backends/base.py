@@ -2,16 +2,13 @@
 
 import abc
 import dataclasses
-import typing as t
 import pathlib
 
+import django.core.checks
 import polib
 
 from live_translations import conf
 from live_translations.types import LanguageCode, MsgKey, OverrideMap
-
-if t.TYPE_CHECKING:
-    import django.core.checks
 
 __all__ = ["TranslationBackend", "TranslationEntry"]
 
@@ -27,6 +24,10 @@ class TranslationEntry:
     fuzzy: bool = False
     is_active: bool = True
     has_override: bool = False
+
+    @property
+    def key(self) -> MsgKey:
+        return MsgKey(self.msgid, self.context)
 
 
 class TranslationBackend(abc.ABC):
@@ -49,9 +50,8 @@ class TranslationBackend(abc.ABC):
     @abc.abstractmethod
     def get_translations(
         self,
-        msgid: str,
+        key: MsgKey,
         languages: list[LanguageCode],
-        context: str = "",
     ) -> dict[LanguageCode, TranslationEntry]:
         """Fetch translations for a msgid across multiple languages.
 
@@ -63,9 +63,8 @@ class TranslationBackend(abc.ABC):
     @abc.abstractmethod
     def save_translations(
         self,
-        msgid: str,
+        key: MsgKey,
         translations: dict[LanguageCode, str],
-        context: str = "",
         active_flags: dict[LanguageCode, bool] | None = None,
     ) -> None:
         """Save translations for a msgid.
@@ -124,9 +123,8 @@ class TranslationBackend(abc.ABC):
 
     def get_defaults(
         self,
-        msgid: str,
+        key: MsgKey,
         languages: list[LanguageCode],
-        context: str = "",
     ) -> dict[LanguageCode, str]:
         """Get baseline default translations for display alongside overrides.
 
@@ -136,8 +134,7 @@ class TranslationBackend(abc.ABC):
 
     def get_hint(
         self,
-        msgid: str,
-        context: str = "",
+        key: MsgKey,
     ) -> str:
         """Get the translator comment (#. line) for a msgid from .po files."""
         for lang in conf.get_settings().languages:
@@ -146,12 +143,12 @@ class TranslationBackend(abc.ABC):
                 po = polib.pofile(str(path))
             except (OSError, ValueError):
                 continue
-            entry = po.find(msgid, msgctxt=context or False)
+            entry = po.find(key.msgid, msgctxt=key.context or False)
             if entry and entry.comment:
                 return entry.comment.strip()
         return ""
 
-    def check(self) -> "list[django.core.checks.CheckMessage]":
+    def check(self) -> list[django.core.checks.CheckMessage]:
         """Return Django system check errors/warnings for this backend's configuration.
 
         Override in subclasses to add backend-specific checks.

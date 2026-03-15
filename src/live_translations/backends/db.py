@@ -6,17 +6,17 @@ make overrides visible to Django's gettext machinery.
 """
 
 import logging
+import pathlib
 import typing as t
 import uuid
-import pathlib
 
 import django.conf
 import django.core.cache
 import django.core.checks
 import django.db.utils
 import django.utils.translation
-import django.utils.translation.trans_real
 import django.utils.translation.reloader
+import django.utils.translation.trans_real
 
 from live_translations import conf, history, models
 from live_translations.backends import base, po
@@ -104,9 +104,7 @@ class DatabaseBackend(base.TranslationBackend):
         # replaces trans_real._active with a fresh Local(), wiping the language
         # that LocaleMiddleware already activated for this request.
         current_lang = django.utils.translation.get_language()
-        django.utils.translation.reloader.translation_file_changed(
-            sender=None, file_path=_DUMMY_MO
-        )
+        django.utils.translation.reloader.translation_file_changed(sender=None, file_path=_DUMMY_MO)
         self.inject_overrides()
         self._local_version = remote
         # Re-activate the language so this request proceeds in the correct locale.
@@ -116,9 +114,7 @@ class DatabaseBackend(base.TranslationBackend):
     @t.override
     def bump_catalog_version(self) -> None:
         """Set a new version in shared cache, signaling all processes."""
-        django.core.cache.caches[self.cache_alias].set(
-            CATALOG_VERSION_KEY, uuid.uuid4().hex, CATALOG_VERSION_TIMEOUT
-        )
+        django.core.cache.caches[self.cache_alias].set(CATALOG_VERSION_KEY, uuid.uuid4().hex, CATALOG_VERSION_TIMEOUT)
 
     @t.override
     def bulk_activate(
@@ -132,11 +128,7 @@ class DatabaseBackend(base.TranslationBackend):
         for key in msgids:
             q |= django.db.models.Q(msgid=key.msgid, context=key.context)
 
-        qs = (
-            models.TranslationEntry.objects.qs.for_languages([language])
-            .active(False)
-            .filter(q)
-        )
+        qs = models.TranslationEntry.objects.qs.for_languages([language]).active(active=False).filter(q)
 
         activated = [MsgKey(msgid, ctx) for msgid, ctx in qs.values_list("msgid", "context")]
         qs.update(is_active=True)
@@ -152,7 +144,7 @@ class DatabaseBackend(base.TranslationBackend):
         try:
             for msgid, ctx, msgstr in (
                 models.TranslationEntry.objects.qs.for_languages([language])
-                .active(False)
+                .active(active=False)
                 .exclude(msgstr="")
                 .values_list("msgid", "context", "msgstr")
             ):
@@ -165,9 +157,7 @@ class DatabaseBackend(base.TranslationBackend):
     def inject_overrides(self) -> None:
         """Query all DB overrides and inject into Django's translation catalogs."""
         try:
-            rows = models.TranslationEntry.objects.qs.active().values_list(
-                "language", "msgid", "context", "msgstr"
-            )
+            rows = models.TranslationEntry.objects.qs.active().values_list("language", "msgid", "context", "msgstr")
         except (django.db.utils.OperationalError, django.db.utils.ProgrammingError):
             # Table doesn't exist yet (before migrations).
             return
@@ -181,11 +171,9 @@ class DatabaseBackend(base.TranslationBackend):
                 trans_obj: django.utils.translation.trans_real.DjangoTranslation = (
                     django.utils.translation.trans_real.translation(lang)
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001, S112
                 continue
-            catalog: django.utils.translation.trans_real.TranslationCatalog | None = (
-                trans_obj._catalog  # type: ignore[assignment]
-            )
+            catalog: django.utils.translation.trans_real.TranslationCatalog | None = trans_obj._catalog  # type: ignore[assignment]
             if catalog is None:
                 continue
             for msgid, context, msgstr in entries:
@@ -195,23 +183,18 @@ class DatabaseBackend(base.TranslationBackend):
     @t.override
     def get_translations(
         self,
-        msgid: str,
+        key: MsgKey,
         languages: list[LanguageCode],
-        context: str = "",
     ) -> dict[LanguageCode, base.TranslationEntry]:
         """Fetch translations for a msgid, merging DB overrides with .po defaults."""
         po_backend = self._get_po_backend()
-        po_entries = po_backend.get_translations(
-            msgid=msgid,
-            languages=languages,
-            context=context,
-        )
+        po_entries = po_backend.get_translations(key, languages)
 
         # Query DB overrides for this specific msgid
         db_overrides: dict[LanguageCode, DbOverride] = {}
         try:
             for row in (
-                models.TranslationEntry.objects.qs.for_msgid(msgid, context=context)
+                models.TranslationEntry.objects.qs.for_key(key)
                 .for_languages(languages)
                 .values_list("language", "msgstr", "is_active")
             ):
@@ -229,9 +212,9 @@ class DatabaseBackend(base.TranslationBackend):
 
             result[lang] = base.TranslationEntry(
                 language=lang,
-                msgid=msgid,
+                msgid=key.msgid,
                 msgstr=db_entry.msgstr if db_entry is not None else po_msgstr,
-                context=context,
+                context=key.context,
                 fuzzy=po_fuzzy if db_entry is None else False,
                 is_active=db_entry.is_active if db_entry is not None else True,
                 has_override=db_entry is not None,
@@ -242,39 +225,33 @@ class DatabaseBackend(base.TranslationBackend):
     @t.override
     def get_defaults(
         self,
-        msgid: str,
+        key: MsgKey,
         languages: list[LanguageCode],
-        context: str = "",
     ) -> dict[LanguageCode, str]:
         """Get .po file translations (read-only) for display as defaults."""
         po_backend = self._get_po_backend()
-        po_entries = po_backend.get_translations(
-            msgid=msgid,
-            languages=languages,
-            context=context,
-        )
+        po_entries = po_backend.get_translations(key, languages)
         return {lang: entry.msgstr for lang, entry in po_entries.items()}
 
     @t.override
     def save_translations(
         self,
-        msgid: str,
+        key: MsgKey,
         translations: dict[LanguageCode, str],
-        context: str = "",
         active_flags: dict[LanguageCode, bool] | None = None,
     ) -> None:
         """Save translation overrides to the database."""
         fallback_active = conf.get_settings().translation_active_by_default
-        po_defaults = self.get_defaults(msgid, list(translations.keys()), context)
+        po_defaults = self.get_defaults(key, list(translations.keys()))
 
         # Snapshot existing DB values (text + active state) for history tracking
         existing: dict[LanguageCode, DbOverride] = {}
         for row in (
-            models.TranslationEntry.objects.qs.for_msgid(msgid, context=context)
+            models.TranslationEntry.objects.qs.for_key(key)
             .filter(language__in=translations.keys())
             .values_list("language", "msgstr", "is_active")
         ):
-            row: tuple["LanguageCode", str, bool]
+            row: tuple[LanguageCode, str, bool]
             existing[row[0]] = DbOverride(row[1], row[2])
 
         old_text_values: dict[LanguageCode, str] = {}
@@ -284,32 +261,26 @@ class DatabaseBackend(base.TranslationBackend):
             old_entry = existing.get(lang)
             old_text_values[lang] = old_entry.msgstr if old_entry else ""
 
-            is_active = (
-                active_flags.get(lang, fallback_active)
-                if active_flags
-                else fallback_active
-            )
+            is_active = active_flags.get(lang, fallback_active) if active_flags else fallback_active
             new_active_states[lang] = is_active
             if old_entry is not None:
                 old_active_states[lang] = old_entry.is_active
 
             models.TranslationEntry.objects.update_or_create(
                 language=lang,
-                msgid=msgid,
-                context=context,
+                msgid=key.msgid,
+                context=key.context,
                 defaults={"msgstr": msgstr, "is_active": is_active},
             )
 
         history.record_text_changes(
-            msgid=msgid,
-            context=context,
+            key=key,
             old_entries=old_text_values,
             new_entries=translations,
             defaults=po_defaults,
         )
         history.record_active_changes(
-            msgid=msgid,
-            context=context,
+            key=key,
             old_states=old_active_states,
             new_states=new_active_states,
         )

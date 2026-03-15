@@ -32,9 +32,7 @@ class MarkerResolver:
     _S_COMMENT = 9
     _S_ATTR_UQ = 10  # Inside unquoted attribute value
 
-    _RAWTEXT_TAGS: t.ClassVar[frozenset[str]] = frozenset(
-        {"script", "style", "textarea", "title"}
-    )
+    _RAWTEXT_TAGS: t.ClassVar[frozenset[str]] = frozenset({"script", "style", "textarea", "title"})
 
     def __init__(
         self,
@@ -97,9 +95,7 @@ class MarkerResolver:
                     content = self._b64_decode(m.group(3))
                     flag = m.group(4)
 
-                    escaped_content = (
-                        self._html_escape(content) if flag == "r" else content
-                    )
+                    escaped_content = self._html_escape(content) if flag == "r" else content
 
                     if state == self._S_TEXT:
                         # Text content -> <span> wrapper
@@ -252,11 +248,7 @@ class MarkerResolver:
                         if html[j] == '"':
                             recover = False
                             break
-                        if (
-                            html[j] == "<"
-                            and j + 1 < n
-                            and (html[j + 1].isalpha() or html[j + 1] == "/")
-                        ):
+                        if html[j] == "<" and j + 1 < n and (html[j + 1].isalpha() or html[j + 1] == "/"):
                             break
                     if recover:
                         if pending_attrs:
@@ -278,11 +270,7 @@ class MarkerResolver:
                         if html[j] == "'":
                             recover = False
                             break
-                        if (
-                            html[j] == "<"
-                            and j + 1 < n
-                            and (html[j + 1].isalpha() or html[j + 1] == "/")
-                        ):
+                        if html[j] == "<" and j + 1 < n and (html[j + 1].isalpha() or html[j + 1] == "/"):
                             break
                     if recover:
                         if pending_attrs:
@@ -315,12 +303,11 @@ class MarkerResolver:
                     state = self._S_TEXT
                     continue
 
-            elif state == self._S_COMMENT:
-                if html[i : i + 3] == "-->":
-                    result.append("-->")
-                    i += 3
-                    state = self._S_TEXT
-                    continue
+            elif state == self._S_COMMENT and html[i : i + 3] == "-->":
+                result.append("-->")
+                i += 3
+                state = self._S_TEXT
+                continue
 
             result.append(ch)
             i += 1
