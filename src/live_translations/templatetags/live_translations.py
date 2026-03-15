@@ -15,6 +15,14 @@ import django.templatetags.i18n
 
 from live_translations import strings
 
+__all__ = [
+    "LiveBlockTranslateNode",
+    "LiveTranslateNode",
+    "do_live_block_translate",
+    "do_live_translate",
+    "register",
+]
+
 register = django.template.Library()
 
 # -- Re-export all tags and filters from Django's i18n library --

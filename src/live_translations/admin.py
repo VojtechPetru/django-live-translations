@@ -7,7 +7,11 @@ import django.db.models
 import django.http
 import django.utils.html
 
-from live_translations import models
+from live_translations import conf, history, models
+from live_translations.backends import po
+from live_translations.history import _get_user
+
+__all__ = ["TranslationEntryAdmin"]
 
 try:
     import unfold.admin
@@ -19,9 +23,6 @@ except ImportError:
 
 def _get_po_default(obj: models.TranslationEntry) -> str:
     """Get the .po file translation for this entry's msgid/context/language."""
-    from live_translations import conf
-    from live_translations.backends import po
-
     settings = conf.get_settings()
     po_backend = po.POFileBackend(
         locale_dir=settings.locale_dir, domain=settings.domain
@@ -114,8 +115,6 @@ class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
         form: t.Any,
         change: bool,
     ) -> None:
-        from live_translations import conf, history
-
         # Capture old value before save for history tracking
         old_msgstr = ""
         if change and obj.pk:
@@ -168,8 +167,6 @@ class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
         request: django.http.HttpRequest,
         obj: models.TranslationEntry,
     ) -> None:
-        from live_translations import conf, history
-
         po_default = _get_po_default(obj)
         history.record_change(
             language=obj.language,
@@ -189,10 +186,6 @@ class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
         request: django.http.HttpRequest,
         queryset: django.db.models.QuerySet[models.TranslationEntry],
     ) -> None:
-        from live_translations import conf
-        from live_translations.backends import po
-        from live_translations.history import _get_user
-
         settings = conf.get_settings()
         po_backend = po.POFileBackend(
             locale_dir=settings.locale_dir, domain=settings.domain
@@ -240,8 +233,6 @@ class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
         request: django.http.HttpRequest,
         queryset: django.db.models.QuerySet[models.TranslationEntry],
     ) -> None:
-        from live_translations import conf, history
-
         to_activate = queryset.filter(is_active=False)
         affected = list(to_activate.values_list("language", "msgid", "context"))
         updated = to_activate.update(is_active=True)
@@ -262,8 +253,6 @@ class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
         request: django.http.HttpRequest,
         queryset: django.db.models.QuerySet[models.TranslationEntry],
     ) -> None:
-        from live_translations import conf, history
-
         to_deactivate = queryset.filter(is_active=True)
         affected = list(to_deactivate.values_list("language", "msgid", "context"))
         updated = to_deactivate.update(is_active=False)

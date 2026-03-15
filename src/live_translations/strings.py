@@ -15,8 +15,27 @@ import logging
 import re
 import typing as t
 
+import django.template.base
+import django.utils.formats
+import django.utils.functional
 import django.utils.html
 import django.utils.safestring
+import django.utils.translation
+
+from live_translations.types import MsgKey, OverrideMap
+
+__all__ = [
+    "MARKER_END",
+    "MARKER_RE",
+    "MARKER_SEP",
+    "MARKER_START",
+    "TranslatableString",
+    "install_gettext_patch",
+    "lt_active",
+    "lt_current_user",
+    "lt_preview_overrides",
+    "make_marker",
+]
 
 logger = logging.getLogger("live_translations")
 
@@ -101,7 +120,7 @@ lt_current_user: "contextvars.ContextVar[AbstractBaseUser | None]" = (
 # Per-request preview overrides: maps (msgid, context) -> msgstr for inactive
 # translations that should be shown in preview mode. Set by the middleware when
 # the lt_preview cookie is present, reset in its finally block.
-lt_preview_overrides: contextvars.ContextVar[dict[tuple[str, str], str] | None] = (
+lt_preview_overrides: contextvars.ContextVar[OverrideMap | None] = (
     contextvars.ContextVar("lt_preview_overrides", default=None)
 )
 
@@ -173,9 +192,6 @@ def install_gettext_patch() -> None:
     All TranslatableString wrapping is guarded by try/except so failures never
     affect regular users and degrade gracefully for translators.
     """
-    import django.utils.functional
-    import django.utils.translation
-
     _trans = django.utils.translation._trans  # type: ignore[attr-defined]
 
     # Force lazy resolution of _trans attributes by accessing them once.
@@ -197,13 +213,15 @@ def install_gettext_patch() -> None:
         result = _orig_gettext(message)
         if not lt_active.get(False):
             return result  # type: ignore[no-any-return]
+        # Django may pass lazy proxy objects; force to str once upfront.
+        message = str(message)
         try:
             preview = lt_preview_overrides.get(None)
             if preview is not None:
-                pv = preview.get((str(message), ""))
+                pv = preview.get(MsgKey(message, ""))
                 if pv is not None:
-                    return TranslatableString(pv, msgid=str(message))
-            return TranslatableString(result, msgid=str(message))
+                    return TranslatableString(pv, msgid=message)
+            return TranslatableString(result, msgid=message)
         except Exception:
             logger.exception("Failed to wrap gettext result in TranslatableString")
             return result  # type: ignore[no-any-return]
@@ -219,15 +237,16 @@ def install_gettext_patch() -> None:
         )
         if not lt_active.get(False):
             return result  # type: ignore[no-any-return]
+        # Django may pass lazy proxy objects; force to str once upfront.
+        message = str(message)
+        context = str(context)
         try:
             preview = lt_preview_overrides.get(None)
             if preview is not None:
-                pv = preview.get((str(message), str(context)))
+                pv = preview.get(MsgKey(message, context))
                 if pv is not None:
-                    return TranslatableString(
-                        pv, msgid=str(message), context=str(context)
-                    )
-            return TranslatableString(result, msgid=str(message), context=str(context))
+                    return TranslatableString(pv, msgid=message, context=context)
+            return TranslatableString(result, msgid=message, context=context)
         except Exception:
             logger.exception("Failed to wrap pgettext result in TranslatableString")
             return result  # type: ignore[no-any-return]
@@ -246,14 +265,16 @@ def install_gettext_patch() -> None:
     # lt_active itself and returns plain escaped text for normal users.
 
     def _gettext_translatable(message: str) -> TranslatableString:
+        # Django may pass lazy proxy objects; force to str once upfront.
+        message = str(message)
         result = _orig_gettext(message)
         try:
             preview = lt_preview_overrides.get(None)
             if preview is not None:
-                pv = preview.get((str(message), ""))
+                pv = preview.get(MsgKey(message, ""))
                 if pv is not None:
-                    return TranslatableString(pv, msgid=str(message))
-            return TranslatableString(result, msgid=str(message))
+                    return TranslatableString(pv, msgid=message)
+            return TranslatableString(result, msgid=message)
         except Exception:
             logger.exception("Failed to create TranslatableString for lazy gettext")
             return result  # type: ignore[return-value]
@@ -262,6 +283,9 @@ def install_gettext_patch() -> None:
         context: str,
         message: str,
     ) -> TranslatableString:
+        # Django may pass lazy proxy objects; force to str once upfront.
+        message = str(message)
+        context = str(context)
         result = (
             _orig_pgettext(context, message)
             if _orig_pgettext is not None
@@ -270,12 +294,10 @@ def install_gettext_patch() -> None:
         try:
             preview = lt_preview_overrides.get(None)
             if preview is not None:
-                pv = preview.get((str(message), str(context)))
+                pv = preview.get(MsgKey(message, context))
                 if pv is not None:
-                    return TranslatableString(
-                        pv, msgid=str(message), context=str(context)
-                    )
-            return TranslatableString(result, msgid=str(message), context=str(context))
+                    return TranslatableString(pv, msgid=message, context=context)
+            return TranslatableString(result, msgid=message, context=context)
         except Exception:
             logger.exception("Failed to create TranslatableString for lazy pgettext")
             return result  # type: ignore[return-value]
@@ -295,7 +317,7 @@ def install_gettext_patch() -> None:
     # Similarly, conditional_escape() calls str() on Promise objects.
     # We add an early __html__ check so objects that support it (our lazy
     # proxy, TranslatableString, SafeString) short-circuit correctly.
-    import django.template.base as _tpl
+    _tpl = django.template.base
 
     _orig_render_value = _tpl.render_value_in_context
 
@@ -303,8 +325,6 @@ def install_gettext_patch() -> None:
         value: t.Any,
         context: t.Any,
     ) -> str:
-        import django.utils.formats
-
         value = _tpl.template_localtime(value, use_tz=context.use_tz)
         value = django.utils.formats.localize(value, use_l10n=context.use_l10n)
         if context.autoescape:

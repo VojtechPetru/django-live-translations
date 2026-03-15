@@ -16,7 +16,10 @@ import django.templatetags.static
 import django.utils.html
 import django.utils.translation
 
-from live_translations import conf, resolver, strings
+from live_translations import conf, resolver, strings, views
+from live_translations.types import OverrideMap
+
+__all__ = ["LiveTranslationsMiddleware"]
 
 _resolver = resolver.MarkerResolver(
     marker_re=strings.MARKER_RE,
@@ -80,7 +83,7 @@ class LiveTranslationsMiddleware:
 
         # Preview mode: load inactive overrides for the current language
         is_preview = is_active and request.COOKIES.get("lt_preview") == "1"
-        preview_overrides: dict[tuple[str, str], str] | None = None
+        preview_overrides: OverrideMap | None = None
         preview_token = None
         if is_preview:
             preview_overrides = self._load_preview_overrides()
@@ -110,42 +113,25 @@ class LiveTranslationsMiddleware:
         request: django.http.HttpRequest,
         view_name: str,
     ) -> django.http.HttpResponse:
-        from live_translations import views
-
         view: t.Callable[[django.http.HttpRequest], django.http.HttpResponse] = getattr(
             views, view_name
         )
         return view(request)
 
     @staticmethod
-    def _load_preview_overrides() -> dict[tuple[str, str], str]:
-        """Load inactive DB translations for the current language into a preview dict."""
-        from live_translations import models
-
+    def _load_preview_overrides() -> OverrideMap:
+        """Load inactive translations for the current language into a preview dict."""
         language = django.utils.translation.get_language() or ""
         if not language:
             return {}
-
-        overrides: dict[tuple[str, str], str] = {}
-        try:
-            for msgid, ctx, msgstr in (
-                models.TranslationEntry.objects.filter(
-                    language=language, is_active=False
-                )
-                .exclude(msgstr="")
-                .values_list("msgid", "context", "msgstr")
-            ):
-                overrides[(msgid, ctx)] = msgstr
-        except Exception:
-            pass
-        return overrides
+        return conf.get_backend_instance().get_inactive_overrides(language)
 
     def _inject_assets(
         self,
         request: django.http.HttpRequest,
         response: django.http.HttpResponse,
         *,
-        preview_entries: dict[tuple[str, str], str] | None = None,
+        preview_entries: OverrideMap | None = None,
     ) -> None:
         content = response.content.decode(response.charset)
 

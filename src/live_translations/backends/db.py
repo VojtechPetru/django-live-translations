@@ -8,25 +8,26 @@ make overrides visible to Django's gettext machinery.
 import logging
 import typing as t
 import uuid
-from pathlib import Path
+import pathlib
 
+import django.conf
 import django.core.cache
+import django.core.checks
 import django.db.utils
 import django.utils.translation
 import django.utils.translation.trans_real
 import django.utils.translation.reloader
 
-from live_translations.backends import base
+from live_translations import conf, history, models
+from live_translations.backends import base, po
+from live_translations.types import DbOverride, LanguageCode, MsgKey, OverrideMap
 
-if t.TYPE_CHECKING:
-    import django.core.checks
-
-    from live_translations.backends import po as _po_mod
+__all__ = ["CATALOG_VERSION_KEY", "CATALOG_VERSION_TIMEOUT", "DatabaseBackend"]
 
 logger = logging.getLogger(__name__)
 
 _UNSET: object = object()
-_DUMMY_MO = Path("_.mo")
+_DUMMY_MO = pathlib.Path("_.mo")
 
 CATALOG_VERSION_KEY = "lt:catalog_version"
 CATALOG_VERSION_TIMEOUT = 60 * 60 * 24 * 30  # 30 days
@@ -42,7 +43,7 @@ class DatabaseBackend(base.TranslationBackend):
 
     def __init__(
         self,
-        locale_dir: str,
+        locale_dir: pathlib.Path,
         domain: str,
         cache_alias: str = "default",
     ) -> None:
@@ -50,10 +51,7 @@ class DatabaseBackend(base.TranslationBackend):
         self._local_version: object = _UNSET  # sentinel, always mismatches initially
 
     @t.override
-    def check(self) -> "list[django.core.checks.CheckMessage]":
-        import django.conf
-        import django.core.checks
-
+    def check(self) -> list[django.core.checks.CheckMessage]:
         errors: list[django.core.checks.CheckMessage] = []
 
         cache_conf = django.conf.settings.CACHES.get(self.cache_alias)
@@ -86,11 +84,9 @@ class DatabaseBackend(base.TranslationBackend):
 
         return errors
 
-    def _get_po_backend(self) -> "_po_mod.POFileBackend":
+    def _get_po_backend(self) -> po.POFileBackend:
         """Lazy-import and cache POFileBackend for .po file access."""
         if not hasattr(self, "_po_backend"):
-            from live_translations.backends import po
-
             self._po_backend = po.POFileBackend(
                 locale_dir=self.locale_dir,
                 domain=self.domain,
@@ -125,12 +121,25 @@ class DatabaseBackend(base.TranslationBackend):
         )
 
     @t.override
+    def get_inactive_overrides(self, language: LanguageCode) -> OverrideMap:
+        overrides: OverrideMap = {}
+        try:
+            for msgid, ctx, msgstr in (
+                models.TranslationEntry.objects.qs.for_languages([language])
+                .active(False)
+                .exclude(msgstr="")
+                .values_list("msgid", "context", "msgstr")
+            ):
+                overrides[MsgKey(msgid, ctx)] = msgstr
+        except (django.db.utils.OperationalError, django.db.utils.ProgrammingError):
+            pass
+        return overrides
+
+    @t.override
     def inject_overrides(self) -> None:
         """Query all DB overrides and inject into Django's translation catalogs."""
-        from live_translations import models
-
         try:
-            rows = models.TranslationEntry.objects.active().values_list(
+            rows = models.TranslationEntry.objects.qs.active().values_list(
                 "language", "msgid", "context", "msgstr"
             )
         except (django.db.utils.OperationalError, django.db.utils.ProgrammingError):
@@ -143,7 +152,7 @@ class DatabaseBackend(base.TranslationBackend):
 
         for lang, entries in by_lang.items():
             try:
-                trans_obj: "django.utils.translation.trans_real.DjangoTranslation" = (
+                trans_obj: django.utils.translation.trans_real.DjangoTranslation = (
                     django.utils.translation.trans_real.translation(lang)
                 )
             except Exception:
@@ -161,12 +170,10 @@ class DatabaseBackend(base.TranslationBackend):
     def get_translations(
         self,
         msgid: str,
-        languages: list[str],
+        languages: list[LanguageCode],
         context: str = "",
-    ) -> dict[str, base.TranslationEntry]:
+    ) -> dict[LanguageCode, base.TranslationEntry]:
         """Fetch translations for a msgid, merging DB overrides with .po defaults."""
-        from live_translations import models
-
         po_backend = self._get_po_backend()
         po_entries = po_backend.get_translations(
             msgid=msgid,
@@ -175,18 +182,18 @@ class DatabaseBackend(base.TranslationBackend):
         )
 
         # Query DB overrides for this specific msgid
-        db_overrides: dict[str, tuple[str, bool]] = {}
+        db_overrides: dict[LanguageCode, DbOverride] = {}
         try:
             for row in (
-                models.TranslationEntry.objects.for_msgid(msgid, context)
-                .filter(language__in=languages)
+                models.TranslationEntry.objects.qs.for_msgid(msgid, context=context)
+                .for_languages(languages)
                 .values_list("language", "msgstr", "is_active")
             ):
-                db_overrides[row[0]] = (row[1], row[2])
+                db_overrides[row[0]] = DbOverride(row[1], row[2])
         except (django.db.utils.OperationalError, django.db.utils.ProgrammingError):
             pass
 
-        result: dict[str, base.TranslationEntry] = {}
+        result: dict[LanguageCode, base.TranslationEntry] = {}
         for lang in languages:
             po_entry = po_entries.get(lang)
             po_msgstr = po_entry.msgstr if po_entry else ""
@@ -197,10 +204,10 @@ class DatabaseBackend(base.TranslationBackend):
             result[lang] = base.TranslationEntry(
                 language=lang,
                 msgid=msgid,
-                msgstr=db_entry[0] if db_entry is not None else po_msgstr,
+                msgstr=db_entry.msgstr if db_entry is not None else po_msgstr,
                 context=context,
                 fuzzy=po_fuzzy if db_entry is None else False,
-                is_active=db_entry[1] if db_entry is not None else True,
+                is_active=db_entry.is_active if db_entry is not None else True,
                 has_override=db_entry is not None,
             )
 
@@ -210,9 +217,9 @@ class DatabaseBackend(base.TranslationBackend):
     def get_defaults(
         self,
         msgid: str,
-        languages: list[str],
+        languages: list[LanguageCode],
         context: str = "",
-    ) -> dict[str, str]:
+    ) -> dict[LanguageCode, str]:
         """Get .po file translations (read-only) for display as defaults."""
         po_backend = self._get_po_backend()
         po_entries = po_backend.get_translations(
@@ -223,48 +230,42 @@ class DatabaseBackend(base.TranslationBackend):
         return {lang: entry.msgstr for lang, entry in po_entries.items()}
 
     @t.override
-    def get_hint(
-        self,
-        msgid: str,
-        context: str = "",
-    ) -> str:
-        """Delegate to POFileBackend for translator comments."""
-        return self._get_po_backend().get_hint(msgid, context)
-
-    @t.override
     def save_translations(
         self,
         msgid: str,
-        translations: dict[str, str],
+        translations: dict[LanguageCode, str],
         context: str = "",
-        active_flags: dict[str, bool] | None = None,
+        active_flags: dict[LanguageCode, bool] | None = None,
     ) -> None:
         """Save translation overrides to the database."""
-        from live_translations import conf as lt_conf
-        from live_translations import history, models
-
-        fallback_active = lt_conf.get_settings().translation_active_by_default
+        fallback_active = conf.get_settings().translation_active_by_default
         po_defaults = self.get_defaults(msgid, list(translations.keys()), context)
 
         # Snapshot existing DB values (text + active state) for history tracking
-        existing: dict[str, tuple[str, bool]] = {}
+        existing: dict[LanguageCode, DbOverride] = {}
         for row in (
-            models.TranslationEntry.objects.for_msgid(msgid, context)
+            models.TranslationEntry.objects.qs.for_msgid(msgid, context=context)
             .filter(language__in=translations.keys())
             .values_list("language", "msgstr", "is_active")
         ):
-            existing[row[0]] = (row[1], row[2])
+            row: tuple["LanguageCode", str, bool]
+            existing[row[0]] = DbOverride(row[1], row[2])
 
+        old_text_values: dict[LanguageCode, str] = {}
+        old_active_states: dict[LanguageCode, bool] = {}
+        new_active_states: dict[LanguageCode, bool] = {}
         for lang, msgstr in translations.items():
             old_entry = existing.get(lang)
-            old_msgstr = old_entry[0] if old_entry else ""
-            old_is_active = old_entry[1] if old_entry else False
+            old_text_values[lang] = old_entry.msgstr if old_entry else ""
 
             is_active = (
                 active_flags.get(lang, fallback_active)
                 if active_flags
                 else fallback_active
             )
+            new_active_states[lang] = is_active
+            if old_entry is not None:
+                old_active_states[lang] = old_entry.is_active
 
             models.TranslationEntry.objects.update_or_create(
                 language=lang,
@@ -272,38 +273,18 @@ class DatabaseBackend(base.TranslationBackend):
                 context=context,
                 defaults={"msgstr": msgstr, "is_active": is_active},
             )
-            # Track text changes
-            if not old_msgstr:
-                history.record_change(
-                    language=lang,
-                    msgid=msgid,
-                    context=context,
-                    action=models.TranslationHistory.Action.CREATE,
-                    old_value=po_defaults.get(lang, ""),
-                    new_value=msgstr,
-                )
-            elif old_msgstr != msgstr:
-                history.record_change(
-                    language=lang,
-                    msgid=msgid,
-                    context=context,
-                    action=models.TranslationHistory.Action.UPDATE,
-                    old_value=old_msgstr,
-                    new_value=msgstr,
-                )
-            # Track active state changes (only for pre-existing entries)
-            if old_entry is not None and old_is_active != is_active:
-                history.record_change(
-                    language=lang,
-                    msgid=msgid,
-                    context=context,
-                    action=(
-                        models.TranslationHistory.Action.ACTIVATE
-                        if is_active
-                        else models.TranslationHistory.Action.DEACTIVATE
-                    ),
-                    old_value="active" if old_is_active else "inactive",
-                    new_value="active" if is_active else "inactive",
-                )
 
+        history.record_text_changes(
+            msgid=msgid,
+            context=context,
+            old_entries=old_text_values,
+            new_entries=translations,
+            defaults=po_defaults,
+        )
+        history.record_active_changes(
+            msgid=msgid,
+            context=context,
+            old_states=old_active_states,
+            new_states=new_active_states,
+        )
         self.bump_catalog_version()

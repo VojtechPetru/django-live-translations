@@ -40,7 +40,7 @@ class TestTranslationEntryModel:
         models.TranslationEntry.objects.create(
             language="en", msgid="inactive_msg", msgstr="Inactive", is_active=False
         )
-        active_qs = models.TranslationEntry.objects.active()
+        active_qs = models.TranslationEntry.objects.qs.active()
         assert active_qs.count() == 1
         assert active_qs.first().msgid == "active_msg"
 
@@ -51,7 +51,7 @@ class TestTranslationEntryModel:
         models.TranslationEntry.objects.create(
             language="en", msgid="msg2", msgstr="M2", is_active=False
         )
-        assert models.TranslationEntry.objects.active().count() == 1
+        assert models.TranslationEntry.objects.qs.active().count() == 1
 
 
 class TestBaseDataclass:

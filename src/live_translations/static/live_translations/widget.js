@@ -291,6 +291,7 @@
       var params = new URLSearchParams({ msgid: msgid, context: context });
       return fetch(API_BASE + "/translations/?" + params, {
         credentials: "same-origin",
+        cache: "no-store",
       }).then(function (resp) {
         if (!resp.ok) throw new Error("GET failed: " + resp.status);
         return resp.json();
@@ -1068,7 +1069,19 @@
 
     Promise.all(work)
       .then(function () {
-        if (activeFlagChanged || langsToDelete.length > 0) {
+        var needsReload = activeFlagChanged || langsToDelete.length > 0;
+        if (!needsReload) {
+          for (var i = 0; i < LANGUAGES.length; i++) {
+            var lang = LANGUAGES[i];
+            if (_deletionsMarked[lang]) continue;
+            var textChanged = translations[lang] !== (_originalValues[lang] || "");
+            if (textChanged && (activeFlags[lang] || PREVIEW)) {
+              needsReload = true;
+              break;
+            }
+          }
+        }
+        if (needsReload) {
           _reloadPage();
         } else {
           saveBtn.disabled = false;

@@ -6,6 +6,15 @@ import re
 import django.db.models
 
 from live_translations import models, strings
+from live_translations.types import DiffSegment, LanguageCode
+
+__all__ = [
+    "compute_diff",
+    "record_active_changes",
+    "record_bulk_action",
+    "record_change",
+    "record_text_changes",
+]
 
 
 def _get_user() -> django.db.models.Model | None:
@@ -18,7 +27,7 @@ def _get_user() -> django.db.models.Model | None:
 
 def record_change(
     *,
-    language: str,
+    language: LanguageCode,
     msgid: str,
     context: str,
     action: str,
@@ -35,6 +44,71 @@ def record_change(
         new_value=new_value,
         user=_get_user(),
     )
+
+
+def record_text_changes(
+    *,
+    msgid: str,
+    context: str,
+    old_entries: dict[LanguageCode, str],
+    new_entries: dict[LanguageCode, str],
+    defaults: dict[LanguageCode, str] | None = None,
+) -> None:
+    """Record CREATE/UPDATE history for each language where the text changed.
+
+    Args:
+        old_entries: lang -> previous msgstr ("" means new/create).
+        new_entries: lang -> new msgstr being saved.
+        defaults: fallback old_value for CREATE actions (e.g. PO defaults).
+    """
+    for lang, new_msgstr in new_entries.items():
+        old_msgstr = old_entries.get(lang, "")
+        if not old_msgstr:
+            record_change(
+                language=lang,
+                msgid=msgid,
+                context=context,
+                action=models.TranslationHistory.Action.CREATE,
+                old_value=(defaults or {}).get(lang, ""),
+                new_value=new_msgstr,
+            )
+        elif old_msgstr != new_msgstr:
+            record_change(
+                language=lang,
+                msgid=msgid,
+                context=context,
+                action=models.TranslationHistory.Action.UPDATE,
+                old_value=old_msgstr,
+                new_value=new_msgstr,
+            )
+
+
+def record_active_changes(
+    *,
+    msgid: str,
+    context: str,
+    old_states: dict[LanguageCode, bool],
+    new_states: dict[LanguageCode, bool],
+) -> None:
+    """Record ACTIVATE/DEACTIVATE history for each language where the active state changed.
+
+    Only records changes for pre-existing entries (languages present in old_states).
+    """
+    for lang, new_active in new_states.items():
+        old_active = old_states.get(lang)
+        if old_active is not None and old_active != new_active:
+            record_change(
+                language=lang,
+                msgid=msgid,
+                context=context,
+                action=(
+                    models.TranslationHistory.Action.ACTIVATE
+                    if new_active
+                    else models.TranslationHistory.Action.DEACTIVATE
+                ),
+                old_value="active" if old_active else "inactive",
+                new_value="active" if new_active else "inactive",
+            )
 
 
 def record_bulk_action(
@@ -71,7 +145,7 @@ def record_bulk_action(
 _WORD_RE = re.compile(r"\S+|\s+")
 
 
-def compute_diff(old_text: str, new_text: str) -> list[dict[str, str]]:
+def compute_diff(old_text: str, new_text: str) -> list[DiffSegment]:
     """Compute a word-level inline diff between two strings.
 
     Returns a list of segments suitable for JSON serialization:
@@ -88,7 +162,7 @@ def compute_diff(old_text: str, new_text: str) -> list[dict[str, str]]:
     new_words = _WORD_RE.findall(new_text)
 
     sm = difflib.SequenceMatcher(None, old_words, new_words)
-    segments: list[dict[str, str]] = []
+    segments: list[DiffSegment] = []
 
     for op, i1, i2, j1, j2 in sm.get_opcodes():
         if op == "equal":

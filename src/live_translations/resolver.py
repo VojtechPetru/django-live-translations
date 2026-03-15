@@ -9,6 +9,8 @@ import json
 import re
 import typing as t
 
+__all__ = ["MarkerResolver"]
+
 
 class MarkerResolver:
     """Replace text-safe markers with <span> (text) or plain text + data-lt-attrs (attributes).

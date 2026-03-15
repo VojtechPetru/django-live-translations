@@ -5,23 +5,32 @@ import typing as t
 import django.conf
 import django.db.models
 
+__all__ = [
+    "TranslationEntry",
+    "TranslationEntryManager",
+    "TranslationEntryQuerySet",
+    "TranslationHistory",
+]
+
 
 class TranslationEntryQuerySet(django.db.models.QuerySet["TranslationEntry"]):
-    def for_language(
+    def for_languages(
         self,
-        language: str,
+        languages: list[str],
     ) -> t.Self:
-        return self.filter(language=language)
+        return self.filter(language__in=languages)
 
     def for_msgid(
         self,
         msgid: str,
+        /,
+        *,
         context: str = "",
     ) -> t.Self:
         return self.filter(msgid=msgid, context=context)
 
-    def active(self) -> t.Self:
-        return self.filter(is_active=True)
+    def active(self, active: bool = True, /) -> t.Self:
+        return self.filter(is_active=active)
 
 
 class TranslationEntryManager(django.db.models.Manager["TranslationEntry"]):
@@ -32,22 +41,6 @@ class TranslationEntryManager(django.db.models.Manager["TranslationEntry"]):
     @property
     def qs(self) -> TranslationEntryQuerySet:
         return self.get_queryset()
-
-    def for_language(
-        self,
-        language: str,
-    ) -> TranslationEntryQuerySet:
-        return self.qs.for_language(language)
-
-    def for_msgid(
-        self,
-        msgid: str,
-        context: str = "",
-    ) -> TranslationEntryQuerySet:
-        return self.qs.for_msgid(msgid, context=context)
-
-    def active(self) -> TranslationEntryQuerySet:
-        return self.qs.active()
 
 
 class TranslationEntry(django.db.models.Model):

@@ -1,14 +1,27 @@
 import dataclasses
 import functools
 import typing as t
-from pathlib import Path
+import pathlib
 
 import django.conf
 import django.http
 import django.utils.module_loading
 
+from live_translations.types import LanguageCode
+
 if t.TYPE_CHECKING:
     from live_translations.backends.base import TranslationBackend
+
+__all__ = [
+    "API_PREFIX",
+    "LiveTranslationsConf",
+    "LiveTranslationsSettings",
+    "PermissionCheck",
+    "default_permission_check",
+    "get_backend_instance",
+    "get_permission_checker",
+    "get_settings",
+]
 
 PermissionCheck: t.TypeAlias = t.Callable[[django.http.HttpRequest], bool]
 
@@ -52,11 +65,11 @@ class LiveTranslationsSettings(t.TypedDict, total=False):
     """Gettext domain — the basename of ``.po``/``.mo`` files
     (e.g. ``"django"`` resolves to ``django.po``). Default: ``"django"``."""
 
-    LANGUAGES: list[str]
+    LANGUAGES: list[LanguageCode]
     """Language codes available for live editing. Falls back to the codes
     in ``settings.LANGUAGES``. Set explicitly to expose only a subset."""
 
-    LOCALE_DIR: str | Path
+    LOCALE_DIR: str | pathlib.Path
     """Path to the locale directory containing ``{lang}/LC_MESSAGES/`` subdirs.
     Falls back to ``settings.LOCALE_PATHS[0]``, then ``settings.BASE_DIR / "locale"``."""
 
@@ -91,10 +104,10 @@ _DEFAULTS: LiveTranslationsSettings = {
 class LiveTranslationsConf:
     """Resolved configuration for live_translations."""
 
-    languages: list[str] = dataclasses.field(default_factory=list)
+    languages: list[LanguageCode] = dataclasses.field(default_factory=list)
     backend: str = _DEFAULTS["BACKEND"]  # type: ignore[assignment]
     cache: str = _DEFAULTS["CACHE"]
-    locale_dir: str = ""
+    locale_dir: pathlib.Path = pathlib.Path()
     domain: str = _DEFAULTS["DOMAIN"]
     permission_check: str = _DEFAULTS["PERMISSION_CHECK"]  # type: ignore[assignment]
     translation_active_by_default: bool = False
@@ -129,18 +142,15 @@ def get_settings() -> LiveTranslationsConf:
             languages = [django.conf.settings.LANGUAGE_CODE]
 
     locale_dir_raw = raw.get("LOCALE_DIR", "")
-    locale_dir = (
-        str(locale_dir_raw) if isinstance(locale_dir_raw, Path) else locale_dir_raw
-    )
-    if not locale_dir:
+    if locale_dir_raw:
+        locale_dir = pathlib.Path(locale_dir_raw)
+    else:
         locale_paths: list[str] = getattr(django.conf.settings, "LOCALE_PATHS", [])
         if locale_paths:
-            locale_dir = str(locale_paths[0])
+            locale_dir = pathlib.Path(locale_paths[0])
         else:
-            import os
-
             base = getattr(django.conf.settings, "BASE_DIR", "")
-            locale_dir = os.path.join(str(base), "locale")
+            locale_dir = pathlib.Path(str(base)) / "locale"
 
     return LiveTranslationsConf(
         languages=languages,

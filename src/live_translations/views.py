@@ -6,11 +6,22 @@ import logging
 import re
 import typing as t
 
+import django.db.models
 import django.http
+import django.utils.translation
 import django.views.decorators.csrf
 import django.views.decorators.http
 
 from live_translations import conf, history, models
+
+__all__ = [
+    "bulk_activate",
+    "delete_translation",
+    "get_history",
+    "get_translations",
+    "require_translation_permission",
+    "save_translations",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +70,9 @@ def require_translation_permission(view: _F) -> _F:
     """Decorator that returns 403 if the user lacks the configured translation permission."""
 
     @functools.wraps(view)
-    def wrapper(request: django.http.HttpRequest, *args: t.Any, **kwargs: t.Any) -> django.http.JsonResponse:
+    def wrapper(
+        request: django.http.HttpRequest, *args: t.Any, **kwargs: t.Any
+    ) -> django.http.JsonResponse:
         checker = conf.get_permission_checker()
         if not checker(request):
             return django.http.JsonResponse({"error": "Forbidden"}, status=403)
@@ -126,8 +139,6 @@ def save_translations(request: django.http.HttpRequest) -> django.http.JsonRespo
     POST /__live-translations__/translations/save/
     Body: {"msgid": "...", "context": "", "translations": {"cs": "...", "en": "..."}}
     """
-    import django.utils.translation
-
     try:
         body: dict[str, t.Any] = json.loads(request.body)
     except json.JSONDecodeError:
@@ -278,11 +289,11 @@ def delete_translation(request: django.http.HttpRequest) -> django.http.JsonResp
     if not msgid:
         return django.http.JsonResponse({"error": "msgid is required"}, status=400)
 
-    qs = models.TranslationEntry.objects.for_msgid(msgid, context)
+    qs = models.TranslationEntry.objects.qs.for_msgid(msgid, context=context)
     if languages:
-        qs = qs.filter(language__in=languages)
+        qs = qs.for_languages(languages)
     elif language:
-        qs = qs.for_language(language)
+        qs = qs.for_languages([language])
 
     entries = list(qs.values_list("language", "msgstr"))
     deleted_count, _ = qs.delete()
@@ -311,8 +322,6 @@ def bulk_activate(request: django.http.HttpRequest) -> django.http.JsonResponse:
     POST /__live-translations__/translations/bulk-activate/
     Body: {"language": "en", "msgids": [{"msgid": "...", "context": ""}, ...]}
     """
-    import django.db.models
-
     try:
         body: dict[str, t.Any] = json.loads(request.body)
     except json.JSONDecodeError:
@@ -339,7 +348,11 @@ def bulk_activate(request: django.http.HttpRequest) -> django.http.JsonResponse:
     for item in msgid_list:
         q |= django.db.models.Q(msgid=item["msgid"], context=item.get("context", ""))
 
-    qs = models.TranslationEntry.objects.filter(q, language=language, is_active=False)
+    qs = (
+        models.TranslationEntry.objects.qs.for_languages([language])
+        .active(False)
+        .filter(q)
+    )
 
     # Materialize before update so history records the correct rows
     affected = list(qs.values_list("language", "msgid", "context"))

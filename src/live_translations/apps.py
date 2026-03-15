@@ -1,7 +1,12 @@
 import typing as t
 
 import django.apps
+import django.conf
 import django.core.checks
+
+from live_translations import conf, strings
+
+__all__ = ["LiveTranslationsConfig"]
 
 
 class LiveTranslationsConfig(django.apps.AppConfig):
@@ -22,10 +27,6 @@ def _register_checks() -> None:
         app_configs: t.Any,
         **kwargs: t.Any,
     ) -> list[django.core.checks.Error | django.core.checks.Warning]:
-        import django.conf
-
-        from live_translations import conf
-
         errors: list[django.core.checks.Error | django.core.checks.Warning] = []
 
         raw: dict[str, t.Any] = getattr(django.conf.settings, "LIVE_TRANSLATIONS", {})
@@ -75,8 +76,6 @@ def _register_checks() -> None:
 
 
 def _patch_gettext() -> None:
-    from live_translations import strings
-
     strings.install_gettext_patch()
 
 

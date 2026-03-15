@@ -3,16 +3,24 @@
 import abc
 import dataclasses
 import typing as t
+import pathlib
+
+import polib
+
+from live_translations import conf
+from live_translations.types import LanguageCode, OverrideMap
 
 if t.TYPE_CHECKING:
     import django.core.checks
+
+__all__ = ["TranslationBackend", "TranslationEntry"]
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class TranslationEntry:
     """One translation of a msgid in a single language."""
 
-    language: str
+    language: LanguageCode
     msgid: str
     msgstr: str
     context: str  # "" if no msgctxt
@@ -30,7 +38,7 @@ class TranslationBackend(abc.ABC):
 
     def __init__(
         self,
-        locale_dir: str,
+        locale_dir: pathlib.Path,
         domain: str,
         cache_alias: str = "default",
     ) -> None:
@@ -42,9 +50,9 @@ class TranslationBackend(abc.ABC):
     def get_translations(
         self,
         msgid: str,
-        languages: list[str],
+        languages: list[LanguageCode],
         context: str = "",
-    ) -> dict[str, TranslationEntry]:
+    ) -> dict[LanguageCode, TranslationEntry]:
         """Fetch translations for a msgid across multiple languages.
 
         Returns dict mapping language code to TranslationEntry.
@@ -56,9 +64,9 @@ class TranslationBackend(abc.ABC):
     def save_translations(
         self,
         msgid: str,
-        translations: dict[str, str],
+        translations: dict[LanguageCode, str],
         context: str = "",
-        active_flags: dict[str, bool] | None = None,
+        active_flags: dict[LanguageCode, bool] | None = None,
     ) -> None:
         """Save translations for a msgid.
 
@@ -96,12 +104,19 @@ class TranslationBackend(abc.ABC):
         to set a new version in Django's shared cache.
         """
 
+    def get_inactive_overrides(self, language: LanguageCode) -> OverrideMap:
+        """Return inactive translations for preview mode.
+
+        Returns dict of (msgid, context) -> pending msgstr for the given language.
+        """
+        return {}
+
     def get_defaults(
         self,
         msgid: str,
-        languages: list[str],
+        languages: list[LanguageCode],
         context: str = "",
-    ) -> dict[str, str]:
+    ) -> dict[LanguageCode, str]:
         """Get baseline default translations for display alongside overrides.
 
         Returns empty dict by default. DatabaseBackend overrides this to read from .po files.
@@ -113,11 +128,16 @@ class TranslationBackend(abc.ABC):
         msgid: str,
         context: str = "",
     ) -> str:
-        """Get the translator comment (#. line) for a msgid from .po files.
-
-        Returns empty string if no comment exists. POFileBackend reads from .po,
-        DatabaseBackend delegates to POFileBackend.
-        """
+        """Get the translator comment (#. line) for a msgid from .po files."""
+        for lang in conf.get_settings().languages:
+            path = self.locale_dir / lang / "LC_MESSAGES" / f"{self.domain}.po"
+            try:
+                po = polib.pofile(str(path))
+            except (OSError, ValueError):
+                continue
+            entry = po.find(msgid, msgctxt=context or False)
+            if entry and entry.comment:
+                return entry.comment.strip()
         return ""
 
     def check(self) -> "list[django.core.checks.CheckMessage]":
