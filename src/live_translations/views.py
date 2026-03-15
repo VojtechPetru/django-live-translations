@@ -6,13 +6,14 @@ import logging
 import re
 import typing as t
 
-import django.db.models
 import django.http
 import django.utils.translation
 import django.views.decorators.csrf
 import django.views.decorators.http
 
 from live_translations import conf, history, models
+from live_translations.backends.base import TranslationBackend
+from live_translations.types import LanguageCode, MsgKey
 
 __all__ = [
     "bulk_activate",
@@ -38,14 +39,14 @@ def _extract_placeholders(text: str) -> set[str]:
 
 def _validate_placeholders(
     msgid: str,
-    translations: dict[str, str],
-) -> dict[str, list[str]] | None:
+    translations: dict[LanguageCode, str],
+) -> dict[LanguageCode, list[str]] | None:
     """Return per-language error details if any translation has mismatched placeholders, else None."""
     expected = _extract_placeholders(msgid)
     if not expected:
         return None
 
-    errors: dict[str, list[str]] = {}
+    errors: dict[LanguageCode, list[str]] = {}
     for lang, msgstr in translations.items():
         if not msgstr:
             continue
@@ -130,6 +131,32 @@ def get_translations(request: django.http.HttpRequest) -> django.http.JsonRespon
     )
 
 
+def _compute_display(
+    request: django.http.HttpRequest,
+    backend: TranslationBackend,
+    msgid: str,
+    context: str,
+    page_language: LanguageCode = "",
+) -> dict[str, t.Any]:
+    settings = conf.get_settings()
+    current_lang: LanguageCode = page_language or django.utils.translation.get_language() or settings.languages[0]
+    is_preview = conf.is_preview_request(request)
+
+    entries = backend.get_translations(msgid=msgid, languages=[current_lang], context=context)
+    entry = entries.get(current_lang)
+
+    if entry and (entry.is_active or is_preview):
+        display_text = entry.msgstr
+    else:
+        defaults = backend.get_defaults(msgid=msgid, languages=[current_lang], context=context)
+        display_text = defaults.get(current_lang, "")
+
+    return {
+        "text": display_text,
+        "is_preview_entry": bool(is_preview and entry and not entry.is_active),
+    }
+
+
 @require_translation_permission
 @django.views.decorators.csrf.csrf_protect
 @django.views.decorators.http.require_POST
@@ -146,8 +173,9 @@ def save_translations(request: django.http.HttpRequest) -> django.http.JsonRespo
 
     msgid: str = body.get("msgid", "")
     context: str = body.get("context", "")
-    translations: dict[str, str] = body.get("translations", {})
-    active_flags: dict[str, bool] = body.get("active_flags", {})
+    translations: dict[LanguageCode, str] = body.get("translations", {})
+    active_flags: dict[LanguageCode, bool] = body.get("active_flags", {})
+    page_language: LanguageCode = body.get("page_language", "")
 
     if not msgid:
         return django.http.JsonResponse({"error": "msgid is required"}, status=400)
@@ -187,14 +215,10 @@ def save_translations(request: django.http.HttpRequest) -> django.http.JsonRespo
         logger.exception("Failed to save translations for msgid='%s'", msgid)
         return django.http.JsonResponse({"error": "Backend error"}, status=500)
 
-    # Return the current language's translation for in-place update
-    current_lang = django.utils.translation.get_language() or settings.languages[0]
-    current_msgstr = translations.get(current_lang, "")
-
     return django.http.JsonResponse(
         {
             "ok": True,
-            "current_language_msgstr": current_msgstr,
+            "display": _compute_display(request, backend, msgid, context, page_language),
         }
     )
 
@@ -283,8 +307,9 @@ def delete_translation(request: django.http.HttpRequest) -> django.http.JsonResp
 
     msgid: str = body.get("msgid", "")
     context: str = body.get("context", "")
-    languages: list[str] = body.get("languages", [])
-    language: str = body.get("language", "")
+    languages: list[LanguageCode] = body.get("languages", [])
+    language: LanguageCode = body.get("language", "")
+    page_language: LanguageCode = body.get("page_language", "")
 
     if not msgid:
         return django.http.JsonResponse({"error": "msgid is required"}, status=400)
@@ -310,7 +335,12 @@ def delete_translation(request: django.http.HttpRequest) -> django.http.JsonResp
             )
         conf.get_backend_instance().bump_catalog_version()
 
-    return django.http.JsonResponse({"ok": True, "deleted": deleted_count})
+    backend = conf.get_backend_instance()
+    return django.http.JsonResponse({
+        "ok": True,
+        "deleted": deleted_count,
+        "display": _compute_display(request, backend, msgid, context, page_language),
+    })
 
 
 @require_translation_permission
@@ -327,7 +357,7 @@ def bulk_activate(request: django.http.HttpRequest) -> django.http.JsonResponse:
     except json.JSONDecodeError:
         return django.http.JsonResponse({"error": "Invalid JSON"}, status=400)
 
-    language: str = body.get("language", "")
+    language: LanguageCode = body.get("language", "")
     if not language or not isinstance(language, str):
         return django.http.JsonResponse({"error": "language is required"}, status=400)
 
@@ -343,28 +373,16 @@ def bulk_activate(request: django.http.HttpRequest) -> django.http.JsonResponse:
                 {"error": "Each item must have a 'msgid' key"}, status=400
             )
 
-    # Build OR query for all (msgid, context) pairs for the given language
-    q = django.db.models.Q()
-    for item in msgid_list:
-        q |= django.db.models.Q(msgid=item["msgid"], context=item.get("context", ""))
+    backend = conf.get_backend_instance()
+    keys = [MsgKey(msgid=item["msgid"], context=item.get("context", "")) for item in msgid_list]
+    activated = backend.bulk_activate(language, keys)
 
-    qs = (
-        models.TranslationEntry.objects.qs.for_languages([language])
-        .active(False)
-        .filter(q)
-    )
-
-    # Materialize before update so history records the correct rows
-    affected = list(qs.values_list("language", "msgid", "context"))
-    updated = qs.update(is_active=True)
-
-    if updated:
+    if activated:
         history.record_bulk_action(
-            entries=affected,
+            entries=[(language, key.msgid, key.context) for key in activated],
             action=models.TranslationHistory.Action.ACTIVATE,
             old_value="inactive",
             new_value="active",
         )
-        conf.get_backend_instance().bump_catalog_version()
 
-    return django.http.JsonResponse({"ok": True, "activated": updated})
+    return django.http.JsonResponse({"ok": True, "activated": len(activated)})

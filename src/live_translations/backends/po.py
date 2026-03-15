@@ -213,8 +213,14 @@ class POFileBackend(base.TranslationBackend):
                 if "fuzzy" in entry.flags:
                     entry.flags.remove("fuzzy")
             else:
-                # Inactive: keep current msgstr in .po/.mo, store new value as pending
-                _set_pending(entry, msgstr)
+                # Inactive: keep current msgstr in .po/.mo, store new value as pending.
+                # If the pending value matches the active value, just clear pending.
+                if msgstr == entry.msgstr:
+                    _clear_pending(entry)
+                    is_active = True
+                    new_active_states[lang] = True
+                else:
+                    _set_pending(entry, msgstr)
                 if "fuzzy" in entry.flags:
                     entry.flags.remove("fuzzy")
 
@@ -241,6 +247,60 @@ class POFileBackend(base.TranslationBackend):
             django.utils.translation.reloader.translation_file_changed(
                 sender=None, file_path=pathlib.Path(mo_path)
             )
+
+    @t.override
+    def bulk_activate(
+        self,
+        language: LanguageCode,
+        msgids: list[MsgKey],
+    ) -> list[MsgKey]:
+        try:
+            po = self._load_po(language)
+        except FileNotFoundError:
+            return []
+
+        activated: list[MsgKey] = []
+        for key in msgids:
+            entry = self._find_entry(po, key.msgid, key.context)
+            if entry is None:
+                continue
+            pending = _get_pending(entry)
+            if pending is None:
+                continue
+            entry.msgstr = pending
+            _clear_pending(entry)
+            if "fuzzy" in entry.flags:
+                entry.flags.remove("fuzzy")
+            activated.append(key)
+
+        if activated:
+            po.save()
+            mo_path = self._mo_path(language)
+            po.save_as_mofile(str(mo_path))
+            self._po_cache.pop(self._po_path(language), None)
+            django.utils.translation.reloader.translation_file_changed(
+                sender=None, file_path=pathlib.Path(mo_path)
+            )
+
+        return activated
+
+    @t.override
+    def get_defaults(
+        self,
+        msgid: str,
+        languages: list[LanguageCode],
+        context: str = "",
+    ) -> dict[LanguageCode, str]:
+        result: dict[LanguageCode, str] = {}
+        for lang in languages:
+            try:
+                po = self._load_po(lang)
+                entry = self._find_entry(po, msgid, context)
+                if entry:
+                    result[lang] = entry.msgstr
+            except FileNotFoundError:
+                pass
+        return result
 
     @t.override
     def get_hint(self, msgid: str, context: str = "") -> str:

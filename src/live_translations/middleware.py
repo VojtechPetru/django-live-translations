@@ -82,7 +82,7 @@ class LiveTranslationsMiddleware:
         is_active = checker(request)
 
         # Preview mode: load inactive overrides for the current language
-        is_preview = is_active and request.COOKIES.get("lt_preview") == "1"
+        is_preview = is_active and conf.is_preview_request(request)
         preview_overrides: OverrideMap | None = None
         preview_token = None
         if is_preview:

@@ -8,7 +8,7 @@ import pathlib
 import polib
 
 from live_translations import conf
-from live_translations.types import LanguageCode, OverrideMap
+from live_translations.types import LanguageCode, MsgKey, OverrideMap
 
 if t.TYPE_CHECKING:
     import django.core.checks
@@ -103,6 +103,17 @@ class TranslationBackend(abc.ABC):
         No-op for file-based backends. DatabaseBackend overrides this
         to set a new version in Django's shared cache.
         """
+
+    def bulk_activate(
+        self,
+        language: LanguageCode,
+        msgids: list[MsgKey],
+    ) -> list[MsgKey]:
+        """Activate pending translations for the given language and msgid/context pairs.
+
+        Returns list of MsgKey that were actually activated.
+        """
+        return []
 
     def get_inactive_overrides(self, language: LanguageCode) -> OverrideMap:
         """Return inactive translations for preview mode.

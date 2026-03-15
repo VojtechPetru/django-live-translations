@@ -121,6 +121,32 @@ class DatabaseBackend(base.TranslationBackend):
         )
 
     @t.override
+    def bulk_activate(
+        self,
+        language: LanguageCode,
+        msgids: list[MsgKey],
+    ) -> list[MsgKey]:
+        import django.db.models
+
+        q = django.db.models.Q()
+        for key in msgids:
+            q |= django.db.models.Q(msgid=key.msgid, context=key.context)
+
+        qs = (
+            models.TranslationEntry.objects.qs.for_languages([language])
+            .active(False)
+            .filter(q)
+        )
+
+        activated = [MsgKey(msgid, ctx) for msgid, ctx in qs.values_list("msgid", "context")]
+        qs.update(is_active=True)
+
+        if activated:
+            self.bump_catalog_version()
+
+        return activated
+
+    @t.override
     def get_inactive_overrides(self, language: LanguageCode) -> OverrideMap:
         overrides: OverrideMap = {}
         try:

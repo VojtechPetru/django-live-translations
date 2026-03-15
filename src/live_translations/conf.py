@@ -21,6 +21,7 @@ __all__ = [
     "get_backend_instance",
     "get_permission_checker",
     "get_settings",
+    "is_preview_request",
 ]
 
 PermissionCheck: t.TypeAlias = t.Callable[[django.http.HttpRequest], bool]
@@ -172,6 +173,10 @@ def get_permission_checker() -> PermissionCheck:
     """Import and return the configured permission check callable (cached)."""
     settings = get_settings()
     return django.utils.module_loading.import_string(settings.permission_check)  # type: ignore[return-value]
+
+
+def is_preview_request(request: django.http.HttpRequest) -> bool:
+    return request.COOKIES.get("lt_preview") == "1"
 
 
 @functools.cache

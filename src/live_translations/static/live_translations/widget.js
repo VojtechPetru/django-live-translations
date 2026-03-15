@@ -8,8 +8,7 @@
  *      └──────(shortcut)───────┘│                        │
  *                                └──(save/cancel/Esc)────┘
  *
- *   Save triggers a page reload; edit mode is persisted to
- *   sessionStorage and restored on the next load.
+ *   Save updates the DOM in-place using server-computed display data.
  *
  * Preview mode (shortcut → page reload):
  *   Server renders inactive translations. Elements with inactive overrides
@@ -253,6 +252,74 @@
     }
     window.location.reload();
   }
+
+  /**
+   * Update all DOM elements matching a msgid/context with new display text.
+   * Handles both inline text spans and attribute translations.
+   * @param {string}  msgid          - The gettext msgid.
+   * @param {string}  context        - The gettext context (empty string if none).
+   * @param {string}  displayText    - The resolved text to display.
+   * @param {boolean} isPreviewEntry - Whether this is an inactive preview entry.
+   * @returns {void}
+   */
+  function _updateDomInPlace(msgid, context, displayText, isPreviewEntry) {
+    // Update inline text spans
+    var spans = document.querySelectorAll(".lt-translatable");
+    for (var i = 0; i < spans.length; i++) {
+      var sp = spans[i];
+      if (sp.dataset.ltMsgid === msgid && (sp.dataset.ltContext || "") === context) {
+        sp.textContent = displayText;
+        if (isPreviewEntry) {
+          sp.classList.add("lt-preview");
+        } else {
+          sp.classList.remove("lt-preview", "lt-selected");
+          var idx = selectedElements.indexOf(sp);
+          if (idx !== -1) selectedElements.splice(idx, 1);
+        }
+      }
+    }
+
+    // Update attribute translations
+    var attrEls = document.querySelectorAll("[data-lt-attrs]");
+    for (var j = 0; j < attrEls.length; j++) {
+      try {
+        var attrs = JSON.parse(attrEls[j].dataset.ltAttrs || "[]");
+        for (var k = 0; k < attrs.length; k++) {
+          if (attrs[k].m === msgid && (attrs[k].c || "") === context) {
+            attrEls[j].setAttribute(attrs[k].a, displayText);
+            if (isPreviewEntry) {
+              attrEls[j].classList.add("lt-preview");
+            } else {
+              attrEls[j].classList.remove("lt-preview", "lt-selected");
+              var aidx = selectedElements.indexOf(attrEls[j]);
+              if (aidx !== -1) selectedElements.splice(aidx, 1);
+            }
+            break;
+          }
+        }
+      } catch (e) { /* ignore malformed JSON */ }
+    }
+
+    // Update PREVIEW_ENTRIES and action bar
+    if (PREVIEW) {
+      if (isPreviewEntry) {
+        var found = false;
+        for (var p = 0; p < PREVIEW_ENTRIES.length; p++) {
+          if (PREVIEW_ENTRIES[p].m === msgid && (PREVIEW_ENTRIES[p].c || "") === context) {
+            found = true;
+            break;
+          }
+        }
+        if (!found) PREVIEW_ENTRIES.push({m: msgid, c: context});
+      } else {
+        PREVIEW_ENTRIES = PREVIEW_ENTRIES.filter(function (e) {
+          return !(e.m === msgid && (e.c || "") === context);
+        });
+      }
+      _updateActionBar();
+    }
+  }
+
   /** @type {HTMLDialogElement|null} */
   var dialog = null;
   /** @type {HTMLElement|null} */
@@ -319,6 +386,7 @@
           context: context,
           translations: translations,
           active_flags: activeFlags || {},
+          page_language: (document.documentElement.lang || "").toLowerCase(),
         }),
       }).then(function (resp) {
         if (!resp.ok) {
@@ -361,7 +429,11 @@
      * @returns {Promise<{ok:boolean, deleted:number}>}
      */
     deleteTranslation: function (msgid, context, languages) {
-      var payload = { msgid: msgid, context: context };
+      var payload = {
+        msgid: msgid,
+        context: context,
+        page_language: (document.documentElement.lang || "").toLowerCase(),
+      };
       if (languages && languages.length) payload.languages = languages;
       return fetch(API_BASE + "/translations/delete/", {
         method: "POST",
@@ -1068,26 +1140,18 @@
     }
 
     Promise.all(work)
-      .then(function () {
-        var needsReload = activeFlagChanged || langsToDelete.length > 0;
-        if (!needsReload) {
-          for (var i = 0; i < LANGUAGES.length; i++) {
-            var lang = LANGUAGES[i];
-            if (_deletionsMarked[lang]) continue;
-            var textChanged = translations[lang] !== (_originalValues[lang] || "");
-            if (textChanged && (activeFlags[lang] || PREVIEW)) {
-              needsReload = true;
-              break;
-            }
-          }
+      .then(function (results) {
+        // Use display from the last response (most current state)
+        var display = null;
+        for (var r = 0; r < results.length; r++) {
+          if (results[r] && results[r].display) display = results[r].display;
         }
-        if (needsReload) {
-          _reloadPage();
-        } else {
-          saveBtn.disabled = false;
-          saveBtn.textContent = "Save";
-          closeModal();
+        if (display) {
+          _updateDomInPlace(msgid, context, display.text, display.is_preview_entry);
         }
+        saveBtn.disabled = false;
+        saveBtn.textContent = "Save";
+        closeModal();
       })
       .catch(function (err) {
         showDialogError(err.message, err.details || null);
@@ -1579,8 +1643,11 @@
 
     api
       .saveTranslations(info.msgid, info.context, translations, activeFlags)
-      .then(function () {
-        _reloadPage();
+      .then(function (data) {
+        if (data && data.display) {
+          _updateDomInPlace(info.msgid, info.context, data.display.text, data.display.is_preview_entry);
+        }
+        closeModal();
       })
       .catch(function (err) {
         // Re-enable buttons on error
