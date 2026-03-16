@@ -2,22 +2,22 @@
 
 **In-browser translation editing for Django superusers.**
 
-django-live-translations lets authorized users edit translations directly on any page of your Django application. Toggle edit mode, click any translatable string, and save changes that take effect immediately -- no deployment, no restarts, no context switching to `.po` file editors.
+django-live-translations lets authorized users edit translations directly on any page of your Django application. Toggle edit mode, click any translatable string, and save changes that take effect immediately - no deployment, no restarts, no context switching to `.po` file editors.
 
 <!-- TODO: replace with actual screenshot -->
 ![Edit mode overview](assets/screenshots/edit-mode.png)
 
 ## Features
 
-- **Inline editing** -- click any translatable string to open a multi-language editor modal
-- **Live preview** -- changes appear on the page instantly after saving
-- **Preview mode** -- review inactive translations before making them live
-- **Edit history** -- word-level diffs with one-click restore
-- **Bulk activation** -- select and activate multiple pending translations at once
-- **Two storage backends** -- PO files (default) or database with cache-based sync
-- **Custom permissions** -- control who can edit translations with a simple callable
-- **Django admin integration** -- manage translation overrides from the admin panel
-- **Zero frontend dependencies** -- vanilla JS widget, no build step required
+- **Inline editing** - click any translatable string to open a multi-language editor modal
+- **Live preview** - changes appear on the page instantly after saving
+- **Preview mode** - review inactive translations before making them live
+- **Edit history** - word-level diffs with one-click restore
+- **Bulk activation** - select and activate multiple pending translations at once
+- **Two storage backends** - PO files (default) or database with cache-based sync
+- **Custom permissions** - control who can edit translations with a simple callable
+- **Django admin integration** - manage translation overrides from the admin panel
+- **Zero frontend dependencies** - vanilla JS widget, no build step required
 
 ## Quick start
 

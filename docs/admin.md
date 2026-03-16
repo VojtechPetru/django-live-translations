@@ -9,15 +9,12 @@ django-live-translations registers a `TranslationEntryAdmin` in Django's admin s
 
 The admin list displays all translation overrides with the following columns:
 
-- **Message ID** -- truncated to 60 characters
-- **Language** -- language code
-- **Translation** -- the override value, truncated to 80 characters
-- **Context** -- gettext message context (if any)
-- **Is Active** -- whether the override is currently applied
-- **Updated At** -- last modification timestamp
-
-<!-- TODO: replace with actual screenshot -->
-![Admin list view](assets/screenshots/admin-list.png)
+- **Message ID** - truncated to 60 characters
+- **Language** - language code
+- **Translation** - the override value, truncated to 80 characters
+- **Context** - gettext message context (if any)
+- **Is Active** - whether the override is currently applied
+- **Updated At** - last modification timestamp
 
 ### Filtering and search
 
@@ -31,9 +28,9 @@ The edit form is organized into two fieldsets:
 
 **Translation:**
 
-- `.po` default (read-only) -- shows the baseline value from the `.po` file for comparison
-- Translation (`msgstr`) -- the override value
-- Is Active -- toggle whether this override is applied
+- `.po` default (read-only) - shows the baseline value from the `.po` file for comparison
+- Translation (`msgstr`) - the override value
+- Is Active - toggle whether this override is applied
 
 **Identification:**
 
@@ -44,9 +41,6 @@ The edit form is organized into two fieldsets:
 ## Bulk actions
 
 Two custom actions are available in the list view:
-
-<!-- TODO: replace with actual screenshot -->
-![Bulk actions dropdown](assets/screenshots/admin-actions.png)
 
 ### Activate selected translations
 
@@ -60,21 +54,4 @@ Both actions trigger the backend's catalog version bump, so changes propagate ac
 
 ## django-unfold support
 
-The admin class automatically detects if [django-unfold](https://github.com/unfoldadmin/django-unfold) is installed and inherits from `unfold.admin.ModelAdmin` instead of Django's default `ModelAdmin`. This provides a modern admin UI with no additional configuration needed.
-
-```python
-# Automatic detection -- no configuration required
-# If unfold is installed, TranslationEntryAdmin uses unfold's ModelAdmin
-# If not, it falls back to django.contrib.admin.ModelAdmin
-```
-
-## How saves work
-
-Admin saves go through the service layer (`services.save_translations`), which:
-
-1. Validates placeholder consistency between msgid and msgstr
-2. Persists the override to the database
-3. Records edit history (create/update action, old/new values)
-4. Bumps the catalog version in the shared cache
-
-Deletes similarly go through `services.delete_translations`, ensuring history is recorded and the cache is invalidated.
+If [django-unfold](https://github.com/unfoldadmin/django-unfold) is installed, the admin automatically uses unfold's `ModelAdmin` for a modern admin UI. No configuration needed.

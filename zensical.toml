@@ -13,7 +13,10 @@ nav = [
   { "Permissions" = "permissions.md" },
   { "Frontend Widget" = "widget.md" },
   { "Django Admin" = "admin.md" },
+  { "How It Works" = "how-it-works.md" },
 ]
+
+extra_css = ["assets/extra.css"]
 
 [project.theme]
 features = [

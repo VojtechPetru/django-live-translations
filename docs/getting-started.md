@@ -39,7 +39,7 @@ MIDDLEWARE = [
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.locale.LocaleMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
-    "live_translations.middleware.LiveTranslationsMiddleware",
+    "live_translations.middleware.LiveTranslationsMiddleware",  # <--
     # ...
 ]
 ```
@@ -82,19 +82,23 @@ See the [Configuration](configuration.md) page for all available options.
 
 Click any highlighted string to open the translation editor.
 
-## What happens under the hood
+## Try the demo app
 
-When an authorized user visits a page:
+The repository includes a working example app you can run locally to see the package in action:
 
-1. The `AppConfig.ready()` hook patches Django's `gettext` and `pgettext` functions
-2. Each translated string gets an invisible zero-width character (ZWC) marker appended
-3. The middleware intercepts the response and injects the widget's CSS/JS assets
-4. The client-side widget finds the ZWC markers, strips them, and wraps text in `<lt-t>` elements
-5. For non-authorized users, the patched gettext is a near-zero-cost pass-through
-6. Non-HTML responses (JSON APIs) have ZWC markers stripped automatically
+```bash
+git clone https://github.com/vojtechpetru/django-live-translations
+cd django-live-translations
+pip install -e ".[dev]"
+cd example
+python manage.py migrate
+python manage.py runserver
+```
+
+Open [localhost:8000](http://localhost:8000) and click the "Quick Login" button - it creates a superuser automatically. Then press `Ctrl+Shift+E` to start editing translations. The demo is configured with the PO backend and English/Czech languages.
 
 ## Next steps
 
-- [Configuration](configuration.md) -- customize settings
-- [Backends](backends.md) -- choose between PO files and database storage
-- [Permissions](permissions.md) -- control who can access the editing UI
+- [Configuration](configuration.md) - customize settings
+- [Backends](backends.md) - choose between PO files and database storage
+- [Permissions](permissions.md) - control who can access the editing UI

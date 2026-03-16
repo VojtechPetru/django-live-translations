@@ -15,7 +15,7 @@ def default_permission_check(request: HttpRequest) -> bool:
     )
 ```
 
-For all other users, the gettext patch is a near-zero-cost pass-through -- no ZWC markers are added, and no widget assets are injected.
+For all other users, the package has no visible effect and near-zero performance overhead.
 
 ## Custom permission check
 
@@ -69,22 +69,6 @@ def can_edit_translations(request: HttpRequest) -> bool:
     return request.user.has_perm("live_translations.change_translationentry")
 ```
 
-### Using a class reference
-
-You can also pass the callable directly instead of a dotted path:
-
-```python
-# settings.py
-from myapp.permissions import can_edit_translations
-
-LIVE_TRANSLATIONS = {
-    "PERMISSION_CHECK": can_edit_translations,
-}
-```
-
-!!! note
-    When using a direct reference, make sure the import doesn't cause circular import issues. Using a dotted string path is generally safer.
-
 ## Preview mode
 
 Preview mode allows authorized users to see inactive translations overlaid on the page without activating them. This is useful for reviewing translations before making them live.
@@ -93,7 +77,7 @@ Preview mode allows authorized users to see inactive translations overlaid on th
 - Inactive translations are shown with amber outlines
 - Preview mode uses the `lt_preview` cookie to persist the state
 
-Preview mode is gated by the same permission check as edit mode -- only users who pass the `PERMISSION_CHECK` can use it.
+Preview mode is gated by the same permission check as edit mode - only users who pass the `PERMISSION_CHECK` can use it.
 
 ## API endpoint protection
 
@@ -107,4 +91,4 @@ All API endpoints under `/__live-translations__/` are protected by the same perm
 | `/__live-translations__/translations/history/` | GET | Fetch edit history |
 | `/__live-translations__/translations/bulk-activate/` | POST | Activate multiple translations |
 
-No URL configuration is needed -- the middleware dispatches these routes internally.
+No URL configuration is needed - these are handled automatically by the middleware.

@@ -12,12 +12,6 @@ LIVE_TRANSLATIONS = {
 
 The `POFileBackend` reads and writes `.po`/`.mo` files directly on disk. This is the default backend and requires no additional setup beyond having a locale directory with `.po` files.
 
-### How it works
-
-- **Active translations** are written directly into the `.po` file's `msgstr` field, and the `.mo` file is recompiled
-- **Inactive translations** (when `TRANSLATION_ACTIVE_BY_DEFAULT` is `False`) are stored as base64-encoded values in the `.po` file's translator comment, using a `ltpending:` prefix
-- After saving, Django's translation file change signal is triggered to reload catalogs
-
 ### File structure
 
 ```
@@ -32,17 +26,21 @@ locale/
       django.mo
 ```
 
+!!! warning "Best suited for local development"
+    The PO backend writes directly to `.po`/`.mo` files on disk. If used on a deployed server, any translation edits will be **lost on the next deployment** when the codebase (including `.po` files) is replaced. Use the [Database backend](#database-backend) for production environments.
+
 ### Trade-offs
 
 **Pros:**
 
-- No database required
-- Changes are version-controlled alongside your code
-- Works with any deployment strategy
+- No database or cache infrastructure required
+- Zero setup - works out of the box
+- Changes are written to `.po` files, which you can commit to version control
 
 **Cons:**
 
-- Writes to the filesystem (may not work on read-only deployments)
+- **Edits are lost on redeployment** - the next deploy overwrites `.po` files with what's in the repo
+- Writes to the filesystem (won't work on read-only deployments like containers)
 - No built-in cross-process synchronization
 - Requires `.po` files to exist for each language
 
@@ -84,21 +82,6 @@ The `DatabaseBackend` stores translation overrides in the database and falls bac
     ```bash
     python manage.py migrate
     ```
-
-### How it works
-
-**Translation resolution order:**
-
-1. Database override (injected into Django's translation catalog)
-2. `.po` file value (via standard gettext catalog)
-
-When a translation is saved:
-
-1. The override is written to the `TranslationEntry` table
-2. A new catalog version UUID is set in the shared cache
-3. On subsequent requests, each process checks the version -- if stale, it clears its local translation cache and re-injects all DB overrides
-
-**Catalog injection** works by writing directly into Django's internal `DjangoTranslation._catalog` objects, so overrides are immediately visible to `gettext()` without restarting the application.
 
 ### Trade-offs
 

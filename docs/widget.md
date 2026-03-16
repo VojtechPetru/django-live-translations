@@ -1,6 +1,6 @@
 # Frontend Widget
 
-The frontend widget is a vanilla JavaScript application (~2500 lines, zero dependencies) that provides the inline translation editing experience. It's automatically injected into HTML responses for authorized users.
+The frontend widget is automatically injected into HTML responses for authorized users. It provides the inline translation editing experience with zero frontend dependencies.
 
 ## Edit mode
 
@@ -11,12 +11,6 @@ When active, all translatable strings on the page are highlighted with blue dash
 <!-- TODO: replace with actual screenshot -->
 ![Edit mode with highlighted strings](assets/screenshots/edit-mode.png)
 
-### How strings are detected
-
-The widget walks the DOM looking for invisible zero-width character (ZWC) markers that were appended to translated strings by the server-side gettext patch. Each marker encodes a string-table ID that maps back to the original `msgid` and context.
-
-The widget strips the markers, wraps the text in `<lt-t>` custom elements (inert inline wrappers), and uses these elements as click targets for editing.
-
 ## Modal editor
 
 Clicking a translatable string opens a modal dialog with tabbed editing for all configured languages.
@@ -26,14 +20,14 @@ Clicking a translatable string opens a modal dialog with tabbed editing for all 
 
 The modal includes:
 
-- **Language tabs** -- one tab per configured language, showing the current translation
-- **Message ID** -- the original `msgid` displayed for reference, with a copy button
-- **Default value** -- the `.po` file baseline (database backend), shown as read-only
-- **Translator hint** -- extracted from `.po` file comments (`#.` lines), if available
-- **Placeholder validation** -- warns if `%(name)s` or `{name}` placeholders don't match between the original and translation
-- **Active toggle** -- per-language checkbox to control whether the translation is immediately active
-- **Save** -- persists changes and updates the page in real-time
-- **Delete override** -- reverts to the `.po` file default (removes the DB or pending override)
+- **Language tabs** - one tab per configured language, showing the current translation
+- **Message ID** - the original `msgid` displayed for reference, with a copy button
+- **Default value** - the `.po` file baseline (database backend), shown as read-only
+- **Translator hint** - extracted from `.po` file comments (`#.` lines), if available
+- **Placeholder validation** - warns if `%(name)s` or `{name}` placeholders don't match between the original and translation
+- **Active toggle** - per-language checkbox to control whether the translation is immediately active
+- **Save** - persists changes and updates the page in real-time
+- **Delete override** - reverts to the `.po` file default (removes the DB or pending override)
 
 ## Preview mode
 
@@ -77,10 +71,6 @@ A draggable hint bar is displayed at the bottom of the page showing the availabl
 <!-- TODO: replace with actual screenshot -->
 ![Shortcut hint bar](assets/screenshots/hint-bar.png)
 
-## Toast notifications
-
-Save, delete, and activation actions show brief toast notifications confirming the operation. Toasts appear at the bottom of the viewport and auto-dismiss.
-
 ## Keyboard shortcuts
 
 | Shortcut | Action | Configurable |
@@ -89,12 +79,3 @@ Save, delete, and activation actions show brief toast notifications confirming t
 | `Ctrl+Shift+P` | Toggle preview mode | `SHORTCUT_PREVIEW` |
 | `Escape` | Close modal / exit edit mode | No |
 | `Shift+Click` | Select element for bulk activation (preview mode) | No |
-
-## Technical details
-
-- The widget uses the `<lt-t>` custom HTML element as an inert inline wrapper (no shadow DOM, no styling side effects)
-- State machine: `inactive` -> `active` -> `editing`
-- All styles are prefixed with `.lt-` to avoid conflicts
-- The widget communicates with the server via JSON endpoints under `/__live-translations__/`
-- DOM updates after save are applied immediately without page reload
-- Attribute translations (e.g. `placeholder`, `title`) are also detected and editable

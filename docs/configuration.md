@@ -1,13 +1,13 @@
 # Configuration
 
-All configuration is done through the `LIVE_TRANSLATIONS` dictionary in your Django settings. Every key is optional -- sensible defaults are derived from Django's own settings.
+All configuration is done through the `LIVE_TRANSLATIONS` dictionary in your Django settings. Every key is optional - sensible defaults are derived from Django's own settings.
 
 ```python
 # settings.py
 LIVE_TRANSLATIONS = {
     "BACKEND": "live_translations.backends.po.POFileBackend",
-    "LANGUAGES": ["en", "cs", "de"],
-    "LOCALE_DIR": BASE_DIR / "locale",
+    "LANGUAGES": ["en", "cs", "de"],  # optional, defaults to settings.LANGUAGES
+    "LOCALE_DIR": BASE_DIR / "locale",  # optional, defaults to LOCALE_PATHS[0]
 }
 ```
 
@@ -32,7 +32,7 @@ LIVE_TRANSLATIONS = {
 |---------|------|---------|-------------|
 | `BACKEND` | `str \| type` | `"live_translations.backends.po.POFileBackend"` | Translation storage backend. Dotted import path or class reference. |
 | `CACHE` | `str` | `"default"` | Django cache alias for cross-process invalidation. Only used by `DatabaseBackend`. |
-| `DOMAIN` | `str` | `"django"` | Gettext domain -- the basename of `.po`/`.mo` files (e.g. `"django"` resolves to `django.po`). |
+| `DOMAIN` | `str` | `"django"` | Gettext domain - the basename of `.po`/`.mo` files (e.g. `"django"` resolves to `django.po`). |
 | `LANGUAGES` | `list[str]` | From `settings.LANGUAGES` | Language codes available for editing. Set explicitly to expose only a subset. |
 | `LOCALE_DIR` | `str \| Path` | `LOCALE_PATHS[0]` or `BASE_DIR/locale` | Path to the locale directory containing `{lang}/LC_MESSAGES/` subdirectories. |
 | `PERMISSION_CHECK` | `str \| Callable` | Superuser check | Callable `(HttpRequest) -> bool` that controls access to the editing UI. Accepts a dotted path or function reference. |
@@ -47,12 +47,12 @@ LIVE_TRANSLATIONS = {
 Choose between the two built-in backends:
 
 ```python
-# PO file backend (default) -- reads/writes .po files directly
+# PO file backend (default) - reads/writes .po files directly
 LIVE_TRANSLATIONS = {
     "BACKEND": "live_translations.backends.po.POFileBackend",
 }
 
-# Database backend -- stores overrides in the DB
+# Database backend - stores overrides in the DB
 LIVE_TRANSLATIONS = {
     "BACKEND": "live_translations.backends.db.DatabaseBackend",
 }
@@ -79,7 +79,7 @@ LIVE_TRANSLATIONS = {
 ```
 
 !!! warning
-    Avoid using `DummyCache` with the database backend. A system check warning (`live_translations.W003`) is raised if this is detected.
+    The cache must be shared across processes (e.g. gunicorn workers). Use Redis, Memcached, or a similar multi-process cache backend. `LocMemCache` and `DummyCache` won't work in production.
 
 ### `LANGUAGES`
 
