@@ -64,3 +64,9 @@ msgstr "This paragraph has a tooltip from a context variable."
 
 msgid "attrs.tooltip_gettext"
 msgstr "This tooltip was translated with gettext()"
+
+msgid "asvar.heading"
+msgstr "Variable assignment"
+
+msgid "asvar.reused_label"
+msgstr "Reusable translation"

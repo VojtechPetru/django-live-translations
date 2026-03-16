@@ -64,3 +64,9 @@ msgstr "Tento odstavec má tooltip z kontextové proměnné."
 
 msgid "attrs.tooltip_gettext"
 msgstr "Tento tooltip byl přeložen pomocí gettext()"
+
+msgid "asvar.heading"
+msgstr "Přiřazení do proměnné"
+
+msgid "asvar.reused_label"
+msgstr "Znovupoužitelný překlad"

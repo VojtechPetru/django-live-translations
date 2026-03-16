@@ -149,6 +149,24 @@ class TestEdgeCases:
         assert span.count() >= 1
         expect(span.first).to_be_visible()
 
+    def test_trans_as_var_produces_translatable_spans(self, page_as_superuser: Page) -> None:
+        """{% trans '...' as X %} should produce translatable spans where {{ X }} is rendered."""
+        spans = page_as_superuser.locator('.lt-translatable[data-lt-msgid="asvar.reused_label"]')
+        # The variable is used in 2 text positions
+        assert spans.count() >= 2
+        expect(spans.first).to_be_visible()
+        expect(spans.nth(1)).to_be_visible()
+
+    def test_trans_as_var_in_attribute(self, page_as_superuser: Page) -> None:
+        """{% trans '...' as X %} used in title="" should produce data-lt-attrs."""
+        el = page_as_superuser.locator("[data-lt-attrs]").filter(
+            has=page_as_superuser.locator('.lt-translatable[data-lt-msgid="asvar.reused_label"]')
+        )
+        assert el.count() >= 1
+        attrs_json = el.first.get_attribute("data-lt-attrs")
+        assert attrs_json is not None
+        assert "asvar.reused_label" in attrs_json
+
     def test_saving_empty_string_is_valid(self, page_as_superuser: Page, base_url: str) -> None:
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)

@@ -53,6 +53,19 @@
         </p>
     </div>
 
+    <div class="card">
+        <h2>{% trans "asvar.heading" %} {% verbatim %}<span class="via">{% trans … as %}</span>{% endverbatim %}</h2>
+        {% trans "asvar.reused_label" as reused %}
+        <p title="{{ reused }}" class="has-tooltip">
+            {% verbatim %}<span class="via">{% trans … as %} in text + <code>title</code> attr</span>{% endverbatim %}
+            {{ reused }}
+        </p>
+        <p>
+            {% verbatim %}<span class="via">{% trans … as %} reused</span>{% endverbatim %}
+            {{ reused }}
+        </p>
+    </div>
+
     <div class="hint">
         {% trans "common.language" %}:
         {% get_available_languages as languages %}

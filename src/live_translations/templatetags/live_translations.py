@@ -12,6 +12,7 @@ import django.template
 import django.template.base
 import django.template.context
 import django.templatetags.i18n
+import django.utils.translation
 
 from live_translations import strings
 
@@ -85,9 +86,24 @@ class LiveTranslateNode(django.template.Node):
     def render(self, context: django.template.context.Context) -> str:
         rendered: str = self.original_node.render(context)
 
-        # Never wrap asvar or noop — they don't produce direct output
-        if (not strings.lt_active.get(False)) or self.original_node.asvar or self.original_node.noop:
+        if (not strings.lt_active.get(False)) or self.original_node.noop:
             return rendered
+
+        if self.original_node.asvar:
+            # Django's TranslateNode stored the translated text in
+            # context[asvar] after passing it through the *original*
+            # render_value_in_context (imported via `from ... import`
+            # before our patch), which downcasts TranslatableString to
+            # plain str — losing __html__().  Re-store as
+            # TranslatableString so {{ var }} produces markers.
+            asvar_name = self.original_node.asvar
+            msgid = _extract_trans_msgid(self.original_node)
+            msg_ctx = _resolve_message_context(self.original_node, context)
+            if msg_ctx:
+                context[asvar_name] = django.utils.translation.pgettext(msg_ctx, msgid)
+            else:
+                context[asvar_name] = django.utils.translation.gettext(msgid)
+            return rendered  # always ""
 
         msgid = _extract_trans_msgid(self.original_node)
         msg_context = _resolve_message_context(self.original_node, context)
