@@ -16,12 +16,10 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#. ltpending:TGl2ZSBUcmFuc2xhdGlvbnMgRGVtbyAtIFRISVMgSVMgQSBQUkVWSUVXIE1PREUgQ09NTUVOVA==
 msgid "demo.title"
 msgstr "Live Translations Demo"
 
 #. Greeting shown on the homepage
-#. ltpending:V2VsY29tZSB0byB0aGUgZGVtbyBhcHBsaWNhdGlvbiEgLSBBTFNPIEEgUFJFVklFVyBNT0RFIENPTU1FTlQ=
 msgid "demo.welcome"
 msgstr "Welcome to the demo application!"
 
