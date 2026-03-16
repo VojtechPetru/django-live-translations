@@ -4,20 +4,8 @@ import json
 import re
 
 import pytest
-from helpers import api_delete, api_restore_po_default, api_save
+from helpers import api_delete, api_restore_po_default, api_save, disable_preview, enable_preview
 from playwright.sync_api import Page, expect
-
-
-def _enable_preview(page: Page, base_url: str) -> None:
-    page.context.add_cookies([{"name": "lt_preview", "value": "1", "url": base_url}])
-    page.reload()
-    page.wait_for_load_state("networkidle")
-
-
-def _disable_preview(page: Page, base_url: str) -> None:
-    page.context.add_cookies([{"name": "lt_preview", "value": "", "url": base_url}])
-    page.reload()
-    page.wait_for_load_state("networkidle")
 
 
 class TestBulkActivate:
@@ -31,13 +19,13 @@ class TestBulkActivate:
             {"en": "Inactive Title"},
             {"en": False},
         )
-        _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        enable_preview(page_as_superuser_for_backend, base_url_for_backend)
         span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span).to_have_class(re.compile(r"lt-preview"))
         span.click(modifiers=["Shift"])
         expect(span).to_have_class(re.compile(r"lt-selected"))
         # Cleanup
-        _disable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        disable_preview(page_as_superuser_for_backend, base_url_for_backend)
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
 
@@ -51,14 +39,14 @@ class TestBulkActivate:
             {"en": "Inactive Title"},
             {"en": False},
         )
-        _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        enable_preview(page_as_superuser_for_backend, base_url_for_backend)
         span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         span.click(modifiers=["Shift"])
         expect(span).to_have_class(re.compile(r"lt-selected"))
         span.click(modifiers=["Shift"])
         expect(span).not_to_have_class(re.compile(r"lt-selected"))
         # Cleanup
-        _disable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        disable_preview(page_as_superuser_for_backend, base_url_for_backend)
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
 
@@ -72,13 +60,13 @@ class TestBulkActivate:
             {"en": "Inactive Title"},
             {"en": False},
         )
-        _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        enable_preview(page_as_superuser_for_backend, base_url_for_backend)
         span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         span.click(modifiers=["Shift"])
         action_bar = page_as_superuser_for_backend.locator(".lt-action-bar")
         expect(action_bar).to_have_class(re.compile(r"lt-action-bar--visible"))
         # Cleanup
-        _disable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        disable_preview(page_as_superuser_for_backend, base_url_for_backend)
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
 
@@ -99,13 +87,13 @@ class TestBulkActivate:
             {"en": "Inactive About"},
             {"en": False},
         )
-        _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        enable_preview(page_as_superuser_for_backend, base_url_for_backend)
         page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first.click(modifiers=["Shift"])
         page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="about.heading"]').first.click(modifiers=["Shift"])
         count_el = page_as_superuser_for_backend.locator(".lt-action-bar__count")
         expect(count_el).to_have_text("2 selected")
         # Cleanup
-        _disable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        disable_preview(page_as_superuser_for_backend, base_url_for_backend)
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "about.heading", ["en"])
@@ -121,7 +109,7 @@ class TestBulkActivate:
             {"en": "Inactive Title"},
             {"en": False},
         )
-        _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        enable_preview(page_as_superuser_for_backend, base_url_for_backend)
         span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         span.click(modifiers=["Shift"])
         expect(span).to_have_class(re.compile(r"lt-selected"))
@@ -131,7 +119,7 @@ class TestBulkActivate:
         action_bar = page_as_superuser_for_backend.locator(".lt-action-bar")
         expect(action_bar).not_to_have_class(re.compile(r"lt-action-bar--visible"))
         # Cleanup
-        _disable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        disable_preview(page_as_superuser_for_backend, base_url_for_backend)
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
 
@@ -145,7 +133,7 @@ class TestBulkActivate:
             {"en": "Inactive Title"},
             {"en": False},
         )
-        _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        enable_preview(page_as_superuser_for_backend, base_url_for_backend)
         page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first.click(modifiers=["Shift"])
         page_as_superuser_for_backend.locator(".lt-action-bar__activate").click()
         confirm_btn = page_as_superuser_for_backend.locator(".lt-action-bar__confirm")
@@ -155,7 +143,7 @@ class TestBulkActivate:
         expect(cancel_btn).to_be_visible()
         expect(warning).to_be_visible()
         # Cleanup
-        _disable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        disable_preview(page_as_superuser_for_backend, base_url_for_backend)
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
 
@@ -169,7 +157,7 @@ class TestBulkActivate:
             {"en": "Inactive Title"},
             {"en": False},
         )
-        _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        enable_preview(page_as_superuser_for_backend, base_url_for_backend)
         page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first.click(modifiers=["Shift"])
         page_as_superuser_for_backend.locator(".lt-action-bar__activate").click()
         expect(page_as_superuser_for_backend.locator(".lt-action-bar__confirm")).to_be_visible()
@@ -178,7 +166,7 @@ class TestBulkActivate:
         expect(page_as_superuser_for_backend.locator(".lt-action-bar__clear")).to_be_visible()
         expect(page_as_superuser_for_backend.locator(".lt-action-bar__confirm")).to_be_hidden()
         # Cleanup
-        _disable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        disable_preview(page_as_superuser_for_backend, base_url_for_backend)
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
 
@@ -194,7 +182,7 @@ class TestBulkActivate:
             {"en": "Bulk Activated Title"},
             {"en": False},
         )
-        _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        enable_preview(page_as_superuser_for_backend, base_url_for_backend)
         span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span).to_have_class(re.compile(r"lt-preview"))
         span.click(modifiers=["Shift"])
@@ -209,7 +197,7 @@ class TestBulkActivate:
         expect(span_after).not_to_have_class(re.compile(r"lt-preview"))
         expect(span_after).to_have_text("Bulk Activated Title")
         # Cleanup
-        _disable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        disable_preview(page_as_superuser_for_backend, base_url_for_backend)
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
 
@@ -225,7 +213,7 @@ class TestBulkActivate:
             {"en": "EN Activated", "cs": "CS Still Inactive"},
             {"en": False, "cs": False},
         )
-        _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        enable_preview(page_as_superuser_for_backend, base_url_for_backend)
         page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first.click(modifiers=["Shift"])
         page_as_superuser_for_backend.locator(".lt-action-bar__activate").click()
         page_as_superuser_for_backend.locator(".lt-action-bar__confirm").click()
@@ -254,7 +242,7 @@ class TestBulkActivate:
         result = response.json()
         assert result.get("ok") is True
         # Cleanup
-        _disable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        disable_preview(page_as_superuser_for_backend, base_url_for_backend)
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en", "cs"])
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en", "cs"])
 
@@ -268,7 +256,7 @@ class TestBulkActivate:
             {"en": "Inactive For Context"},
             {"en": False},
         )
-        _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        enable_preview(page_as_superuser_for_backend, base_url_for_backend)
         # about.heading has no inactive override — shift+click should open modal
         non_preview_span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="about.heading"]').first
         expect(non_preview_span).not_to_have_class(re.compile(r"lt-preview"))
@@ -279,7 +267,7 @@ class TestBulkActivate:
         page_as_superuser_for_backend.locator(".lt-dialog__close").click()
         expect(dialog).to_be_hidden(timeout=3000)
         # Cleanup
-        _disable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        disable_preview(page_as_superuser_for_backend, base_url_for_backend)
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
 
@@ -293,7 +281,7 @@ class TestBulkActivate:
             {"en": "Inactive Title"},
             {"en": False},
         )
-        _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        enable_preview(page_as_superuser_for_backend, base_url_for_backend)
         span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         span.click(modifiers=["Shift"])
         action_bar = page_as_superuser_for_backend.locator(".lt-action-bar")
@@ -301,7 +289,7 @@ class TestBulkActivate:
         span.click(modifiers=["Shift"])
         expect(action_bar).not_to_have_class(re.compile(r"lt-action-bar--visible"))
         # Cleanup
-        _disable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        disable_preview(page_as_superuser_for_backend, base_url_for_backend)
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
 
@@ -317,12 +305,12 @@ class TestBulkActivate:
             {"en": "Inactive Tooltip"},
             {"en": False},
         )
-        _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        enable_preview(page_as_superuser_for_backend, base_url_for_backend)
         attr_el = page_as_superuser_for_backend.locator('[data-lt-attrs*="attrs.tooltip_trans"]').first
         expect(attr_el).to_have_class(re.compile(r"lt-preview"))
         attr_el.click(modifiers=["Shift"])
         expect(attr_el).to_have_class(re.compile(r"lt-selected"))
         # Cleanup
-        _disable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        disable_preview(page_as_superuser_for_backend, base_url_for_backend)
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "attrs.tooltip_trans", ["en"])
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "attrs.tooltip_trans", ["en"])

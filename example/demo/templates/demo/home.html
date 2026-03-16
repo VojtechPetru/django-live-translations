@@ -25,9 +25,65 @@
         .form-row.checkbox-row { display: flex; align-items: center; gap: 0.5rem; }
         .form-row.checkbox-row input { width: auto; }
         .form-row.checkbox-row label { margin-bottom: 0; }
+        .auth-bar { display: flex; align-items: center; justify-content: space-between; background: #f8f8f8; border: 1px solid #e5e5e5; border-radius: 8px; padding: 0.6rem 1rem; margin-bottom: 1.5rem; font-size: 0.85rem; color: #555; }
+        .auth-bar .status { }
+        .auth-bar .status strong { color: #1a1a1a; }
+        .auth-bar button { padding: 0.35rem 0.85rem; border-radius: 6px; border: none; font: inherit; font-size: 0.85rem; font-weight: 500; cursor: pointer; transition: opacity 0.15s; }
+        .auth-bar button:hover { opacity: 0.85; }
+        .auth-bar .btn-login { background: #1a1a1a; color: #fff; }
+        .auth-bar .btn-logout { background: #fff; color: #555; border: 1px solid #ddd; }
+        .auth-actions { display: flex; align-items: center; gap: 0.75rem; }
+        .lang-switcher { font-size: 0.85rem; color: #555; }
+        .tabs { display: flex; gap: 0; border-bottom: 1px solid #ddd; margin-bottom: 1rem; }
+        .tab { padding: 0.4rem 0.85rem; font: inherit; font-size: 0.85rem; font-weight: 500; background: none; border: none; border-bottom: 2px solid transparent; color: #888; cursor: pointer; transition: color 0.15s, border-color 0.15s; }
+        .tab:hover { color: #444; }
+        .tab.active { color: #1a1a1a; border-bottom-color: #1a1a1a; }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
     </style>
 </head>
 <body>
+    <div class="auth-bar">
+        <span class="status">
+            {% if user.is_authenticated %}
+                {% blocktrans with username=user.username %}auth.logged_in {{ username }}{% endblocktrans %}
+            {% else %}
+                {% trans "auth.anonymous" %}
+            {% endif %}
+        </span>
+        <span class="auth-actions">
+            <span class="lang-switcher">
+                {% get_available_languages as languages %}
+                {% for lang_code, lang_name in languages %}
+                    {% if lang_code == LANGUAGE_CODE %}
+                        <strong>{{ lang_name }}</strong>
+                    {% else %}
+                        <form method="post" action="{% url 'set_language' %}" style="display: inline">
+                            {% csrf_token %}
+                            <input type="hidden" name="language" value="{{ lang_code }}">
+                            <input type="hidden" name="next" value="{{ request.path }}">
+                            <button type="submit" style="background: none; border: none; color: #3b82f6; cursor: pointer; font: inherit; font-size: 0.85rem; padding: 0; text-decoration: underline;">{{ lang_name }}</button>
+                        </form>
+                    {% endif %}
+                    {% if not forloop.last %} · {% endif %}
+                {% endfor %}
+            </span>
+            {% if user.is_authenticated %}
+                <form method="post" action="{% url 'quick_logout' %}" style="display: inline">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{{ request.path }}">
+                    <button type="submit" class="btn-logout">{% trans "auth.logout" %}</button>
+                </form>
+            {% else %}
+                <form method="post" action="{% url 'quick_login' %}" style="display: inline">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{{ request.path }}">
+                    <button type="submit" class="btn-login">{% trans "auth.login" %}</button>
+                </form>
+            {% endif %}
+        </span>
+    </div>
+
     <h1>{% trans "demo.title" %} {% verbatim %}<span class="via">{% trans %}</span>{% endverbatim %}</h1>
 
     <p><span class="via">gettext()</span> {{ welcome_message }}</p>
@@ -59,6 +115,11 @@
             <span class="via">gettext() in <code>title</code> attr</span>
             {% trans "attrs.tooltip_context_hint" %}
         </p>
+        <div style="margin-top: 0.75rem;">
+            {% verbatim %}<span class="via">{% trans %} in <code>alt</code> attr</span>{% endverbatim %}
+            <img src="data:image/svg+xml,{% filter urlencode %}<svg xmlns='http://www.w3.org/2000/svg' width='120' height='48' viewBox='0 0 120 48'><rect width='120' height='48' rx='8' fill='%23e8e8e8'/><text x='60' y='28' text-anchor='middle' font-family='system-ui,sans-serif' font-size='11' fill='%23888'>120 × 48</text></svg>{% endfilter %}" alt="{% trans 'attrs.alt_text' %}" style="display: block; margin-top: 0.25rem; border-radius: 4px;">
+            <p style="font-size: 0.8rem; color: #888; margin-top: 0.25rem;">{% trans "attrs.alt_hint" %}</p>
+        </div>
     </div>
 
     <div class="card">
@@ -76,43 +137,50 @@
 
     <div class="card">
         <h2>{% trans "form.heading" %} {% verbatim %}<span class="via">{% trans %}</span>{% endverbatim %}</h2>
-        <p style="margin-bottom: 1rem; font-size: 0.85rem; color: #888;">
-            {% verbatim %}<span class="via">{% trans %}</span>{% endverbatim %}
-            {% trans "form.description" %}
-        </p>
-        {% for field in form %}
-            {% if field.field.widget.input_type == "checkbox" %}
-                <div class="form-row checkbox-row">
-                    {{ field }}
-                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-                    {% if field.help_text %}<span class="helptext">{{ field.help_text }}</span>{% endif %}
-                </div>
-            {% else %}
-                <div class="form-row">
-                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-                    {{ field }}
-                    {% if field.help_text %}<span class="helptext">{{ field.help_text }}</span>{% endif %}
-                </div>
-            {% endif %}
-        {% endfor %}
+        <div class="tabs">
+            <button class="tab active" data-tab="manual">{% trans "form.tab.manual" %}</button>
+            <button class="tab" data-tab="auto">{% trans "form.tab.auto" %}</button>
+        </div>
+        <div id="tab-manual" class="tab-panel active">
+            <p style="margin-bottom: 1rem; font-size: 0.85rem; color: #888;">
+                {% verbatim %}<span class="via">{% trans %}</span>{% endverbatim %}
+                {% trans "form.description" %}
+            </p>
+            {% for field in form %}
+                {% if field.field.widget.input_type == "checkbox" %}
+                    <div class="form-row checkbox-row">
+                        {{ field }}
+                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        {% if field.help_text %}<span class="helptext">{{ field.help_text }}</span>{% endif %}
+                    </div>
+                {% else %}
+                    <div class="form-row">
+                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        {{ field }}
+                        {% if field.help_text %}<span class="helptext">{{ field.help_text }}</span>{% endif %}
+                    </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+        <div id="tab-auto" class="tab-panel">
+            <p style="margin-bottom: 1rem; font-size: 0.85rem; color: #888;">
+                {% verbatim %}<span class="via">{{ form.as_div }}</span>{% endverbatim %}
+                {% trans "form.auto_description" %}
+            </p>
+            {{ form.as_div }}
+        </div>
     </div>
 
-    <div class="hint">
-        {% trans "common.language" %}:
-        {% get_available_languages as languages %}
-        {% for lang_code, lang_name in languages %}
-            {% if lang_code == LANGUAGE_CODE %}
-                <strong>{{ lang_name }}</strong>
-            {% else %}
-                <form method="post" action="{% url 'set_language' %}" style="display: inline">
-                    {% csrf_token %}
-                    <input type="hidden" name="language" value="{{ lang_code }}">
-                    <input type="hidden" name="next" value="{{ request.path }}">
-                    <button type="submit" style="background: none; border: none; color: #3b82f6; cursor: pointer; font: inherit; padding: 0; text-decoration: underline;">{{ lang_name }}</button>
-                </form>
-            {% endif %}
-            {% if not forloop.last %} · {% endif %}
-        {% endfor %}
-    </div>
+    <script>
+        document.querySelectorAll('.tab').forEach(function(tab) {
+            tab.addEventListener('click', function() {
+                document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+                document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
+                tab.classList.add('active');
+                document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+            });
+        });
+    </script>
+
 </body>
 </html>

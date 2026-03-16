@@ -1,7 +1,6 @@
 """Tests for translation edit history."""
 
 import json
-import pathlib
 import unittest.mock
 
 import django.contrib.auth.models
@@ -10,7 +9,6 @@ import django.test
 import pytest
 
 from live_translations import history, models, strings
-from live_translations.backends import db
 from live_translations.types import MsgKey
 
 
@@ -237,13 +235,9 @@ class TestComputeDiff:
 class TestHistoryIntegrationWidget:
     """Test history recording through DatabaseBackend.save_translations()."""
 
-    def _make_backend(self):
-        backend = db.DatabaseBackend(locale_dir=pathlib.Path("/tmp"), domain="django")
-        mock_po = unittest.mock.MagicMock()
-        mock_po.get_translations.return_value = {}
-        mock_po.get_hint.return_value = ""
-        backend._po_backend = mock_po
-        return backend
+    @pytest.fixture(autouse=True)
+    def _backend(self, make_db_backend):
+        self._make_backend = make_db_backend
 
     def test_create_records_history(self):
         backend = self._make_backend()

@@ -90,20 +90,20 @@ class LiveTranslationsMiddleware:
             if preview_token is not None:
                 strings.lt_preview_overrides.reset(preview_token)
 
-        if not is_active:
-            strings.reset_string_registry()
-            return response
+        try:
+            if not is_active:
+                return response
 
-        # Only inject into non-streaming HTML responses
-        content_type = response.get("Content-Type", "")
-        if "text/html" not in content_type or response.streaming:  # type: ignore[union-attr]
-            self._strip_zwc(response)
-            strings.reset_string_registry()
-            return response
+            # Only inject into non-streaming HTML responses
+            content_type = response.get("Content-Type", "")
+            if "text/html" not in content_type or response.streaming:  # type: ignore[union-attr]
+                self._strip_zwc(response)
+                return response
 
-        self._inject_assets(request, response, preview_entries=preview_overrides)
-        strings.reset_string_registry()
-        return response
+            self._inject_assets(request, response, preview_entries=preview_overrides)
+            return response
+        finally:
+            strings.reset_string_registry()
 
     @staticmethod
     def _dispatch_api(

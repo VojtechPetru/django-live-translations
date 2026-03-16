@@ -8,22 +8,12 @@ from helpers import (
     api_restore_po_default,
     api_save,
     check_active_toggle,
+    disable_preview,
+    enable_preview,
     open_modal,
     wait_for_fields_loaded,
 )
 from playwright.sync_api import Page, expect
-
-
-def _enable_preview(page: Page, base_url: str) -> None:
-    page.context.add_cookies([{"name": "lt_preview", "value": "1", "url": base_url}])
-    page.reload()
-    page.wait_for_load_state("networkidle")
-
-
-def _disable_preview(page: Page, base_url: str) -> None:
-    page.context.add_cookies([{"name": "lt_preview", "value": "", "url": base_url}])
-    page.reload()
-    page.wait_for_load_state("networkidle")
 
 
 class TestInPlaceDomUpdates:
@@ -119,7 +109,7 @@ class TestInPlaceDomUpdates:
     def test_preview_entry_gets_amber_class_after_save(
         self, page_as_superuser_for_backend: Page, backend_id: str, base_url_for_backend: str
     ) -> None:
-        _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        enable_preview(page_as_superuser_for_backend, base_url_for_backend)
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
         textarea = page_as_superuser_for_backend.locator("#lt-input-en")
@@ -130,7 +120,7 @@ class TestInPlaceDomUpdates:
         expect(page_as_superuser_for_backend.locator("dialog.lt-dialog[open]")).to_be_hidden(timeout=5000)
         span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span).to_have_class(re.compile(r"lt-preview"))
-        _disable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        disable_preview(page_as_superuser_for_backend, base_url_for_backend)
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
 
@@ -144,7 +134,7 @@ class TestInPlaceDomUpdates:
             {"en": "Pending Activation"},
             {"en": False},
         )
-        _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        enable_preview(page_as_superuser_for_backend, base_url_for_backend)
         span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span).to_have_class(re.compile(r"lt-preview"))
         open_modal(page_as_superuser_for_backend, "demo.title")
@@ -153,6 +143,6 @@ class TestInPlaceDomUpdates:
         page_as_superuser_for_backend.locator(".lt-btn--save").click()
         expect(page_as_superuser_for_backend.locator("dialog.lt-dialog[open]")).to_be_hidden(timeout=5000)
         expect(span).not_to_have_class(re.compile(r"lt-preview"))
-        _disable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        disable_preview(page_as_superuser_for_backend, base_url_for_backend)
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])

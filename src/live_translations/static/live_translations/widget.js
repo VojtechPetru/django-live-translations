@@ -165,13 +165,13 @@
    */
 
   /** @type {RegExp} */
-  var ZWC_RE = /\uFEFF[\u200B\u200C]{16}\uFEFF/g;
+  const ZWC_RE = /\uFEFF[\u200B\u200C]{16}\uFEFF/g;
 
   /** @type {StringTable} */
-  var STRING_TABLE = window.__LT_STRINGS__ || {};
+  const STRING_TABLE = window.__LT_STRINGS__ || {};
 
   /** @type {RegisteredNode[]} */
-  var registeredNodes = [];
+  const registeredNodes = [];
 
   /**
    * Decode a ZWC marker string into a string-table ID.
@@ -179,8 +179,8 @@
    * @returns {number} The decoded string ID (0-65535).
    */
   function decodeZWC(marker) {
-    var n = 0;
-    for (var i = 1; i <= 16; i++) {
+    let n = 0;
+    for (let i = 1; i <= 16; i++) {
       if (marker.charCodeAt(i) === 0x200C) n |= (1 << (16 - i));
     }
     return n;
@@ -194,40 +194,40 @@
   function resolveMarkers() {
     // Phase 1: Text nodes
     /** @type {Text[]} */
-    var textNodes = [];
-    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    const textNodes = [];
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     /** @type {Node|null} */
-    var wNode;
+    let wNode;
     while ((wNode = walker.nextNode()) !== null) {
       textNodes.push(/** @type {Text} */ (wNode));
     }
 
-    for (var ti = 0; ti < textNodes.length; ti++) {
-      var tn = textNodes[ti];
-      var text = tn.textContent || "";
+    for (let ti = 0; ti < textNodes.length; ti++) {
+      let tn = textNodes[ti];
+      const text = tn.textContent || "";
       ZWC_RE.lastIndex = 0;
 
       // Collect all marker matches in this text node
       /** @type {RegExpExecArray[]} */
-      var matches = [];
+      const matches = [];
       /** @type {RegExpExecArray|null} */
-      var execMatch;
+      let execMatch;
       while ((execMatch = ZWC_RE.exec(text)) !== null) {
         matches.push(execMatch);
       }
       if (!matches.length) continue;
 
       // Process markers right-to-left to preserve indices when splitting
-      for (var mi = matches.length - 1; mi >= 0; mi--) {
-        var m = matches[mi];
-        var mIdx = /** @type {number} */ (m.index);
-        var mLen = m[0].length;
-        var id = decodeZWC(m[0]);
-        var meta = STRING_TABLE[id];
+      for (let mi = matches.length - 1; mi >= 0; mi--) {
+        const m = matches[mi];
+        const mIdx = /** @type {number} */ (m.index);
+        const mLen = m[0].length;
+        const id = decodeZWC(m[0]);
+        const meta = STRING_TABLE[id];
         if (!meta) continue;
 
         // Text AFTER the marker becomes a separate text node (tail)
-        var afterStart = mIdx + mLen;
+        const afterStart = mIdx + mLen;
         if (afterStart < (tn.textContent || "").length) {
           tn.splitText(afterStart);
         }
@@ -244,11 +244,11 @@
 
         // The text node BEFORE the marker (content text) is tn's previous sibling.
         // Since we append markers, the content is BEFORE the marker in the text.
-        var contentNode = /** @type {Text|null} */ (tn.previousSibling);
+        const contentNode = /** @type {Text|null} */ (tn.previousSibling);
 
         // Determine which text node contains the translatable content
         /** @type {Text|null} */
-        var nodeToWrap = null;
+        let nodeToWrap = null;
         if (contentNode && contentNode.nodeType === Node.TEXT_NODE && (contentNode.textContent || "").length > 0) {
           nodeToWrap = /** @type {Text} */ (contentNode);
         } else if (tn.nodeType === Node.TEXT_NODE && (tn.textContent || "").length > 0) {
@@ -257,10 +257,10 @@
         }
 
         if (nodeToWrap) {
-          var wrapParent = nodeToWrap.parentNode;
+          const wrapParent = nodeToWrap.parentNode;
           // Wrap in <lt-t> unless parent cannot contain child elements
           if (wrapParent && wrapParent.nodeName !== "OPTION" && wrapParent.nodeName !== "TITLE" && wrapParent.nodeName !== "SCRIPT" && wrapParent.nodeName !== "STYLE") {
-            var ltEl = document.createElement("lt-t");
+            const ltEl = document.createElement("lt-t");
             ltEl.dataset.ltMsgid = meta.m;
             ltEl.dataset.ltContext = meta.c;
             wrapParent.insertBefore(ltEl, nodeToWrap);
@@ -279,19 +279,19 @@
     }
 
     // Phase 2: Attribute values
-    var allElements = document.querySelectorAll("*");
-    for (var ei = 0; ei < allElements.length; ei++) {
-      var el = /** @type {HTMLElement} */ (allElements[ei]);
+    const allElements = document.querySelectorAll("*");
+    for (let ei = 0; ei < allElements.length; ei++) {
+      const el = /** @type {HTMLElement} */ (allElements[ei]);
       /** @type {AttrInfo[]} */
-      var ltAttrs = [];
-      var attrs = el.attributes;
-      for (var ai = 0; ai < attrs.length; ai++) {
-        var attr = attrs[ai];
+      const ltAttrs = [];
+      const attrs = el.attributes;
+      for (let ai = 0; ai < attrs.length; ai++) {
+        const attr = attrs[ai];
         ZWC_RE.lastIndex = 0;
-        var attrMatch = ZWC_RE.exec(attr.value);
+        const attrMatch = ZWC_RE.exec(attr.value);
         if (!attrMatch) continue;
-        var attrId = decodeZWC(attrMatch[0]);
-        var attrMeta = STRING_TABLE[attrId];
+        const attrId = decodeZWC(attrMatch[0]);
+        const attrMeta = STRING_TABLE[attrId];
         if (!attrMeta) continue;
         // Strip ALL ZWC markers from the attribute value
         el.setAttribute(attr.name, attr.value.replace(ZWC_RE, ""));
@@ -304,6 +304,47 @@
   }
 
 
+
+  // ─── Shared Helpers ──────────────────────────────────
+
+  /**
+   * Return the page's language code (lowercase), e.g. "en" or "cs".
+   * @returns {string}
+   */
+  function _pageLang() {
+    return (document.documentElement.lang || "").toLowerCase();
+  }
+
+  /**
+   * Safely parse the `data-lt-attrs` JSON on an element.
+   * @param {HTMLElement} el - Element with a `data-lt-attrs` attribute.
+   * @returns {AttrInfo[]}
+   */
+  function _parseLtAttrs(el) {
+    try { return JSON.parse(el.dataset.ltAttrs || "[]"); } catch { return []; }
+  }
+
+  /**
+   * Build a dedup key from msgid + context (null-separated).
+   * @param {string} msgid   - The gettext message identifier.
+   * @param {string} context - The gettext context (empty string if none).
+   * @returns {string}
+   */
+  function _entryKey(msgid, context) {
+    return msgid + "\x00" + (context || "");
+  }
+
+  /**
+   * Read an error JSON body from a failed API response and throw an Error.
+   * @param {Response} resp - The fetch Response with a non-OK status.
+   * @returns {Promise<never>}
+   */
+  async function _throwApiError(resp) {
+    /** @type {Record<string, unknown>} */
+    let errData;
+    try { errData = await resp.json(); } catch { errData = {}; }
+    throw new Error(/** @type {string} */ (errData.error) || "Request failed: " + resp.status);
+  }
 
   // ─── Shortcut Parsing ────────────────────────────────
 
@@ -477,8 +518,8 @@
    */
   function _updateDomInPlace(msgid, context, displayText, isPreviewEntry) {
     // Update registered text nodes (and their wrapping spans if in edit mode)
-    for (var ri = 0; ri < registeredNodes.length; ri++) {
-      var entry = registeredNodes[ri];
+    for (let ri = 0; ri < registeredNodes.length; ri++) {
+      const entry = registeredNodes[ri];
       if (entry.msgid === msgid && entry.context === context) {
         entry.node.textContent = displayText;
         if (entry.span) {
@@ -486,7 +527,7 @@
             entry.span.classList.add("lt-preview");
           } else {
             entry.span.classList.remove("lt-preview", "lt-selected");
-            var sidx = selectedElements.indexOf(entry.span);
+            const sidx = selectedElements.indexOf(entry.span);
             if (sidx !== -1) selectedElements.splice(sidx, 1);
           }
         }
@@ -495,47 +536,45 @@
 
     // Also update any inline text spans that may exist outside registeredNodes
     // (e.g., if wrapping was skipped for some elements)
-    var spans = document.querySelectorAll("lt-t");
-    for (var i = 0; i < spans.length; i++) {
-      var sp = spans[i];
+    const spans = document.querySelectorAll("lt-t");
+    for (let i = 0; i < spans.length; i++) {
+      const sp = spans[i];
       if (sp.dataset.ltMsgid === msgid && (sp.dataset.ltContext || "") === context) {
         sp.textContent = displayText;
         if (isPreviewEntry) {
           sp.classList.add("lt-preview");
         } else {
           sp.classList.remove("lt-preview", "lt-selected");
-          var idx = selectedElements.indexOf(sp);
+          const idx = selectedElements.indexOf(sp);
           if (idx !== -1) selectedElements.splice(idx, 1);
         }
       }
     }
 
     // Update attribute translations
-    var attrEls = document.querySelectorAll("[data-lt-attrs]");
-    for (var j = 0; j < attrEls.length; j++) {
-      try {
-        var attrs = JSON.parse(attrEls[j].dataset.ltAttrs || "[]");
-        for (var k = 0; k < attrs.length; k++) {
-          if (attrs[k].m === msgid && (attrs[k].c || "") === context) {
-            attrEls[j].setAttribute(attrs[k].a, displayText);
-            if (isPreviewEntry) {
-              attrEls[j].classList.add("lt-preview");
-            } else {
-              attrEls[j].classList.remove("lt-preview", "lt-selected");
-              var aidx = selectedElements.indexOf(attrEls[j]);
-              if (aidx !== -1) selectedElements.splice(aidx, 1);
-            }
-            break;
+    const attrEls = document.querySelectorAll("[data-lt-attrs]");
+    for (let j = 0; j < attrEls.length; j++) {
+      const attrs = _parseLtAttrs(/** @type {HTMLElement} */ (attrEls[j]));
+      for (let k = 0; k < attrs.length; k++) {
+        if (attrs[k].m === msgid && (attrs[k].c || "") === context) {
+          attrEls[j].setAttribute(attrs[k].a, displayText);
+          if (isPreviewEntry) {
+            attrEls[j].classList.add("lt-preview");
+          } else {
+            attrEls[j].classList.remove("lt-preview", "lt-selected");
+            const aidx = selectedElements.indexOf(attrEls[j]);
+            if (aidx !== -1) selectedElements.splice(aidx, 1);
           }
+          break;
         }
-      } catch (e) { /* ignore malformed JSON */ }
+      }
     }
 
     // Update PREVIEW_ENTRIES and action bar
     if (PREVIEW) {
       if (isPreviewEntry) {
-        var found = false;
-        for (var p = 0; p < PREVIEW_ENTRIES.length; p++) {
+        let found = false;
+        for (let p = 0; p < PREVIEW_ENTRIES.length; p++) {
           if (PREVIEW_ENTRIES[p].m === msgid && (PREVIEW_ENTRIES[p].c || "") === context) {
             found = true;
             break;
@@ -620,7 +659,7 @@
           context: context,
           translations: translations,
           active_flags: activeFlags || {},
-          page_language: (document.documentElement.lang || "").toLowerCase(),
+          page_language: _pageLang(),
         }),
       });
       if (!resp.ok) {
@@ -663,7 +702,7 @@
       const payload = {
         msgid: msgid,
         context: context,
-        page_language: (document.documentElement.lang || "").toLowerCase(),
+        page_language: _pageLang(),
       };
       if (languages && languages.length) payload.languages = languages;
       const resp = await fetch(API_BASE + "/translations/delete/", {
@@ -675,12 +714,7 @@
         },
         body: JSON.stringify(payload),
       });
-      if (!resp.ok) {
-        /** @type {Record<string, unknown>} */
-        let errData;
-        try { errData = await resp.json(); } catch { errData = {}; }
-        throw new Error(/** @type {string} */ (errData.error) || "POST failed: " + resp.status);
-      }
+      if (!resp.ok) await _throwApiError(resp);
       return /** @type {Promise<DeleteResponse>} */ (resp.json());
     },
 
@@ -700,12 +734,7 @@
         },
         body: JSON.stringify({ msgids: msgids, language: language }),
       });
-      if (!resp.ok) {
-        /** @type {Record<string, unknown>} */
-        let errData;
-        try { errData = await resp.json(); } catch { errData = {}; }
-        throw new Error(/** @type {string} */ (errData.error) || "POST failed: " + resp.status);
-      }
+      if (!resp.ok) await _throwApiError(resp);
       return /** @type {Promise<BulkActivateResponse>} */ (resp.json());
     },
   };
@@ -935,8 +964,8 @@
     }
 
     // Default edit language: current page language if configured, else first
-    const pageLang = (document.documentElement.lang || "").toLowerCase();
-    _editLang = LANGUAGES.indexOf(pageLang) !== -1 ? pageLang : LANGUAGES[0];
+    const lang = _pageLang();
+    _editLang = LANGUAGES.indexOf(lang) !== -1 ? lang : LANGUAGES[0];
 
     _renderEditorTabs();
     _renderEditorPanels();
@@ -1386,12 +1415,10 @@
    * @returns {AttrInfo|null} The matching descriptor, or null if not found.
    */
   function _getAttrInfo(element, attrName) {
-    try {
-      const attrs = JSON.parse(element.dataset.ltAttrs || "[]");
-      for (let i = 0; i < attrs.length; i++) {
-        if (attrs[i].a === attrName) return attrs[i];
-      }
-    } catch (e) { /* ignore parse errors */ }
+    const attrs = _parseLtAttrs(element);
+    for (let i = 0; i < attrs.length; i++) {
+      if (attrs[i].a === attrName) return attrs[i];
+    }
     return null;
   }
 
@@ -1604,7 +1631,7 @@
     for (let i = 0; i < filtered.length; i++) {
       const entry = filtered[i];
       const item = document.createElement("div");
-      item.className = "lt-history__entry lt-history__entry--" + entry.action;
+      item.className = "lt-history__entry";
 
       const header = document.createElement("div");
       header.className = "lt-history__entry-header";
@@ -1879,32 +1906,25 @@
    * @returns {void}
    */
   function _buildValueSections(container, entry) {
-    if (entry.old_value) {
-      const sec1 = document.createElement("div");
-      sec1.className = "lt-history__value-section";
-      const lbl1 = document.createElement("div");
-      lbl1.className = "lt-history__value-label";
-      lbl1.textContent = "Before";
-      const txt1 = document.createElement("div");
-      txt1.className = "lt-history__value-text";
-      txt1.textContent = entry.old_value;
-      sec1.appendChild(lbl1);
-      sec1.appendChild(txt1);
-      container.appendChild(sec1);
+    /**
+     * @param {string} label - Section heading ("Before" / "After").
+     * @param {string} text  - Value to display.
+     */
+    function addSection(label, text) {
+      const sec = document.createElement("div");
+      sec.className = "lt-history__value-section";
+      const lbl = document.createElement("div");
+      lbl.className = "lt-history__value-label";
+      lbl.textContent = label;
+      const txt = document.createElement("div");
+      txt.className = "lt-history__value-text";
+      txt.textContent = text;
+      sec.appendChild(lbl);
+      sec.appendChild(txt);
+      container.appendChild(sec);
     }
-    if (entry.new_value) {
-      const sec2 = document.createElement("div");
-      sec2.className = "lt-history__value-section";
-      const lbl2 = document.createElement("div");
-      lbl2.className = "lt-history__value-label";
-      lbl2.textContent = "After";
-      const txt2 = document.createElement("div");
-      txt2.className = "lt-history__value-text";
-      txt2.textContent = entry.new_value;
-      sec2.appendChild(lbl2);
-      sec2.appendChild(txt2);
-      container.appendChild(sec2);
-    }
+    if (entry.old_value) addSection("Before", entry.old_value);
+    if (entry.new_value) addSection("After", entry.new_value);
   }
 
   /**
@@ -2053,7 +2073,7 @@
   function _showActivateConfirm() {
     actionBarConfirming = true;
     const count = selectedElements.length;
-    const lang = (document.documentElement.lang || "").toLowerCase() || "unknown";
+    const lang = _pageLang() || "unknown";
     actionBar.innerHTML =
       '<span class="lt-action-bar__warning">' +
       "This will activate " + count + " translation(s) for language \"" + lang + "\". Continue?" +
@@ -2085,23 +2105,21 @@
         // Inline text span
         const msgid = el.dataset.ltMsgid;
         const context = el.dataset.ltContext || "";
-        const key = msgid + "\x00" + context;
+        const key = _entryKey(msgid, context);
         if (!seen[key]) {
           seen[key] = true;
           msgids.push({ msgid: msgid, context: context });
         }
       } else if (el.dataset.ltAttrs) {
         // Attribute element — collect all preview entries
-        try {
-          const attrs = JSON.parse(el.dataset.ltAttrs);
-          for (let j = 0; j < attrs.length; j++) {
-            const aKey = attrs[j].m + "\x00" + (attrs[j].c || "");
-            if (!seen[aKey]) {
-              seen[aKey] = true;
-              msgids.push({ msgid: attrs[j].m, context: attrs[j].c || "" });
-            }
+        const attrs = _parseLtAttrs(el);
+        for (let j = 0; j < attrs.length; j++) {
+          const aKey = _entryKey(attrs[j].m, attrs[j].c);
+          if (!seen[aKey]) {
+            seen[aKey] = true;
+            msgids.push({ msgid: attrs[j].m, context: attrs[j].c || "" });
           }
-        } catch (e) { /* ignore */ }
+        }
       }
     }
 
@@ -2111,7 +2129,7 @@
       return;
     }
 
-    const lang = (document.documentElement.lang || "").toLowerCase();
+    const lang = _pageLang();
 
     try {
       const data = await api.bulkActivate(msgids, lang);
@@ -2131,35 +2149,33 @@
   function _initPreviewMode() {
     // Build lookup from config
     /** @type {Object<string, boolean>} */
-    var lookup = {};
-    for (var i = 0; i < PREVIEW_ENTRIES.length; i++) {
-      var pe = PREVIEW_ENTRIES[i];
-      lookup[pe.m + "\x00" + (pe.c || "")] = true;
+    const lookup = {};
+    for (let i = 0; i < PREVIEW_ENTRIES.length; i++) {
+      const pe = PREVIEW_ENTRIES[i];
+      lookup[_entryKey(pe.m, pe.c)] = true;
     }
 
     // Mark inline text elements (lt-t elements created by resolveMarkers)
-    var spans = document.querySelectorAll("lt-t");
-    for (var s = 0; s < spans.length; s++) {
-      var sp = spans[s];
-      var spKey = (sp.dataset.ltMsgid || "") + "\x00" + (sp.dataset.ltContext || "");
+    const spans = document.querySelectorAll("lt-t");
+    for (let s = 0; s < spans.length; s++) {
+      const sp = spans[s];
+      const spKey = _entryKey(sp.dataset.ltMsgid || "", sp.dataset.ltContext || "");
       if (lookup[spKey]) {
         sp.classList.add("lt-preview");
       }
     }
 
     // Mark attribute-translatable elements
-    var attrEls = document.querySelectorAll("[data-lt-attrs]");
-    for (var a = 0; a < attrEls.length; a++) {
-      try {
-        var attrs = JSON.parse(attrEls[a].dataset.ltAttrs || "[]");
-        for (var j = 0; j < attrs.length; j++) {
-          var aKey = (attrs[j].m || "") + "\x00" + (attrs[j].c || "");
-          if (lookup[aKey]) {
-            attrEls[a].classList.add("lt-preview");
-            break;
-          }
+    const attrEls = document.querySelectorAll("[data-lt-attrs]");
+    for (let a = 0; a < attrEls.length; a++) {
+      const attrs = _parseLtAttrs(/** @type {HTMLElement} */ (attrEls[a]));
+      for (let j = 0; j < attrs.length; j++) {
+        const aKey = _entryKey(attrs[j].m || "", attrs[j].c || "");
+        if (lookup[aKey]) {
+          attrEls[a].classList.add("lt-preview");
+          break;
         }
-      } catch (e) { /* ignore parse errors */ }
+      }
     }
 
     _createActionBar();
@@ -2257,13 +2273,8 @@
           return;
         }
 
-        let attrs;
-        try {
-          attrs = JSON.parse(attrEl.dataset.ltAttrs);
-        } catch (err) {
-          return;
-        }
-        if (!attrs || !attrs.length) return;
+        const attrs = _parseLtAttrs(attrEl);
+        if (!attrs.length) return;
 
         openModal(attrEl, attrs[0]);
       }
@@ -2488,27 +2499,9 @@
     const editEl = _hintBar.querySelector('[data-mode="edit"]');
     const previewEl = _hintBar.querySelector('[data-mode="preview"]');
     const tipEl = _hintBar.querySelector(".lt-hint__tip");
-    if (editEl) {
-      if (state === "active" || state === "editing") {
-        editEl.classList.add("lt-hint__action--active");
-      } else {
-        editEl.classList.remove("lt-hint__action--active");
-      }
-    }
-    if (previewEl) {
-      if (PREVIEW) {
-        previewEl.classList.add("lt-hint__action--active");
-      } else {
-        previewEl.classList.remove("lt-hint__action--active");
-      }
-    }
-    if (tipEl) {
-      if (PREVIEW) {
-        tipEl.classList.add("lt-hint__tip--visible");
-      } else {
-        tipEl.classList.remove("lt-hint__tip--visible");
-      }
-    }
+    if (editEl) editEl.classList.toggle("lt-hint__action--active", state === "active" || state === "editing");
+    if (previewEl) previewEl.classList.toggle("lt-hint__action--active", PREVIEW);
+    if (tipEl) tipEl.classList.toggle("lt-hint__tip--visible", PREVIEW);
   }
 
   _showShortcutHint();

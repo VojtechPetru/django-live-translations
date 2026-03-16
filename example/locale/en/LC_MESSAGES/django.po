@@ -69,6 +69,12 @@ msgstr "This paragraph has a tooltip from a context variable."
 msgid "attrs.tooltip_gettext"
 msgstr "This tooltip was translated with gettext()"
 
+msgid "attrs.alt_text"
+msgstr "A placeholder image demonstrating translated alt text"
+
+msgid "attrs.alt_hint"
+msgstr "This image has a translated alt attribute — inspect it in your browser."
+
 msgid "asvar.heading"
 msgstr "Variable assignment"
 
@@ -121,3 +127,29 @@ msgstr "Subscribe to newsletter"
 
 msgid "form.newsletter.help"
 msgstr "Receive occasional updates by email."
+
+#. Form tabs
+msgid "form.tab.manual"
+msgstr "Manual rendering"
+
+msgid "form.tab.auto"
+msgstr "Auto rendering"
+
+msgid "form.auto_description"
+msgstr ""
+"This tab uses {{ form.as_div }} to render the entire form automatically. "
+"Django generates the labels and help texts from verbose_name / help_text — "
+"live translations can edit these just like manually rendered fields."
+
+#. Auth bar
+msgid "auth.logged_in %(username)s"
+msgstr "Logged in as %(username)s (translator)"
+
+msgid "auth.logout"
+msgstr "Log out"
+
+msgid "auth.anonymous"
+msgstr "Browsing as anonymous user"
+
+msgid "auth.login"
+msgstr "Log in as translator"

@@ -15,11 +15,6 @@ if t.TYPE_CHECKING:
     from pytest_django.fixtures import SettingsWrapper
 
 
-@pytest.fixture
-def _db_setup(db):
-    """Ensure DB is available for tests that need it."""
-
-
 @pytest.mark.django_db
 class TestTranslationEntryModel:
     def test_is_active_field_exists(self):
@@ -124,14 +119,9 @@ class TestGetTranslations:
 
 @pytest.mark.django_db
 class TestSaveTranslations:
-    def _make_backend(self):
-        backend = db.DatabaseBackend(locale_dir=pathlib.Path("/tmp"), domain="django")
-        # Mock PO defaults to return empty (no .po match)
-        mock_po = unittest.mock.MagicMock()
-        mock_po.get_translations.return_value = {}
-        mock_po.get_hint.return_value = ""
-        backend._po_backend = mock_po
-        return backend
+    @pytest.fixture(autouse=True)
+    def _backend(self, make_db_backend):
+        self._make_backend = make_db_backend
 
     @pytest.mark.parametrize("active_default", [True, False])
     def test_new_entry_without_flags_uses_setting(self, active_default, settings):

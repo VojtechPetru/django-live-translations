@@ -17,7 +17,7 @@ msgstr ""
 "Plural-Forms: nplurals=4; plural=(n == 1 && n % 1 == 0) ? 0 : (n >= 2 && n <= 4 && n % 1 == 0) ? 1: (n % 1 != 0 ) ? 2 : 3;\n"
 
 msgid "demo.title"
-msgstr "Demo živých překladů"
+msgstr "Demo živých překladůASDSASD"
 
 #. Greeting shown on the homepage
 msgid "demo.welcome"
@@ -68,6 +68,13 @@ msgstr "Tento odstavec má tooltip z kontextové proměnné."
 
 msgid "attrs.tooltip_gettext"
 msgstr "Tento tooltip byl přeložen pomocí gettext()"
+
+msgid "attrs.alt_text"
+msgstr "Zástupný obrázek demonstrujicí přeložený atribut alt"
+
+msgid "attrs.alt_hint"
+msgstr ""
+"Tento obrázek má přeložený atribut alt — zkontrolujte ho v prohlížeči."
 
 msgid "asvar.heading"
 msgstr "Přiřazení do proměnné"
@@ -121,3 +128,29 @@ msgstr "Přihlásit se k odběru novinek"
 
 msgid "form.newsletter.help"
 msgstr "Příležitostné novinky e-mailem."
+
+#. Form tabs
+msgid "form.tab.manual"
+msgstr "Ruční vykreslení"
+
+msgid "form.tab.auto"
+msgstr "Automatické vykreslení"
+
+msgid "form.auto_description"
+msgstr ""
+"Tato záložka používá {{ form.as_div }} k automatickému vykreslení celého "
+"formuláře. Django generuje popisky a nápovědy z verbose_name / help_text — "
+"živé překlady je umí upravit stejně jako ručně vykreslená pole."
+
+#. Auth bar
+msgid "auth.logged_in %(username)s"
+msgstr "Přihlášen jako %(username)s (překladatel)"
+
+msgid "auth.logout"
+msgstr "Odhlásit se"
+
+msgid "auth.anonymous"
+msgstr "Prohlížíte jako anonymní uživatel"
+
+msgid "auth.login"
+msgstr "Přihlásit se jako překladatel"

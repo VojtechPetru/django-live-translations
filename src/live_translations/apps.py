@@ -18,7 +18,7 @@ class LiveTranslationsConfig(django.apps.AppConfig):
     @t.override
     def ready(self) -> None:
         _register_checks()
-        _patch_gettext()
+        strings.install_gettext_patch()
 
 
 def _register_checks() -> None:
@@ -74,7 +74,3 @@ def _register_checks() -> None:
             errors.extend(conf.get_backend_instance().check())
 
         return errors
-
-
-def _patch_gettext() -> None:
-    strings.install_gettext_patch()

@@ -16,7 +16,6 @@ __all__ = [
     "SaveResult",
     "StringId",
     "StringTable",
-    "StringTableEntry",
     "TranslationInfo",
     "TranslationsResult",
 ]
@@ -52,7 +51,7 @@ class DbOverride(t.NamedTuple):
 
 
 class DiffSegment(t.TypedDict):
-    type: str
+    type: t.Literal["equal", "insert", "delete"]
     text: str
 
 

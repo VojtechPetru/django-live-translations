@@ -1,5 +1,6 @@
 """E2E test fixtures — server management, page helpers, backend parameterization."""
 
+import contextlib
 import os
 import shutil
 import signal
@@ -72,13 +73,6 @@ def locale_dir(session_tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def fresh_locale(tmp_path: Path) -> Path:
-    dest = tmp_path / "locale"
-    shutil.copytree(SOURCE_LOCALE_DIR, dest)
-    return dest
-
-
 # ---------------------------------------------------------------------------
 # Django live server (per-session)
 # ---------------------------------------------------------------------------
@@ -143,12 +137,11 @@ def _kill_port(port: int) -> None:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
         )
         for pid_str in result.stdout.strip().splitlines():
-            try:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.kill(int(pid_str), signal.SIGTERM)
-            except (ProcessLookupError, PermissionError):
-                pass
         if result.stdout.strip():
             time.sleep(1)
     except (subprocess.TimeoutExpired, FileNotFoundError):
@@ -215,11 +208,6 @@ def _db_server(session_tmp_path: Path) -> str:
     yield f"http://127.0.0.1:{port}"
     proc.send_signal(signal.SIGTERM)
     proc.wait(timeout=5)
-
-
-@pytest.fixture(scope="session")
-def po_base_url(_po_server: str) -> str:
-    return _po_server
 
 
 @pytest.fixture(scope="session")

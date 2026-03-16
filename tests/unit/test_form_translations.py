@@ -13,6 +13,7 @@ With the new architecture, patched gettext() returns a plain str with an appende
 
 import django.utils.html
 import django.utils.text
+import pytest
 
 from live_translations.strings import (
     _ZWC_BITS,
@@ -23,6 +24,14 @@ from live_translations.strings import (
     reset_string_registry,
 )
 from live_translations.types import MsgKey
+
+
+@pytest.fixture(autouse=True)
+def _reset_registry():
+    reset_string_registry()
+    yield
+    reset_string_registry()
+
 
 # ---------------------------------------------------------------------------
 # 1. ZWC encoding
@@ -67,14 +76,10 @@ class TestEncodeZwc:
             assert decoded == n, f"Round-trip failed for {n}: got {decoded}"
 
     def test_out_of_range_negative(self) -> None:
-        import pytest
-
         with pytest.raises(ValueError, match="out of range"):
             encode_zwc(-1)
 
     def test_out_of_range_too_large(self) -> None:
-        import pytest
-
         with pytest.raises(ValueError, match="out of range"):
             encode_zwc(65536)
 
@@ -85,12 +90,6 @@ class TestEncodeZwc:
 
 
 class TestStringRegistry:
-    def setup_method(self) -> None:
-        reset_string_registry()
-
-    def teardown_method(self) -> None:
-        reset_string_registry()
-
     def test_register_returns_incrementing_ids(self) -> None:
         id0 = register_string("hello", "")
         id1 = register_string("world", "")
@@ -137,12 +136,6 @@ class TestCapfirstPreservesMarker:
     first content character and the marker stays intact at the end.
     """
 
-    def setup_method(self) -> None:
-        reset_string_registry()
-
-    def teardown_method(self) -> None:
-        reset_string_registry()
-
     def test_capfirst_preserves_marker(self) -> None:
         token = lt_active.set(True)
         try:
@@ -162,12 +155,6 @@ class TestCapfirstPreservesMarker:
 
 
 class TestHtmlEscapePreservesMarker:
-    def setup_method(self) -> None:
-        reset_string_registry()
-
-    def teardown_method(self) -> None:
-        reset_string_registry()
-
     def test_escape_preserves_zwc(self) -> None:
         marker = encode_zwc(42)
         text = "Hello <world>" + marker
@@ -184,12 +171,6 @@ class TestHtmlEscapePreservesMarker:
 
 
 class TestFormattingPreservesMarker:
-    def setup_method(self) -> None:
-        reset_string_registry()
-
-    def teardown_method(self) -> None:
-        reset_string_registry()
-
     def test_percent_formatting(self) -> None:
         marker = encode_zwc(7)
         template = "Hello %(name)s" + marker
