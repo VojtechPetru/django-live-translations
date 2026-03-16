@@ -82,7 +82,7 @@ def open_modal(page: Page, msgid: str, *, attr: bool = False) -> None:
             msgid,
         )
     else:
-        page.locator(f'.lt-translatable[data-lt-msgid="{msgid}"]').first.click()
+        page.locator(f'lt-t[data-lt-msgid="{msgid}"]').first.click()
     expect(page.locator("dialog.lt-dialog[open]")).to_be_visible(timeout=3000)
 
 

@@ -1,131 +1,203 @@
-"""Tests for TranslatableString surviving string operations (capfirst etc.)
-and for the original gettext_lazy proxy class gaining __html__ retroactively.
+"""Tests for ZWC encoding, string registry, and marker survival through string ops.
 
-These cover the two fixes needed so that model-level verbose_name / help_text
-render as translatable markers in Django forms:
+With the new architecture, patched gettext() returns a plain str with an appended
+18-char zero-width character marker.  These tests verify:
 
-1. TranslatableString must preserve type through __getitem__, upper(), __add__,
-   __radd__ — because Django's capfirst() does ``x[0].upper() + x[1:]``.
-
-2. The *original* gettext_lazy proxy class (created before AppConfig.ready()
-   patches it) must gain __html__ so that model-level lazy strings produce
-   markers when rendered in templates.
+1. encode_zwc / decode round-trip correctness.
+2. String registry deduplication via MsgKey.
+3. The ZWC marker survives Django's capfirst() (which does x[0].upper() + x[1:])
+   because the marker is appended, not prepended.
+4. The ZWC marker survives Django's html.escape() (ZWC chars are not HTML-special).
+5. The ZWC marker survives %-formatting and .format() operations.
 """
-
-import base64
 
 import django.utils.html
 import django.utils.text
 
-from live_translations.strings import TranslatableString, lt_active
+from live_translations.strings import (
+    _ZWC_BITS,
+    ZWC_BOUNDARY,
+    encode_zwc,
+    lt_active,
+    register_string,
+    reset_string_registry,
+)
+from live_translations.types import MsgKey
 
 # ---------------------------------------------------------------------------
-# 1. TranslatableString string-operation preservation
-# ---------------------------------------------------------------------------
-
-
-class TestTranslatableStringGetitem:
-    def test_single_index_returns_translatable_string(self) -> None:
-        ts = TranslatableString("hello", msgid="test.msg")
-        result = ts[0]
-        assert isinstance(result, TranslatableString)
-        assert result == "h"
-
-    def test_single_index_preserves_msgid(self) -> None:
-        ts = TranslatableString("hello", msgid="test.msg", context="ctx")
-        result = ts[0]
-        assert result._lt_msgid == "test.msg"
-        assert result._lt_context == "ctx"
-
-    def test_slice_returns_translatable_string(self) -> None:
-        ts = TranslatableString("hello", msgid="test.msg")
-        result = ts[1:]
-        assert isinstance(result, TranslatableString)
-        assert result == "ello"
-        assert result._lt_msgid == "test.msg"
-
-
-class TestTranslatableStringUpper:
-    def test_upper_returns_translatable_string(self) -> None:
-        ts = TranslatableString("hello", msgid="test.msg")
-        result = ts.upper()
-        assert isinstance(result, TranslatableString)
-        assert result == "HELLO"
-
-    def test_upper_preserves_msgid(self) -> None:
-        ts = TranslatableString("hello", msgid="test.msg", context="ctx")
-        result = ts.upper()
-        assert result._lt_msgid == "test.msg"
-        assert result._lt_context == "ctx"
-
-
-class TestTranslatableStringAdd:
-    def test_add_returns_translatable_string(self) -> None:
-        ts = TranslatableString("hel", msgid="test.msg")
-        result = ts + "lo"
-        assert isinstance(result, TranslatableString)
-        assert result == "hello"
-
-    def test_add_preserves_msgid(self) -> None:
-        ts = TranslatableString("hel", msgid="test.msg", context="ctx")
-        result = ts + "lo"
-        assert result._lt_msgid == "test.msg"
-        assert result._lt_context == "ctx"
-
-    def test_add_with_translatable_string_rhs(self) -> None:
-        ts1 = TranslatableString("hel", msgid="left.msg")
-        ts2 = TranslatableString("lo", msgid="right.msg")
-        result = ts1 + ts2
-        assert isinstance(result, TranslatableString)
-        assert result == "hello"
-        # Left operand's msgid wins
-        assert result._lt_msgid == "left.msg"
-
-
-class TestTranslatableStringRadd:
-    def test_radd_returns_translatable_string(self) -> None:
-        ts = TranslatableString("lo", msgid="test.msg")
-        result = "hel" + ts
-        assert isinstance(result, TranslatableString)
-        assert result == "hello"
-
-    def test_radd_preserves_msgid(self) -> None:
-        ts = TranslatableString("lo", msgid="test.msg", context="ctx")
-        result = "hel" + ts
-        assert result._lt_msgid == "test.msg"
-        assert result._lt_context == "ctx"
-
-
-# ---------------------------------------------------------------------------
-# 2. capfirst preserves TranslatableString
+# 1. ZWC encoding
 # ---------------------------------------------------------------------------
 
 
-class TestCapfirstPreservesTranslatableString:
+class TestEncodeZwc:
+    def test_zero(self) -> None:
+        result = encode_zwc(0)
+        assert len(result) == 18
+        assert result[0] == ZWC_BOUNDARY
+        assert result[-1] == ZWC_BOUNDARY
+        # All inner bits should be ZWC_0 (\u200B)
+        inner = result[1:-1]
+        assert all(c == "\u200b" for c in inner)
+
+    def test_one(self) -> None:
+        result = encode_zwc(1)
+        assert len(result) == 18
+        # Least significant bit should be ZWC_1 (\u200C)
+        assert result[-2] == "\u200c"
+        # All other inner bits should be ZWC_0
+        assert all(c == "\u200b" for c in result[1:-2])
+
+    def test_max_id(self) -> None:
+        max_id = (1 << _ZWC_BITS) - 1
+        result = encode_zwc(max_id)
+        assert len(result) == 18
+        # All inner bits should be ZWC_1 (\u200C)
+        inner = result[1:-1]
+        assert all(c == "\u200c" for c in inner)
+
+    def test_round_trip(self) -> None:
+        """Encode then decode (simulating what JS does) for several IDs."""
+        for n in [0, 1, 42, 255, 1000, 65535]:
+            marker = encode_zwc(n)
+            # Decode: same logic as JS decodeZWC
+            decoded = 0
+            for i in range(1, 17):
+                if ord(marker[i]) == 0x200C:
+                    decoded |= 1 << (16 - i)
+            assert decoded == n, f"Round-trip failed for {n}: got {decoded}"
+
+    def test_out_of_range_negative(self) -> None:
+        import pytest
+
+        with pytest.raises(ValueError, match="out of range"):
+            encode_zwc(-1)
+
+    def test_out_of_range_too_large(self) -> None:
+        import pytest
+
+        with pytest.raises(ValueError, match="out of range"):
+            encode_zwc(65536)
+
+
+# ---------------------------------------------------------------------------
+# 2. String registry
+# ---------------------------------------------------------------------------
+
+
+class TestStringRegistry:
+    def setup_method(self) -> None:
+        reset_string_registry()
+
+    def teardown_method(self) -> None:
+        reset_string_registry()
+
+    def test_register_returns_incrementing_ids(self) -> None:
+        id0 = register_string("hello", "")
+        id1 = register_string("world", "")
+        assert id0 == 0
+        assert id1 == 1
+
+    def test_deduplication_same_key(self) -> None:
+        id0 = register_string("hello", "ctx")
+        id1 = register_string("hello", "ctx")
+        assert id0 == id1
+
+    def test_different_context_different_id(self) -> None:
+        id0 = register_string("hello", "")
+        id1 = register_string("hello", "ctx")
+        assert id0 != id1
+
+    def test_get_registry(self) -> None:
+        from live_translations.strings import get_string_registry
+
+        register_string("a", "")
+        register_string("b", "ctx")
+        registry = get_string_registry()
+        assert registry == [MsgKey("a", ""), MsgKey("b", "ctx")]
+
+    def test_reset_clears_registry(self) -> None:
+        from live_translations.strings import get_string_registry
+
+        register_string("a", "")
+        reset_string_registry()
+        assert get_string_registry() == []
+        # IDs restart from 0
+        assert register_string("a", "") == 0
+
+
+# ---------------------------------------------------------------------------
+# 3. ZWC marker survives capfirst
+# ---------------------------------------------------------------------------
+
+
+class TestCapfirstPreservesMarker:
     """Django's capfirst does ``x[0].upper() + x[1:]``.
 
-    With __getitem__, upper(), and __add__ preserving TranslatableString,
-    capfirst should return a TranslatableString with the original msgid.
+    Since the ZWC marker is appended (at the end), capfirst operates on the
+    first content character and the marker stays intact at the end.
     """
 
-    def test_capfirst_returns_translatable_string(self) -> None:
-        ts = TranslatableString("full name", msgid="form.name.label")
-        result = django.utils.text.capfirst(ts)
-        assert isinstance(result, TranslatableString)
-        assert result == "Full name"
+    def setup_method(self) -> None:
+        reset_string_registry()
 
-    def test_capfirst_preserves_msgid(self) -> None:
-        ts = TranslatableString("full name", msgid="form.name.label", context="ctx")
-        result = django.utils.text.capfirst(ts)
-        assert result._lt_msgid == "form.name.label"
-        assert result._lt_context == "ctx"
+    def teardown_method(self) -> None:
+        reset_string_registry()
 
-    def test_capfirst_result_has_working_html(self) -> None:
-        ts = TranslatableString("full name", msgid="form.name.label")
-        result = django.utils.text.capfirst(ts)
+    def test_capfirst_preserves_marker(self) -> None:
         token = lt_active.set(True)
         try:
-            html = result.__html__()
+            from live_translations.strings import _append_marker
+
+            text = _append_marker("full name", "form.name.label", "")
+            result = django.utils.text.capfirst(text)
+            assert result.startswith("Full name")
+            assert ZWC_BOUNDARY in result
         finally:
             lt_active.reset(token)
-        assert base64.b64encode(b"form.name.label").decode() in html  # msgid is base64-encoded in the marker
+
+
+# ---------------------------------------------------------------------------
+# 4. ZWC marker survives html.escape
+# ---------------------------------------------------------------------------
+
+
+class TestHtmlEscapePreservesMarker:
+    def setup_method(self) -> None:
+        reset_string_registry()
+
+    def teardown_method(self) -> None:
+        reset_string_registry()
+
+    def test_escape_preserves_zwc(self) -> None:
+        marker = encode_zwc(42)
+        text = "Hello <world>" + marker
+        escaped = django.utils.html.escape(text)
+        assert ZWC_BOUNDARY in escaped
+        assert "&lt;world&gt;" in escaped
+        # The marker itself should be unchanged
+        assert marker in escaped
+
+
+# ---------------------------------------------------------------------------
+# 5. ZWC marker survives formatting
+# ---------------------------------------------------------------------------
+
+
+class TestFormattingPreservesMarker:
+    def setup_method(self) -> None:
+        reset_string_registry()
+
+    def teardown_method(self) -> None:
+        reset_string_registry()
+
+    def test_percent_formatting(self) -> None:
+        marker = encode_zwc(7)
+        template = "Hello %(name)s" + marker
+        result = template % {"name": "World"}
+        assert result == "Hello World" + marker
+
+    def test_str_format(self) -> None:
+        marker = encode_zwc(7)
+        template = "Hello {name}" + marker
+        result = template.format(name="World")
+        assert result == "Hello World" + marker

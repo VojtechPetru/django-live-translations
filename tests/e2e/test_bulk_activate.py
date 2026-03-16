@@ -32,7 +32,7 @@ class TestBulkActivate:
             {"en": False},
         )
         _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
-        span = page_as_superuser_for_backend.locator('.lt-translatable[data-lt-msgid="demo.title"]').first
+        span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span).to_have_class(re.compile(r"lt-preview"))
         span.click(modifiers=["Shift"])
         expect(span).to_have_class(re.compile(r"lt-selected"))
@@ -52,7 +52,7 @@ class TestBulkActivate:
             {"en": False},
         )
         _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
-        span = page_as_superuser_for_backend.locator('.lt-translatable[data-lt-msgid="demo.title"]').first
+        span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         span.click(modifiers=["Shift"])
         expect(span).to_have_class(re.compile(r"lt-selected"))
         span.click(modifiers=["Shift"])
@@ -73,7 +73,7 @@ class TestBulkActivate:
             {"en": False},
         )
         _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
-        span = page_as_superuser_for_backend.locator('.lt-translatable[data-lt-msgid="demo.title"]').first
+        span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         span.click(modifiers=["Shift"])
         action_bar = page_as_superuser_for_backend.locator(".lt-action-bar")
         expect(action_bar).to_have_class(re.compile(r"lt-action-bar--visible"))
@@ -100,12 +100,8 @@ class TestBulkActivate:
             {"en": False},
         )
         _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
-        page_as_superuser_for_backend.locator('.lt-translatable[data-lt-msgid="demo.title"]').first.click(
-            modifiers=["Shift"]
-        )
-        page_as_superuser_for_backend.locator('.lt-translatable[data-lt-msgid="about.heading"]').first.click(
-            modifiers=["Shift"]
-        )
+        page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first.click(modifiers=["Shift"])
+        page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="about.heading"]').first.click(modifiers=["Shift"])
         count_el = page_as_superuser_for_backend.locator(".lt-action-bar__count")
         expect(count_el).to_have_text("2 selected")
         # Cleanup
@@ -126,7 +122,7 @@ class TestBulkActivate:
             {"en": False},
         )
         _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
-        span = page_as_superuser_for_backend.locator('.lt-translatable[data-lt-msgid="demo.title"]').first
+        span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         span.click(modifiers=["Shift"])
         expect(span).to_have_class(re.compile(r"lt-selected"))
         page_as_superuser_for_backend.locator(".lt-action-bar__clear").click()
@@ -150,9 +146,7 @@ class TestBulkActivate:
             {"en": False},
         )
         _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
-        page_as_superuser_for_backend.locator('.lt-translatable[data-lt-msgid="demo.title"]').first.click(
-            modifiers=["Shift"]
-        )
+        page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first.click(modifiers=["Shift"])
         page_as_superuser_for_backend.locator(".lt-action-bar__activate").click()
         confirm_btn = page_as_superuser_for_backend.locator(".lt-action-bar__confirm")
         cancel_btn = page_as_superuser_for_backend.locator(".lt-action-bar__cancel")
@@ -176,9 +170,7 @@ class TestBulkActivate:
             {"en": False},
         )
         _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
-        page_as_superuser_for_backend.locator('.lt-translatable[data-lt-msgid="demo.title"]').first.click(
-            modifiers=["Shift"]
-        )
+        page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first.click(modifiers=["Shift"])
         page_as_superuser_for_backend.locator(".lt-action-bar__activate").click()
         expect(page_as_superuser_for_backend.locator(".lt-action-bar__confirm")).to_be_visible()
         page_as_superuser_for_backend.locator(".lt-action-bar__cancel").click()
@@ -203,7 +195,7 @@ class TestBulkActivate:
             {"en": False},
         )
         _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
-        span = page_as_superuser_for_backend.locator('.lt-translatable[data-lt-msgid="demo.title"]').first
+        span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span).to_have_class(re.compile(r"lt-preview"))
         span.click(modifiers=["Shift"])
         page_as_superuser_for_backend.locator(".lt-action-bar__activate").click()
@@ -213,7 +205,7 @@ class TestBulkActivate:
         expect(toast).to_contain_text("activated")
         page_as_superuser_for_backend.wait_for_load_state("networkidle")
         # After reload, the span should no longer have amber outline
-        span_after = page_as_superuser_for_backend.locator('.lt-translatable[data-lt-msgid="demo.title"]').first
+        span_after = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span_after).not_to_have_class(re.compile(r"lt-preview"))
         expect(span_after).to_have_text("Bulk Activated Title")
         # Cleanup
@@ -234,16 +226,14 @@ class TestBulkActivate:
             {"en": False, "cs": False},
         )
         _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
-        page_as_superuser_for_backend.locator('.lt-translatable[data-lt-msgid="demo.title"]').first.click(
-            modifiers=["Shift"]
-        )
+        page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first.click(modifiers=["Shift"])
         page_as_superuser_for_backend.locator(".lt-action-bar__activate").click()
         page_as_superuser_for_backend.locator(".lt-action-bar__confirm").click()
         toast = page_as_superuser_for_backend.locator(".lt-toast--success")
         expect(toast).to_be_visible(timeout=5000)
         page_as_superuser_for_backend.wait_for_load_state("networkidle")
         # EN should be active now (text shows override)
-        span_en = page_as_superuser_for_backend.locator('.lt-translatable[data-lt-msgid="demo.title"]').first
+        span_en = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span_en).to_have_text("EN Activated")
         # Verify CS is still inactive via API — fetch translation and check active flag
         csrf = page_as_superuser_for_backend.evaluate("() => window.__LT_CONFIG__?.csrfToken || ''")
@@ -280,9 +270,7 @@ class TestBulkActivate:
         )
         _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
         # about.heading has no inactive override — shift+click should open modal
-        non_preview_span = page_as_superuser_for_backend.locator(
-            '.lt-translatable[data-lt-msgid="about.heading"]'
-        ).first
+        non_preview_span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="about.heading"]').first
         expect(non_preview_span).not_to_have_class(re.compile(r"lt-preview"))
         non_preview_span.click(modifiers=["Shift"])
         dialog = page_as_superuser_for_backend.locator("dialog.lt-dialog[open]")
@@ -306,7 +294,7 @@ class TestBulkActivate:
             {"en": False},
         )
         _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
-        span = page_as_superuser_for_backend.locator('.lt-translatable[data-lt-msgid="demo.title"]').first
+        span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         span.click(modifiers=["Shift"])
         action_bar = page_as_superuser_for_backend.locator(".lt-action-bar")
         expect(action_bar).to_have_class(re.compile(r"lt-action-bar--visible"))

@@ -61,7 +61,7 @@ class TestPreviewMode:
             {"en": False},
         )
         _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
-        span = page_as_superuser_for_backend.locator('.lt-translatable[data-lt-msgid="demo.title"]').first
+        span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span).to_have_class(re.compile(r"lt-preview"))
         # Cleanup
         _disable_preview(page_as_superuser_for_backend, base_url_for_backend)
@@ -95,8 +95,8 @@ class TestPreviewMode:
             {"en": False},
         )
         _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
-        active_span = page_as_superuser_for_backend.locator('.lt-translatable[data-lt-msgid="demo.title"]').first
-        inactive_span = page_as_superuser_for_backend.locator('.lt-translatable[data-lt-msgid="about.heading"]').first
+        active_span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
+        inactive_span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="about.heading"]').first
         expect(active_span).not_to_have_class(re.compile(r"lt-preview"))
         expect(inactive_span).to_have_class(re.compile(r"lt-preview"))
         # Cleanup
@@ -117,7 +117,7 @@ class TestPreviewMode:
             {"en": False},
         )
         _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
-        span = page_as_superuser_for_backend.locator('.lt-translatable[data-lt-msgid="demo.title"]').first
+        span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span).to_have_text("Custom Preview Text")
         # Cleanup
         _disable_preview(page_as_superuser_for_backend, base_url_for_backend)
@@ -136,7 +136,7 @@ class TestPreviewMode:
         )
         page_as_superuser_for_backend.reload()
         page_as_superuser_for_backend.wait_for_load_state("networkidle")
-        span = page_as_superuser_for_backend.locator('.lt-translatable[data-lt-msgid="demo.title"]').first
+        span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span).to_have_text("Live Translations Demo")
         # Cleanup
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
@@ -153,12 +153,12 @@ class TestPreviewMode:
             {"en": False},
         )
         _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
-        span = page_as_superuser_for_backend.locator('.lt-translatable[data-lt-msgid="demo.title"]').first
+        span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span).to_have_class(re.compile(r"lt-preview"))
         _disable_preview(page_as_superuser_for_backend, base_url_for_backend)
         preview_elements = page_as_superuser_for_backend.locator(".lt-preview")
         expect(preview_elements).to_have_count(0)
-        span_after = page_as_superuser_for_backend.locator('.lt-translatable[data-lt-msgid="demo.title"]').first
+        span_after = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span_after).to_have_text("Live Translations Demo")
         # Cleanup
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])

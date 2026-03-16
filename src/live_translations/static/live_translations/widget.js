@@ -144,6 +144,167 @@
   /** @type {Array<{m:string, c:string}>} */
   let PREVIEW_ENTRIES = CONFIG.previewEntries || [];
 
+  // ─── String Table & ZWC Marker Resolution ───────────
+
+  /**
+   * @typedef {{m: string, c: string}} StringTableEntry
+   * Mirrors Python's StringTableEntry TypedDict.
+   */
+
+  /**
+   * @typedef {Object<number, StringTableEntry>} StringTable
+   * Maps string ID to {msgid, context}. Injected as window.__LT_STRINGS__.
+   */
+
+  /**
+   * @typedef {Object} RegisteredNode
+   * @property {Text}              node    - The text node containing translated content.
+   * @property {string}            msgid   - The gettext message ID.
+   * @property {string}            context - The gettext context (empty string if none).
+   * @property {HTMLElement|null}  span    - Wrapping <lt-t> element (null only for OPTION/TITLE/SCRIPT/STYLE parents).
+   */
+
+  /** @type {RegExp} */
+  var ZWC_RE = /\uFEFF[\u200B\u200C]{16}\uFEFF/g;
+
+  /** @type {StringTable} */
+  var STRING_TABLE = window.__LT_STRINGS__ || {};
+
+  /** @type {RegisteredNode[]} */
+  var registeredNodes = [];
+
+  /**
+   * Decode a ZWC marker string into a string-table ID.
+   * @param {string} marker - 18-char ZWC sequence (FEFF + 16 bits + FEFF).
+   * @returns {number} The decoded string ID (0-65535).
+   */
+  function decodeZWC(marker) {
+    var n = 0;
+    for (var i = 1; i <= 16; i++) {
+      if (marker.charCodeAt(i) === 0x200C) n |= (1 << (16 - i));
+    }
+    return n;
+  }
+
+  /**
+   * Walk the DOM, find ZWC markers in text nodes and attribute values,
+   * strip them, and populate registeredNodes[].
+   * @returns {void}
+   */
+  function resolveMarkers() {
+    // Phase 1: Text nodes
+    /** @type {Text[]} */
+    var textNodes = [];
+    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    /** @type {Node|null} */
+    var wNode;
+    while ((wNode = walker.nextNode()) !== null) {
+      textNodes.push(/** @type {Text} */ (wNode));
+    }
+
+    for (var ti = 0; ti < textNodes.length; ti++) {
+      var tn = textNodes[ti];
+      var text = tn.textContent || "";
+      ZWC_RE.lastIndex = 0;
+
+      // Collect all marker matches in this text node
+      /** @type {RegExpExecArray[]} */
+      var matches = [];
+      /** @type {RegExpExecArray|null} */
+      var execMatch;
+      while ((execMatch = ZWC_RE.exec(text)) !== null) {
+        matches.push(execMatch);
+      }
+      if (!matches.length) continue;
+
+      // Process markers right-to-left to preserve indices when splitting
+      for (var mi = matches.length - 1; mi >= 0; mi--) {
+        var m = matches[mi];
+        var mIdx = /** @type {number} */ (m.index);
+        var mLen = m[0].length;
+        var id = decodeZWC(m[0]);
+        var meta = STRING_TABLE[id];
+        if (!meta) continue;
+
+        // Text AFTER the marker becomes a separate text node (tail)
+        var afterStart = mIdx + mLen;
+        if (afterStart < (tn.textContent || "").length) {
+          tn.splitText(afterStart);
+        }
+
+        // Text of the marker itself: remove it.
+        // Now tn contains everything up to and including the marker.
+        // Split before the marker to isolate it.
+        if (mIdx > 0) {
+          tn = /** @type {Text} */ (tn.splitText(mIdx));
+        }
+
+        // tn now starts with the marker. Remove the marker text from tn.
+        tn.textContent = (tn.textContent || "").substring(mLen);
+
+        // The text node BEFORE the marker (content text) is tn's previous sibling.
+        // Since we append markers, the content is BEFORE the marker in the text.
+        var contentNode = /** @type {Text|null} */ (tn.previousSibling);
+
+        // Determine which text node contains the translatable content
+        /** @type {Text|null} */
+        var nodeToWrap = null;
+        if (contentNode && contentNode.nodeType === Node.TEXT_NODE && (contentNode.textContent || "").length > 0) {
+          nodeToWrap = /** @type {Text} */ (contentNode);
+        } else if (tn.nodeType === Node.TEXT_NODE && (tn.textContent || "").length > 0) {
+          // Marker was at position 0 or no previous content; use tn (text after marker)
+          nodeToWrap = /** @type {Text} */ (tn);
+        }
+
+        if (nodeToWrap) {
+          var wrapParent = nodeToWrap.parentNode;
+          // Wrap in <lt-t> unless parent cannot contain child elements
+          if (wrapParent && wrapParent.nodeName !== "OPTION" && wrapParent.nodeName !== "TITLE" && wrapParent.nodeName !== "SCRIPT" && wrapParent.nodeName !== "STYLE") {
+            var ltEl = document.createElement("lt-t");
+            ltEl.dataset.ltMsgid = meta.m;
+            ltEl.dataset.ltContext = meta.c;
+            wrapParent.insertBefore(ltEl, nodeToWrap);
+            ltEl.appendChild(nodeToWrap);
+            registeredNodes.push({ node: nodeToWrap, msgid: meta.m, context: meta.c, span: ltEl });
+          } else {
+            registeredNodes.push({ node: nodeToWrap, msgid: meta.m, context: meta.c, span: null });
+          }
+        }
+
+        // Clean up empty text node left after marker removal
+        if (tn !== nodeToWrap && tn.textContent === "" && tn.parentNode) {
+          tn.parentNode.removeChild(tn);
+        }
+      }
+    }
+
+    // Phase 2: Attribute values
+    var allElements = document.querySelectorAll("*");
+    for (var ei = 0; ei < allElements.length; ei++) {
+      var el = /** @type {HTMLElement} */ (allElements[ei]);
+      /** @type {AttrInfo[]} */
+      var ltAttrs = [];
+      var attrs = el.attributes;
+      for (var ai = 0; ai < attrs.length; ai++) {
+        var attr = attrs[ai];
+        ZWC_RE.lastIndex = 0;
+        var attrMatch = ZWC_RE.exec(attr.value);
+        if (!attrMatch) continue;
+        var attrId = decodeZWC(attrMatch[0]);
+        var attrMeta = STRING_TABLE[attrId];
+        if (!attrMeta) continue;
+        // Strip ALL ZWC markers from the attribute value
+        el.setAttribute(attr.name, attr.value.replace(ZWC_RE, ""));
+        ltAttrs.push({ a: attr.name, m: attrMeta.m, c: attrMeta.c });
+      }
+      if (ltAttrs.length) {
+        el.dataset.ltAttrs = JSON.stringify(ltAttrs);
+      }
+    }
+  }
+
+
+
   // ─── Shortcut Parsing ────────────────────────────────
 
   /**
@@ -315,35 +476,53 @@
    * @returns {void}
    */
   function _updateDomInPlace(msgid, context, displayText, isPreviewEntry) {
-    // Update inline text spans
-    const spans = document.querySelectorAll(".lt-translatable");
-    for (let i = 0; i < spans.length; i++) {
-      const sp = spans[i];
+    // Update registered text nodes (and their wrapping spans if in edit mode)
+    for (var ri = 0; ri < registeredNodes.length; ri++) {
+      var entry = registeredNodes[ri];
+      if (entry.msgid === msgid && entry.context === context) {
+        entry.node.textContent = displayText;
+        if (entry.span) {
+          if (isPreviewEntry) {
+            entry.span.classList.add("lt-preview");
+          } else {
+            entry.span.classList.remove("lt-preview", "lt-selected");
+            var sidx = selectedElements.indexOf(entry.span);
+            if (sidx !== -1) selectedElements.splice(sidx, 1);
+          }
+        }
+      }
+    }
+
+    // Also update any inline text spans that may exist outside registeredNodes
+    // (e.g., if wrapping was skipped for some elements)
+    var spans = document.querySelectorAll("lt-t");
+    for (var i = 0; i < spans.length; i++) {
+      var sp = spans[i];
       if (sp.dataset.ltMsgid === msgid && (sp.dataset.ltContext || "") === context) {
         sp.textContent = displayText;
         if (isPreviewEntry) {
           sp.classList.add("lt-preview");
         } else {
           sp.classList.remove("lt-preview", "lt-selected");
-          const idx = selectedElements.indexOf(sp);
+          var idx = selectedElements.indexOf(sp);
           if (idx !== -1) selectedElements.splice(idx, 1);
         }
       }
     }
 
     // Update attribute translations
-    const attrEls = document.querySelectorAll("[data-lt-attrs]");
-    for (let j = 0; j < attrEls.length; j++) {
+    var attrEls = document.querySelectorAll("[data-lt-attrs]");
+    for (var j = 0; j < attrEls.length; j++) {
       try {
-        const attrs = JSON.parse(attrEls[j].dataset.ltAttrs || "[]");
-        for (let k = 0; k < attrs.length; k++) {
+        var attrs = JSON.parse(attrEls[j].dataset.ltAttrs || "[]");
+        for (var k = 0; k < attrs.length; k++) {
           if (attrs[k].m === msgid && (attrs[k].c || "") === context) {
             attrEls[j].setAttribute(attrs[k].a, displayText);
             if (isPreviewEntry) {
               attrEls[j].classList.add("lt-preview");
             } else {
               attrEls[j].classList.remove("lt-preview", "lt-selected");
-              const aidx = selectedElements.indexOf(attrEls[j]);
+              var aidx = selectedElements.indexOf(attrEls[j]);
               if (aidx !== -1) selectedElements.splice(aidx, 1);
             }
             break;
@@ -355,8 +534,8 @@
     // Update PREVIEW_ENTRIES and action bar
     if (PREVIEW) {
       if (isPreviewEntry) {
-        let found = false;
-        for (let p = 0; p < PREVIEW_ENTRIES.length; p++) {
+        var found = false;
+        for (var p = 0; p < PREVIEW_ENTRIES.length; p++) {
           if (PREVIEW_ENTRIES[p].m === msgid && (PREVIEW_ENTRIES[p].c || "") === context) {
             found = true;
             break;
@@ -653,7 +832,7 @@
   /**
    * Open the translation editor for a translatable element.
    *
-   * For inline text spans (`<span class="lt-translatable">`), `attrInfo` is
+   * For inline text elements (`<lt-t>`), `attrInfo` is
    * omitted and the msgid/context are read from the element's `data-lt-msgid`
    * and `data-lt-context` attributes. For attribute translations (e.g. `title`),
    * the caller passes the {@link AttrInfo} descriptor from `data-lt-attrs`.
@@ -1952,29 +2131,29 @@
   function _initPreviewMode() {
     // Build lookup from config
     /** @type {Object<string, boolean>} */
-    const lookup = {};
-    for (let i = 0; i < PREVIEW_ENTRIES.length; i++) {
-      const e = PREVIEW_ENTRIES[i];
-      lookup[e.m + "\x00" + (e.c || "")] = true;
+    var lookup = {};
+    for (var i = 0; i < PREVIEW_ENTRIES.length; i++) {
+      var pe = PREVIEW_ENTRIES[i];
+      lookup[pe.m + "\x00" + (pe.c || "")] = true;
     }
 
-    // Mark inline text spans
-    const spans = document.querySelectorAll(".lt-translatable");
-    for (let s = 0; s < spans.length; s++) {
-      const sp = spans[s];
-      const spKey = (sp.dataset.ltMsgid || "") + "\x00" + (sp.dataset.ltContext || "");
+    // Mark inline text elements (lt-t elements created by resolveMarkers)
+    var spans = document.querySelectorAll("lt-t");
+    for (var s = 0; s < spans.length; s++) {
+      var sp = spans[s];
+      var spKey = (sp.dataset.ltMsgid || "") + "\x00" + (sp.dataset.ltContext || "");
       if (lookup[spKey]) {
         sp.classList.add("lt-preview");
       }
     }
 
     // Mark attribute-translatable elements
-    const attrEls = document.querySelectorAll("[data-lt-attrs]");
-    for (let a = 0; a < attrEls.length; a++) {
+    var attrEls = document.querySelectorAll("[data-lt-attrs]");
+    for (var a = 0; a < attrEls.length; a++) {
       try {
-        const attrs = JSON.parse(attrEls[a].dataset.ltAttrs || "[]");
-        for (let j = 0; j < attrs.length; j++) {
-          const aKey = (attrs[j].m || "") + "\x00" + (attrs[j].c || "");
+        var attrs = JSON.parse(attrEls[a].dataset.ltAttrs || "[]");
+        for (var j = 0; j < attrs.length; j++) {
+          var aKey = (attrs[j].m || "") + "\x00" + (attrs[j].c || "");
           if (lookup[aKey]) {
             attrEls[a].classList.add("lt-preview");
             break;
@@ -2048,8 +2227,8 @@
     function (e) {
       if (state !== "active") return;
 
-      // Check for inline text span first
-      const span = e.target.closest(".lt-translatable");
+      // Check for inline text element first
+      const span = e.target.closest("lt-t");
       if (span) {
         e.preventDefault();
         e.stopPropagation();
@@ -2092,9 +2271,13 @@
     true
   ); // Use capture phase to intercept before other handlers
 
-  // ─── Edit Mode Restore After Reload ──────────────────
+  // ─── ZWC Marker Resolution + Edit Mode Restore ───────
 
   document.addEventListener("DOMContentLoaded", function () {
+    // Resolve ZWC markers in text nodes and attribute values
+    resolveMarkers();
+
+    // Restore edit mode after reload (if persisted in sessionStorage)
     try {
       if (sessionStorage.getItem(_EDIT_MODE_KEY)) {
         sessionStorage.removeItem(_EDIT_MODE_KEY);
@@ -2103,16 +2286,15 @@
         }
       }
     } catch (e) { /* private browsing / quota */ }
-  });
 
-  // ─── Preview Mode Auto-Activation ───────────────────
-
-  if (PREVIEW) {
-    document.addEventListener("DOMContentLoaded", function () {
-      activateEditMode();
+    // Preview mode auto-activation
+    if (PREVIEW) {
+      if (state === "inactive") {
+        activateEditMode();
+      }
       _initPreviewMode();
-    });
-  }
+    }
+  });
 
   // ─── Shortcut Hint (sticky bar) ──────────────────────
 

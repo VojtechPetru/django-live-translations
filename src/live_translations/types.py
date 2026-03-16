@@ -14,6 +14,9 @@ __all__ = [
     "MsgKey",
     "OverrideMap",
     "SaveResult",
+    "StringId",
+    "StringTable",
+    "StringTableEntry",
     "TranslationInfo",
     "TranslationsResult",
 ]
@@ -27,6 +30,20 @@ class MsgKey(t.NamedTuple):
 
 
 type OverrideMap = dict[MsgKey, str]
+
+type StringId = int
+"""Index into the per-request string registry (0-65535)."""
+
+
+class StringTableEntry(t.TypedDict):
+    """Single entry in the JSON string table injected as ``window.__LT_STRINGS__``."""
+
+    m: str
+    c: str
+
+
+type StringTable = dict[int, StringTableEntry]
+"""Maps StringId to {m, c}. Serialized to JSON for the frontend."""
 
 
 class DbOverride(t.NamedTuple):

@@ -2,31 +2,26 @@
 
 Responsibilities:
 1. Dispatch API requests (``/__live-translations__/*``) to view functions.
-2. Set ``lt_active`` contextvar so template nodes and gettext know when to emit markers.
-3. Resolve text-safe markers into ``<span>`` wrappers (text) or ``data-lt-attrs`` (attributes).
-4. Inject JS/CSS assets into HTML responses for active users.
+2. Set ``lt_active`` contextvar so patched gettext appends ZWC markers.
+3. Inject the string table + JS/CSS assets into HTML responses.
+4. Strip ZWC markers from non-HTML responses (JSON APIs, etc.).
 """
 
 import json
+import re
 import typing as t
 
 import django.http
 import django.middleware.csrf
 import django.templatetags.static
-import django.utils.html
 import django.utils.translation
 
-from live_translations import conf, resolver, strings, views
-from live_translations.types import OverrideMap
+from live_translations import conf, strings, views
+from live_translations.types import OverrideMap, StringTable
 
 __all__ = ["LiveTranslationsMiddleware"]
 
-_resolver = resolver.MarkerResolver(
-    marker_re=strings.MARKER_RE,
-    marker_start=strings.MARKER_START,
-    b64_decode=strings._b64d,
-    html_escape=django.utils.html.escape,
-)
+_ZWC_RE: t.Final[re.Pattern[str]] = re.compile(r"\uFEFF[\u200B\u200C]{16}\uFEFF")
 
 _API_ROUTES: dict[str, str] = {
     f"{conf.API_PREFIX}/translations/": "get_translations",
@@ -96,14 +91,18 @@ class LiveTranslationsMiddleware:
                 strings.lt_preview_overrides.reset(preview_token)
 
         if not is_active:
+            strings.reset_string_registry()
             return response
 
         # Only inject into non-streaming HTML responses
         content_type = response.get("Content-Type", "")
         if "text/html" not in content_type or response.streaming:  # type: ignore[union-attr]
+            self._strip_zwc(response)
+            strings.reset_string_registry()
             return response
 
         self._inject_assets(request, response, preview_entries=preview_overrides)
+        strings.reset_string_registry()
         return response
 
     @staticmethod
@@ -122,6 +121,17 @@ class LiveTranslationsMiddleware:
             return {}
         return conf.get_backend_instance().get_inactive_overrides(language)
 
+    @staticmethod
+    def _strip_zwc(response: django.http.HttpResponse) -> None:
+        """Strip ZWC markers from non-HTML responses."""
+        content = response.content.decode(response.charset)
+        if strings.ZWC_BOUNDARY not in content:
+            return
+        content = _ZWC_RE.sub("", content)
+        response.content = content.encode(response.charset)
+        if "Content-Length" in response:
+            response["Content-Length"] = len(response.content)
+
     def _inject_assets(
         self,
         request: django.http.HttpRequest,
@@ -130,10 +140,6 @@ class LiveTranslationsMiddleware:
         preview_entries: OverrideMap | None = None,
     ) -> None:
         content = response.content.decode(response.charset)
-
-        # Resolve text-safe markers -> <span> (text) or plain text + data-lt-attrs (attributes)
-        if strings.MARKER_START in content:
-            content = _resolver.resolve(content)
 
         body_close_idx = content.rfind("</body>")
         if body_close_idx == -1:
@@ -159,6 +165,11 @@ class LiveTranslationsMiddleware:
         shortcut_edit_js = json.dumps(settings.shortcut_edit)
         shortcut_preview_js = json.dumps(settings.shortcut_preview)
 
+        # Serialize the per-request string registry for client-side marker resolution
+        registry = strings.get_string_registry()
+        table: StringTable = {i: {"m": key.msgid, "c": key.context} for i, key in enumerate(registry)}
+        strings_json = json.dumps(table, separators=(",", ":"))
+
         snippet = (
             f'<link rel="stylesheet" href="{css_url}">'
             "<script>"
@@ -169,6 +180,7 @@ class LiveTranslationsMiddleware:
             f"shortcutEdit:{shortcut_edit_js},"
             f"shortcutPreview:{shortcut_preview_js}"
             f"{preview_config}}};"
+            f"window.__LT_STRINGS__={strings_json};"
             "</script>"
             f'<script src="{js_url}"></script>'
         )

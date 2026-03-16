@@ -20,7 +20,7 @@ class TestPermissionSystem:
         assert config["csrfToken"]
 
     def test_superuser_page_has_translatable_spans(self, page_as_superuser: Page) -> None:
-        spans = page_as_superuser.locator(".lt-translatable[data-lt-msgid]")
+        spans = page_as_superuser.locator("lt-t[data-lt-msgid]")
         expect(spans.first).to_be_visible()
         assert spans.count() > 1
 
@@ -37,7 +37,7 @@ class TestPermissionSystem:
         expect(hint).to_have_count(0)
 
     def test_anonymous_user_no_translatable_spans(self, page_anonymous: Page) -> None:
-        spans = page_anonymous.locator(".lt-translatable")
+        spans = page_anonymous.locator("lt-t")
         expect(spans).to_have_count(0)
 
     def test_api_get_translations_returns_403_for_anonymous(self, page_anonymous: Page, base_url: str) -> None:

@@ -3,14 +3,15 @@
    Dark palette · Border emphasis · Developer-tool aesthetic
    ──────────────────────────────────────────────────────── */
 
-/* ── Translatable spans (invisible by default) ───────── */
-/* These render on the host page — keep light-compatible  */
+/* ── Translatable elements (invisible by default) ────── */
+/* <lt-t> is a custom element used as an inert inline      */
+/* wrapper — no browser defaults, no selector collisions.  */
 
-.lt-translatable {
+lt-t {
   /* No visual impact when edit mode is off */
 }
 
-.lt-edit-mode .lt-translatable {
+.lt-edit-mode lt-t {
   outline: 2px dashed rgba(59, 130, 246, 0.5);
   outline-offset: 2px;
   cursor: pointer;
@@ -18,7 +19,7 @@
   transition: outline-color 0.15s ease, background-color 0.15s ease;
 }
 
-.lt-edit-mode .lt-translatable:hover {
+.lt-edit-mode lt-t:hover {
   outline-color: rgba(59, 130, 246, 1);
   background-color: rgba(59, 130, 246, 0.08);
 }
@@ -1036,11 +1037,11 @@
 
 /* ── Preview Mode: Inactive Translation Indicators ───── */
 
-.lt-edit-mode .lt-translatable.lt-preview {
+.lt-edit-mode lt-t.lt-preview {
   outline: 2px dashed rgba(245, 158, 11, 0.6);
 }
 
-.lt-edit-mode .lt-translatable.lt-preview:hover {
+.lt-edit-mode lt-t.lt-preview:hover {
   outline-color: rgba(245, 158, 11, 1);
   background-color: rgba(245, 158, 11, 0.08);
 }
@@ -1056,7 +1057,7 @@
 
 /* ── Preview Mode: Selected State ────────────────────── */
 
-.lt-edit-mode .lt-translatable.lt-selected,
+.lt-edit-mode lt-t.lt-selected,
 .lt-edit-mode [data-lt-attrs].lt-selected {
   outline: 2px solid rgba(245, 158, 11, 1);
   background-color: rgba(245, 158, 11, 0.12);

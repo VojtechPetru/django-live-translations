@@ -25,7 +25,7 @@ class TestSaveFlowPOBackend:
         check_active_toggle(page_as_superuser)
         page_as_superuser.locator(".lt-btn--save").click()
         expect(page_as_superuser.locator("dialog.lt-dialog[open]")).to_be_hidden(timeout=5000)
-        span = page_as_superuser.locator('.lt-translatable[data-lt-msgid="demo.title"]')
+        span = page_as_superuser.locator('lt-t[data-lt-msgid="demo.title"]')
         expect(span).to_have_text("Custom Title")
         api_restore_po_default(page_as_superuser, base_url, "demo.title", ["en"])
 
@@ -38,7 +38,7 @@ class TestSaveFlowPOBackend:
         expect(toggle).not_to_be_checked()
         page_as_superuser.locator(".lt-btn--save").click()
         expect(page_as_superuser.locator("dialog.lt-dialog[open]")).to_be_hidden(timeout=5000)
-        span = page_as_superuser.locator('.lt-translatable[data-lt-msgid="demo.title"]')
+        span = page_as_superuser.locator('lt-t[data-lt-msgid="demo.title"]')
         expect(span).to_have_text("Live Translations Demo")
         api_restore_po_default(page_as_superuser, base_url, "demo.title", ["en"])
 
@@ -126,7 +126,7 @@ class TestSaveFlowDBBackend:
         api_save(page, db_base_url, "demo.title", {"en": "DB Active"}, {"en": True})
         page.reload()
         page.wait_for_load_state("networkidle")
-        span = page.locator('.lt-translatable[data-lt-msgid="demo.title"]')
+        span = page.locator('lt-t[data-lt-msgid="demo.title"]')
         expect(span).to_have_text("DB Active")
         api_delete(page, db_base_url, "demo.title", ["en"])
 
@@ -134,7 +134,7 @@ class TestSaveFlowDBBackend:
         api_save(page, db_base_url, "demo.title", {"en": "DB Inactive"}, {"en": False})
         page.reload()
         page.wait_for_load_state("networkidle")
-        span = page.locator('.lt-translatable[data-lt-msgid="demo.title"]')
+        span = page.locator('lt-t[data-lt-msgid="demo.title"]')
         expect(span).to_have_text("Live Translations Demo")
         api_delete(page, db_base_url, "demo.title", ["en"])
 
