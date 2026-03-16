@@ -1,0 +1,39 @@
+[project]
+site_name = "django-live-translations"
+site_url = "https://vojtechpetru.github.io/django-live-translations/"
+site_description = "In-browser translation editing for Django superusers"
+repo_url = "https://github.com/vojtechpetru/django-live-translations"
+repo_name = "vojtechpetru/django-live-translations"
+
+nav = [
+  { "Home" = "index.md" },
+  { "Getting Started" = "getting-started.md" },
+  { "Configuration" = "configuration.md" },
+  { "Backends" = "backends.md" },
+  { "Permissions" = "permissions.md" },
+  { "Frontend Widget" = "widget.md" },
+  { "Django Admin" = "admin.md" },
+]
+
+[project.theme]
+features = [
+  "navigation.instant",
+  "navigation.tracking",
+  "navigation.top",
+  "navigation.path",
+  "content.action.edit",
+  "content.action.view",
+  "content.code.copy",
+]
+
+[project.theme.palette]
+scheme = "slate"
+primary = "indigo"
+accent = "indigo"
+
+[project.markdown_extensions.attr_list]
+[project.markdown_extensions.md_in_html]
+[project.markdown_extensions.pymdownx.highlight]
+[project.markdown_extensions.pymdownx.superfences]
+[project.markdown_extensions.admonition]
+[project.markdown_extensions.pymdownx.details]
