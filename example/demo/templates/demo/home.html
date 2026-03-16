@@ -22,8 +22,8 @@
 <body>
     <h1>{% trans "demo.title" %} {% verbatim %}<span class="via">{% trans %}</span>{% endverbatim %}</h1>
 
-    <p>{% verbatim %}<span class="via">gettext()</span>{% endverbatim %} {{ welcome_message }}</p>
-    <p>{% verbatim %}<span class="via">gettext_lazy()</span>{% endverbatim %} {{ page_description }}</p>
+    <p><span class="via">gettext()</span> {{ welcome_message }}</p>
+    <p><span class="via">gettext_lazy()</span> {{ page_description }}</p>
 
     <div class="card">
         <h2>{% trans "about.heading" %} {% verbatim %}<span class="via">{% trans %}</span>{% endverbatim %}</h2>
@@ -48,7 +48,7 @@
             {% trans "attrs.tooltip_hint" %}
         </p>
         <p title="{{ tooltip_text }}" class="has-tooltip">
-            {% verbatim %}<span class="via">gettext() in <code>title</code> attr</span>{% endverbatim %}
+            <span class="via">gettext() in <code>title</code> attr</span>
             {% trans "attrs.tooltip_context_hint" %}
         </p>
     </div>
