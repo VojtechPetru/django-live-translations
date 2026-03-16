@@ -35,6 +35,24 @@ jobs:
       - run: playwright install --with-deps chromium
       - run: pytest tests/e2e --backend=${{ matrix.backend }}
 
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev,e2e]"
+      - run: playwright install --with-deps chromium
+      - run: pytest tests/unit --cov=live_translations --cov-branch -q
+      - run: pytest tests/e2e --backend=both --cov=live_translations --cov-branch --cov-append -q
+      - run: coverage report --fail-under=90
+      - run: coverage json -o coverage.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.json
+
   type-check:
     runs-on: ubuntu-latest
     steps:
