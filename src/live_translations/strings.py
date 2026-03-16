@@ -88,7 +88,7 @@ _lt_string_id_map: contextvars.ContextVar[dict[MsgKey, StringId] | None] = conte
 )
 
 
-def register_string(msgid: str, context: str) -> StringId:
+def register_string(key: MsgKey) -> StringId:
     """Register a translatable string and return its ID.  Deduplicates by MsgKey."""
     registry = _lt_string_registry.get()
     id_map = _lt_string_id_map.get()
@@ -96,7 +96,6 @@ def register_string(msgid: str, context: str) -> StringId:
         registry, id_map = [], {}
         _lt_string_registry.set(registry)
         _lt_string_id_map.set(id_map)
-    key = MsgKey(msgid, context)
     existing = id_map.get(key)
     if existing is not None:
         return existing
@@ -125,17 +124,17 @@ type _GettextFn = t.Callable[[str], str]
 type _PgettextFn = t.Callable[[str, str], str]
 
 
-def _append_marker(result: str, msgid: str, context: str) -> str:
+def _append_marker(result: str, key: MsgKey) -> str:
     """Append a ZWC-encoded string-table ID to a translated string.
 
     Also applies preview overrides when active.
     """
     preview = lt_preview_overrides.get(None)
     if preview is not None:
-        pv = preview.get(MsgKey(msgid, context))
+        pv = preview.get(key)
         if pv is not None:
             result = pv
-    string_id = register_string(msgid, context)
+    string_id = register_string(key)
     return result + encode_zwc(string_id)
 
 
@@ -177,7 +176,7 @@ def install_gettext_patch() -> None:
         # Django may pass lazy proxy objects; force to str once upfront.
         message = str(message)
         try:
-            return _append_marker(result, message, "")
+            return _append_marker(result, MsgKey(message, ""))
         except Exception:
             logger.exception("Failed to append translation marker")
             return result
@@ -189,7 +188,7 @@ def install_gettext_patch() -> None:
         # Django may pass lazy proxy objects; force to str once upfront.
         message, context = str(message), str(context)
         try:
-            return _append_marker(result, message, context)
+            return _append_marker(result, MsgKey(message, context))
         except Exception:
             logger.exception("Failed to append translation marker")
             return result
