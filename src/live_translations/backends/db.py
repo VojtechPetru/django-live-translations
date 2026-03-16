@@ -96,7 +96,7 @@ class DatabaseBackend(base.TranslationBackend):
 
     @t.override
     def ensure_current(self) -> None:
-        """Check shared version counter; clear + re-inject if stale."""
+        """Check the shared version counter; clear and re-inject if stale."""
         remote = django.core.cache.caches[self.cache_alias].get(CATALOG_VERSION_KEY)
         if remote == self._local_version:
             return
