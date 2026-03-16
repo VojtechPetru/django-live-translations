@@ -1,6 +1,6 @@
 """E2E tests for the permission system — widget visibility and API access control."""
 
-from conftest import API_PREFIX
+from helpers import API_PREFIX
 from playwright.sync_api import Page, expect
 
 

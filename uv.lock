@@ -201,7 +201,6 @@ dependencies = [
     { name = "django", version = "5.2.12", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "django", version = "6.0.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "polib" },
-    { name = "pytest-sugar" },
 ]
 
 [package.optional-dependencies]
@@ -211,6 +210,7 @@ dev = [
     { name = "pyrefly" },
     { name = "pytest" },
     { name = "pytest-django" },
+    { name = "pytest-sugar" },
     { name = "ruff" },
 ]
 e2e = [
@@ -231,7 +231,7 @@ requires-dist = [
     { name = "pytest-django", marker = "extra == 'dev'" },
     { name = "pytest-django", marker = "extra == 'e2e'" },
     { name = "pytest-playwright", marker = "extra == 'e2e'" },
-    { name = "pytest-sugar", specifier = ">=1.1.1" },
+    { name = "pytest-sugar", marker = "extra == 'dev'" },
     { name = "ruff", marker = "extra == 'dev'" },
 ]
 provides-extras = ["dev", "e2e"]

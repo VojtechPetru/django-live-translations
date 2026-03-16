@@ -3,7 +3,7 @@
 import json
 import re
 
-from conftest import (
+from helpers import (
     API_PREFIX,
     activate_edit_mode,
     api_restore_po_default,

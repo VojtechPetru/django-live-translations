@@ -1,14 +1,14 @@
 """E2E tests for save flow — active/inactive saves, multi-language, and validation."""
 
 import pytest
-from conftest import (
+from helpers import (
     SUPERUSER,
-    _login,
     api_delete,
     api_restore_po_default,
     api_save,
     check_active_toggle,
     close_modal,
+    login,
     open_modal,
     uncheck_active_toggle,
     wait_for_fields_loaded,
@@ -105,7 +105,7 @@ class TestSaveFlowPOBackend:
 class TestSaveFlowDBBackend:
     @pytest.fixture(autouse=True)
     def _setup(self, page: Page, db_base_url: str) -> None:
-        _login(page, db_base_url, *SUPERUSER)
+        login(page, db_base_url, *SUPERUSER)
         page.goto(f"{db_base_url}/en/")
         page.wait_for_load_state("networkidle")
 

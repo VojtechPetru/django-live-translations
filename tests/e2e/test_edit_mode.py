@@ -1,6 +1,6 @@
 """E2E tests for edit mode — toggle, highlighting, and click-to-open behavior."""
 
-from conftest import activate_edit_mode, deactivate_edit_mode, open_modal, wait_for_fields_loaded
+from helpers import activate_edit_mode, deactivate_edit_mode, open_modal, wait_for_fields_loaded
 from playwright.sync_api import Page, expect
 
 

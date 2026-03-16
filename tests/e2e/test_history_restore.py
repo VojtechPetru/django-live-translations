@@ -1,5 +1,5 @@
 import pytest
-from conftest import api_delete, api_restore_po_default, api_save, close_modal, open_modal, wait_for_fields_loaded
+from helpers import api_delete, api_restore_po_default, api_save, close_modal, open_modal, wait_for_fields_loaded
 from playwright.sync_api import Page, expect
 
 

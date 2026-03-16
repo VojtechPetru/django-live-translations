@@ -3,7 +3,7 @@
 import json
 import re
 
-from conftest import activate_edit_mode, deactivate_edit_mode
+from helpers import activate_edit_mode, deactivate_edit_mode
 from playwright.sync_api import Page, expect
 
 

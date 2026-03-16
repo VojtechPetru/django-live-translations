@@ -2,7 +2,7 @@
 
 import re
 
-from conftest import API_PREFIX, activate_edit_mode, close_modal, open_modal, wait_for_fields_loaded
+from helpers import API_PREFIX, activate_edit_mode, close_modal, open_modal, wait_for_fields_loaded
 from playwright.sync_api import Page, expect
 
 

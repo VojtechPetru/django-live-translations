@@ -2,7 +2,7 @@
 
 import json
 
-from conftest import activate_edit_mode, api_restore_po_default, check_active_toggle, open_modal, wait_for_fields_loaded
+from helpers import activate_edit_mode, api_restore_po_default, check_active_toggle, open_modal, wait_for_fields_loaded
 from playwright.sync_api import Page, expect
 
 

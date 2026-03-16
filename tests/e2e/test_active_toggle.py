@@ -1,6 +1,6 @@
 """E2E tests for the active toggle — visibility, state, labels, and tab indicators."""
 
-from conftest import api_restore_po_default, api_save, check_active_toggle, open_modal, wait_for_fields_loaded
+from helpers import api_restore_po_default, api_save, check_active_toggle, open_modal, wait_for_fields_loaded
 from playwright.sync_api import Page, expect
 
 

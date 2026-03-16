@@ -1,14 +1,14 @@
 """E2E tests for Django admin interface — DB backend only."""
 
 import pytest
-from conftest import API_PREFIX, SUPERUSER, _login, api_delete, api_save
+from helpers import API_PREFIX, SUPERUSER, api_delete, api_save, login
 from playwright.sync_api import Page, expect
 
 
 class TestAdminInterface:
     @pytest.fixture(autouse=True)
     def _setup(self, page: Page, db_base_url: str) -> None:
-        _login(page, db_base_url, *SUPERUSER)
+        login(page, db_base_url, *SUPERUSER)
         page.goto(f"{db_base_url}/en/")
         page.wait_for_load_state("networkidle")
         self._page = page
