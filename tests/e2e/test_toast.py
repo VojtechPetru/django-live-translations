@@ -13,7 +13,7 @@ class TestToastNotifications:
         body_classes = page.locator("body").get_attribute("class") or ""
         if "lt-edit-mode" not in body_classes:
             activate_edit_mode(page)
-        page.locator('.lt-translatable[data-lt-msgid="demo.title"]').first.click()
+        page.locator('lt-t[data-lt-msgid="demo.title"]').first.click()
 
     def test_error_toast_on_api_failure(self, page_as_superuser: Page) -> None:
         def intercept_get(route: Route) -> None:
@@ -90,7 +90,7 @@ class TestToastNotifications:
         page.reload()
         page.wait_for_load_state("networkidle")
 
-        span = page.locator('.lt-translatable[data-lt-msgid="demo.title"]').first
+        span = page.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span).to_have_class(re.compile(r"lt-preview"))
         span.click(modifiers=["Shift"])
         page.locator(".lt-action-bar__activate").click()

@@ -52,7 +52,7 @@ class LiveTranslationsSettings(t.TypedDict, total=False):
     Usage in ``settings.py``::
 
         if typing.TYPE_CHECKING:
-            from live_translations import LiveTranslationsSettings
+            from live_translations.conf import LiveTranslationsSettings
 
         LIVE_TRANSLATIONS: "LiveTranslationsSettings" = {
             "BACKEND": "live_translations.backends.db.DatabaseBackend",

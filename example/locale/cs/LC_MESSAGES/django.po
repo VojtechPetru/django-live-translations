@@ -17,7 +17,7 @@ msgstr ""
 "Plural-Forms: nplurals=4; plural=(n == 1 && n % 1 == 0) ? 0 : (n >= 2 && n <= 4 && n % 1 == 0) ? 1: (n % 1 != 0 ) ? 2 : 3;\n"
 
 msgid "demo.title"
-msgstr "Demo živých překladů"
+msgstr "Demo živých překladůASDSASD"
 
 #. Greeting shown on the homepage
 msgid "demo.welcome"
@@ -30,13 +30,17 @@ msgid "about.heading"
 msgstr "O této stránce"
 
 msgid "about.description"
-msgstr "Tato stránka demonstruje widget pro živé překlady. Přihlaste se jako superuživatel a stiskněte Shift+T pro aktivaci režimu úprav."
+msgstr ""
+"Tato stránka demonstruje widget pro živé překlady. Přihlaste se jako "
+"superuživatel a stiskněte Shift+T pro aktivaci režimu úprav."
 
 msgid "how_it_works.heading"
 msgstr "Jak to funguje"
 
 msgid "edit_mode.toggle_hint %(key)s"
-msgstr "Stiskněte %(key)s pro přepnutí režimu úprav. Přeložené řetězce budou zvýrazněny — klikněte na libovolný pro otevření editoru."
+msgstr ""
+"Stiskněte %(key)s pro přepnutí režimu úprav. Přeložené řetězce budou "
+"zvýrazněny — klikněte na libovolný pro otevření editoru."
 
 msgid "features.heading"
 msgstr "Funkce"
@@ -65,8 +69,88 @@ msgstr "Tento odstavec má tooltip z kontextové proměnné."
 msgid "attrs.tooltip_gettext"
 msgstr "Tento tooltip byl přeložen pomocí gettext()"
 
+msgid "attrs.alt_text"
+msgstr "Zástupný obrázek demonstrujicí přeložený atribut alt"
+
+msgid "attrs.alt_hint"
+msgstr ""
+"Tento obrázek má přeložený atribut alt — zkontrolujte ho v prohlížeči."
+
 msgid "asvar.heading"
 msgstr "Přiřazení do proměnné"
 
 msgid "asvar.reused_label"
 msgstr "Znovupoužitelný překlad"
+
+#. Form section
+msgid "form.heading"
+msgstr "Django formulář"
+
+msgid "form.description"
+msgstr ""
+"Popisky a nápovědy níže pochází z verbose_name / help_text — jak na úrovni "
+"modelu, tak formuláře."
+
+msgid "form.feedback.verbose_name"
+msgstr "Zpětná vazba"
+
+msgid "form.feedback.verbose_name_plural"
+msgstr "Záznamy zpětné vazby"
+
+#. Model field labels & help texts (via gettext_lazy on the model)
+msgid "form.name.label"
+msgstr "Celé jméno"
+
+msgid "form.name.help"
+msgstr "Vaše jméno a příjmení."
+
+msgid "form.email.label"
+msgstr "E-mailová adresa"
+
+msgid "form.email.help"
+msgstr "Váš e-mail nikdy nesdílíme."
+
+msgid "form.message.label"
+msgstr "Zpráva"
+
+msgid "form.message.help"
+msgstr "Napište nám, co si myslíte."
+
+#. Form-only field labels & help texts (set directly on the form class)
+msgid "form.subject.label"
+msgstr "Předmět"
+
+msgid "form.subject.help"
+msgstr "Krátké shrnutí vaší zprávy."
+
+msgid "form.newsletter.label"
+msgstr "Přihlásit se k odběru novinek"
+
+msgid "form.newsletter.help"
+msgstr "Příležitostné novinky e-mailem."
+
+#. Form tabs
+msgid "form.tab.manual"
+msgstr "Ruční vykreslení"
+
+msgid "form.tab.auto"
+msgstr "Automatické vykreslení"
+
+msgid "form.auto_description"
+msgstr ""
+"Tato záložka používá {{ form.as_div }} k automatickému vykreslení celého "
+"formuláře. Django generuje popisky a nápovědy z verbose_name / help_text — "
+"živé překlady je umí upravit stejně jako ručně vykreslená pole."
+
+#. Auth bar
+msgid "auth.logged_in %(username)s"
+msgstr "Přihlášen jako %(username)s (překladatel)"
+
+msgid "auth.logout"
+msgstr "Odhlásit se"
+
+msgid "auth.anonymous"
+msgstr "Prohlížíte jako anonymní uživatel"
+
+msgid "auth.login"
+msgstr "Přihlásit se jako překladatel"

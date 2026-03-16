@@ -25,10 +25,6 @@ class TranslationEntry:
     is_active: bool = True
     has_override: bool = False
 
-    @property
-    def key(self) -> MsgKey:
-        return MsgKey(self.msgid, self.context)
-
 
 class TranslationBackend(abc.ABC):
     """Protocol for translation storage backends.
@@ -70,9 +66,8 @@ class TranslationBackend(abc.ABC):
         """Save translations for a msgid.
 
         Args:
-            msgid: The message identifier.
+            key: The (msgid, context) pair identifying the translatable string.
             translations: Dict mapping language code to new msgstr.
-            context: Gettext context (empty string if none).
             active_flags: Optional dict mapping language code to is_active.
                 When provided, sets the active state per language.
                 When absent, uses the TRANSLATION_ACTIVE_BY_DEFAULT setting

@@ -3,20 +3,8 @@
 import json
 import re
 
-from helpers import activate_edit_mode
+from helpers import activate_edit_mode, disable_preview, enable_preview
 from playwright.sync_api import Page, expect
-
-
-def _enable_preview(page: Page, base_url: str) -> None:
-    page.context.add_cookies([{"name": "lt_preview", "value": "1", "url": base_url}])
-    page.reload()
-    page.wait_for_load_state("networkidle")
-
-
-def _disable_preview(page: Page, base_url: str) -> None:
-    page.context.add_cookies([{"name": "lt_preview", "value": "", "url": base_url}])
-    page.reload()
-    page.wait_for_load_state("networkidle")
 
 
 class TestPersistence:
@@ -35,7 +23,7 @@ class TestPersistence:
         assert stored is None
 
     def test_preview_cookie_survives_reload(self, page_as_superuser: Page, base_url: str) -> None:
-        _enable_preview(page_as_superuser, base_url)
+        enable_preview(page_as_superuser, base_url)
         cookies = page_as_superuser.context.cookies()
         assert any(c["name"] == "lt_preview" and c["value"] == "1" for c in cookies)
         page_as_superuser.reload()
@@ -44,10 +32,10 @@ class TestPersistence:
         assert any(c["name"] == "lt_preview" and c["value"] == "1" for c in cookies_after)
         preview_flag = page_as_superuser.evaluate("() => window.__LT_CONFIG__?.preview")
         assert preview_flag is True
-        _disable_preview(page_as_superuser, base_url)
+        disable_preview(page_as_superuser, base_url)
 
     def test_preview_cookie_clears_on_toggle_off(self, page_as_superuser: Page, base_url: str) -> None:
-        _enable_preview(page_as_superuser, base_url)
+        enable_preview(page_as_superuser, base_url)
         assert any(c["name"] == "lt_preview" and c["value"] == "1" for c in page_as_superuser.context.cookies())
         # Toggle preview off via keyboard (triggers page reload)
         with page_as_superuser.expect_navigation():

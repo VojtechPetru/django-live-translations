@@ -144,6 +144,208 @@
   /** @type {Array<{m:string, c:string}>} */
   let PREVIEW_ENTRIES = CONFIG.previewEntries || [];
 
+  // ─── String Table & ZWC Marker Resolution ───────────
+
+  /**
+   * @typedef {{m: string, c: string}} StringTableEntry
+   * Mirrors Python's StringTableEntry TypedDict.
+   */
+
+  /**
+   * @typedef {Object<number, StringTableEntry>} StringTable
+   * Maps string ID to {msgid, context}. Injected as window.__LT_STRINGS__.
+   */
+
+  /**
+   * @typedef {Object} RegisteredNode
+   * @property {Text}              node    - The text node containing translated content.
+   * @property {string}            msgid   - The gettext message ID.
+   * @property {string}            context - The gettext context (empty string if none).
+   * @property {HTMLElement|null}  span    - Wrapping <lt-t> element (null only for OPTION/TITLE/SCRIPT/STYLE parents).
+   */
+
+  /** @type {RegExp} */
+  const ZWC_RE = /\uFEFF[\u200B\u200C]{16}\uFEFF/g;
+
+  /** @type {StringTable} */
+  const STRING_TABLE = window.__LT_STRINGS__ || {};
+
+  /** @type {RegisteredNode[]} */
+  const registeredNodes = [];
+
+  /**
+   * Decode a ZWC marker string into a string-table ID.
+   * @param {string} marker - 18-char ZWC sequence (FEFF + 16 bits + FEFF).
+   * @returns {number} The decoded string ID (0-65535).
+   */
+  function decodeZWC(marker) {
+    let n = 0;
+    for (let i = 1; i <= 16; i++) {
+      if (marker.charCodeAt(i) === 0x200C) n |= (1 << (16 - i));
+    }
+    return n;
+  }
+
+  /**
+   * Walk the DOM, find ZWC markers in text nodes and attribute values,
+   * strip them, and populate registeredNodes[].
+   * @returns {void}
+   */
+  function resolveMarkers() {
+    // Phase 1: Text nodes
+    /** @type {Text[]} */
+    const textNodes = [];
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    /** @type {Node|null} */
+    let wNode;
+    while ((wNode = walker.nextNode()) !== null) {
+      textNodes.push(/** @type {Text} */ (wNode));
+    }
+
+    for (let ti = 0; ti < textNodes.length; ti++) {
+      let tn = textNodes[ti];
+      const text = tn.textContent || "";
+      ZWC_RE.lastIndex = 0;
+
+      // Collect all marker matches in this text node
+      /** @type {RegExpExecArray[]} */
+      const matches = [];
+      /** @type {RegExpExecArray|null} */
+      let execMatch;
+      while ((execMatch = ZWC_RE.exec(text)) !== null) {
+        matches.push(execMatch);
+      }
+      if (!matches.length) continue;
+
+      // Process markers right-to-left to preserve indices when splitting
+      for (let mi = matches.length - 1; mi >= 0; mi--) {
+        const m = matches[mi];
+        const mIdx = /** @type {number} */ (m.index);
+        const mLen = m[0].length;
+        const id = decodeZWC(m[0]);
+        const meta = STRING_TABLE[id];
+        if (!meta) continue;
+
+        // Text AFTER the marker becomes a separate text node (tail)
+        const afterStart = mIdx + mLen;
+        if (afterStart < (tn.textContent || "").length) {
+          tn.splitText(afterStart);
+        }
+
+        // Text of the marker itself: remove it.
+        // Now tn contains everything up to and including the marker.
+        // Split before the marker to isolate it.
+        if (mIdx > 0) {
+          tn = /** @type {Text} */ (tn.splitText(mIdx));
+        }
+
+        // tn now starts with the marker. Remove the marker text from tn.
+        tn.textContent = (tn.textContent || "").substring(mLen);
+
+        // The text node BEFORE the marker (content text) is tn's previous sibling.
+        // Since we append markers, the content is BEFORE the marker in the text.
+        const contentNode = /** @type {Text|null} */ (tn.previousSibling);
+
+        // Determine which text node contains the translatable content
+        /** @type {Text|null} */
+        let nodeToWrap = null;
+        if (contentNode && contentNode.nodeType === Node.TEXT_NODE && (contentNode.textContent || "").length > 0) {
+          nodeToWrap = /** @type {Text} */ (contentNode);
+        } else if (tn.nodeType === Node.TEXT_NODE && (tn.textContent || "").length > 0) {
+          // Marker was at position 0 or no previous content; use tn (text after marker)
+          nodeToWrap = /** @type {Text} */ (tn);
+        }
+
+        if (nodeToWrap) {
+          const wrapParent = nodeToWrap.parentNode;
+          // Wrap in <lt-t> unless parent cannot contain child elements
+          if (wrapParent && wrapParent.nodeName !== "OPTION" && wrapParent.nodeName !== "TITLE" && wrapParent.nodeName !== "SCRIPT" && wrapParent.nodeName !== "STYLE") {
+            const ltEl = document.createElement("lt-t");
+            ltEl.dataset.ltMsgid = meta.m;
+            ltEl.dataset.ltContext = meta.c;
+            wrapParent.insertBefore(ltEl, nodeToWrap);
+            ltEl.appendChild(nodeToWrap);
+            registeredNodes.push({ node: nodeToWrap, msgid: meta.m, context: meta.c, span: ltEl });
+          } else {
+            registeredNodes.push({ node: nodeToWrap, msgid: meta.m, context: meta.c, span: null });
+          }
+        }
+
+        // Clean up empty text node left after marker removal
+        if (tn !== nodeToWrap && tn.textContent === "" && tn.parentNode) {
+          tn.parentNode.removeChild(tn);
+        }
+      }
+    }
+
+    // Phase 2: Attribute values
+    const allElements = document.querySelectorAll("*");
+    for (let ei = 0; ei < allElements.length; ei++) {
+      const el = /** @type {HTMLElement} */ (allElements[ei]);
+      /** @type {AttrInfo[]} */
+      const ltAttrs = [];
+      const attrs = el.attributes;
+      for (let ai = 0; ai < attrs.length; ai++) {
+        const attr = attrs[ai];
+        ZWC_RE.lastIndex = 0;
+        const attrMatch = ZWC_RE.exec(attr.value);
+        if (!attrMatch) continue;
+        const attrId = decodeZWC(attrMatch[0]);
+        const attrMeta = STRING_TABLE[attrId];
+        if (!attrMeta) continue;
+        // Strip ALL ZWC markers from the attribute value
+        el.setAttribute(attr.name, attr.value.replace(ZWC_RE, ""));
+        ltAttrs.push({ a: attr.name, m: attrMeta.m, c: attrMeta.c });
+      }
+      if (ltAttrs.length) {
+        el.dataset.ltAttrs = JSON.stringify(ltAttrs);
+      }
+    }
+  }
+
+
+
+  // ─── Shared Helpers ──────────────────────────────────
+
+  /**
+   * Return the page's language code (lowercase), e.g. "en" or "cs".
+   * @returns {string}
+   */
+  function _pageLang() {
+    return (document.documentElement.lang || "").toLowerCase();
+  }
+
+  /**
+   * Safely parse the `data-lt-attrs` JSON on an element.
+   * @param {HTMLElement} el - Element with a `data-lt-attrs` attribute.
+   * @returns {AttrInfo[]}
+   */
+  function _parseLtAttrs(el) {
+    try { return JSON.parse(el.dataset.ltAttrs || "[]"); } catch { return []; }
+  }
+
+  /**
+   * Build a dedup key from msgid + context (null-separated).
+   * @param {string} msgid   - The gettext message identifier.
+   * @param {string} context - The gettext context (empty string if none).
+   * @returns {string}
+   */
+  function _entryKey(msgid, context) {
+    return msgid + "\x00" + (context || "");
+  }
+
+  /**
+   * Read an error JSON body from a failed API response and throw an Error.
+   * @param {Response} resp - The fetch Response with a non-OK status.
+   * @returns {Promise<never>}
+   */
+  async function _throwApiError(resp) {
+    /** @type {Record<string, unknown>} */
+    let errData;
+    try { errData = await resp.json(); } catch { errData = {}; }
+    throw new Error(/** @type {string} */ (errData.error) || "Request failed: " + resp.status);
+  }
+
   // ─── Shortcut Parsing ────────────────────────────────
 
   /**
@@ -315,8 +517,26 @@
    * @returns {void}
    */
   function _updateDomInPlace(msgid, context, displayText, isPreviewEntry) {
-    // Update inline text spans
-    const spans = document.querySelectorAll(".lt-translatable");
+    // Update registered text nodes (and their wrapping spans if in edit mode)
+    for (let ri = 0; ri < registeredNodes.length; ri++) {
+      const entry = registeredNodes[ri];
+      if (entry.msgid === msgid && entry.context === context) {
+        entry.node.textContent = displayText;
+        if (entry.span) {
+          if (isPreviewEntry) {
+            entry.span.classList.add("lt-preview");
+          } else {
+            entry.span.classList.remove("lt-preview", "lt-selected");
+            const sidx = selectedElements.indexOf(entry.span);
+            if (sidx !== -1) selectedElements.splice(sidx, 1);
+          }
+        }
+      }
+    }
+
+    // Also update any inline text spans that may exist outside registeredNodes
+    // (e.g., if wrapping was skipped for some elements)
+    const spans = document.querySelectorAll("lt-t");
     for (let i = 0; i < spans.length; i++) {
       const sp = spans[i];
       if (sp.dataset.ltMsgid === msgid && (sp.dataset.ltContext || "") === context) {
@@ -334,22 +554,20 @@
     // Update attribute translations
     const attrEls = document.querySelectorAll("[data-lt-attrs]");
     for (let j = 0; j < attrEls.length; j++) {
-      try {
-        const attrs = JSON.parse(attrEls[j].dataset.ltAttrs || "[]");
-        for (let k = 0; k < attrs.length; k++) {
-          if (attrs[k].m === msgid && (attrs[k].c || "") === context) {
-            attrEls[j].setAttribute(attrs[k].a, displayText);
-            if (isPreviewEntry) {
-              attrEls[j].classList.add("lt-preview");
-            } else {
-              attrEls[j].classList.remove("lt-preview", "lt-selected");
-              const aidx = selectedElements.indexOf(attrEls[j]);
-              if (aidx !== -1) selectedElements.splice(aidx, 1);
-            }
-            break;
+      const attrs = _parseLtAttrs(/** @type {HTMLElement} */ (attrEls[j]));
+      for (let k = 0; k < attrs.length; k++) {
+        if (attrs[k].m === msgid && (attrs[k].c || "") === context) {
+          attrEls[j].setAttribute(attrs[k].a, displayText);
+          if (isPreviewEntry) {
+            attrEls[j].classList.add("lt-preview");
+          } else {
+            attrEls[j].classList.remove("lt-preview", "lt-selected");
+            const aidx = selectedElements.indexOf(attrEls[j]);
+            if (aidx !== -1) selectedElements.splice(aidx, 1);
           }
+          break;
         }
-      } catch (e) { /* ignore malformed JSON */ }
+      }
     }
 
     // Update PREVIEW_ENTRIES and action bar
@@ -441,7 +659,7 @@
           context: context,
           translations: translations,
           active_flags: activeFlags || {},
-          page_language: (document.documentElement.lang || "").toLowerCase(),
+          page_language: _pageLang(),
         }),
       });
       if (!resp.ok) {
@@ -484,7 +702,7 @@
       const payload = {
         msgid: msgid,
         context: context,
-        page_language: (document.documentElement.lang || "").toLowerCase(),
+        page_language: _pageLang(),
       };
       if (languages && languages.length) payload.languages = languages;
       const resp = await fetch(API_BASE + "/translations/delete/", {
@@ -496,12 +714,7 @@
         },
         body: JSON.stringify(payload),
       });
-      if (!resp.ok) {
-        /** @type {Record<string, unknown>} */
-        let errData;
-        try { errData = await resp.json(); } catch { errData = {}; }
-        throw new Error(/** @type {string} */ (errData.error) || "POST failed: " + resp.status);
-      }
+      if (!resp.ok) await _throwApiError(resp);
       return /** @type {Promise<DeleteResponse>} */ (resp.json());
     },
 
@@ -521,12 +734,7 @@
         },
         body: JSON.stringify({ msgids: msgids, language: language }),
       });
-      if (!resp.ok) {
-        /** @type {Record<string, unknown>} */
-        let errData;
-        try { errData = await resp.json(); } catch { errData = {}; }
-        throw new Error(/** @type {string} */ (errData.error) || "POST failed: " + resp.status);
-      }
+      if (!resp.ok) await _throwApiError(resp);
       return /** @type {Promise<BulkActivateResponse>} */ (resp.json());
     },
   };
@@ -653,7 +861,7 @@
   /**
    * Open the translation editor for a translatable element.
    *
-   * For inline text spans (`<span class="lt-translatable">`), `attrInfo` is
+   * For inline text elements (`<lt-t>`), `attrInfo` is
    * omitted and the msgid/context are read from the element's `data-lt-msgid`
    * and `data-lt-context` attributes. For attribute translations (e.g. `title`),
    * the caller passes the {@link AttrInfo} descriptor from `data-lt-attrs`.
@@ -756,8 +964,8 @@
     }
 
     // Default edit language: current page language if configured, else first
-    const pageLang = (document.documentElement.lang || "").toLowerCase();
-    _editLang = LANGUAGES.indexOf(pageLang) !== -1 ? pageLang : LANGUAGES[0];
+    const lang = _pageLang();
+    _editLang = LANGUAGES.indexOf(lang) !== -1 ? lang : LANGUAGES[0];
 
     _renderEditorTabs();
     _renderEditorPanels();
@@ -1207,12 +1415,10 @@
    * @returns {AttrInfo|null} The matching descriptor, or null if not found.
    */
   function _getAttrInfo(element, attrName) {
-    try {
-      const attrs = JSON.parse(element.dataset.ltAttrs || "[]");
-      for (let i = 0; i < attrs.length; i++) {
-        if (attrs[i].a === attrName) return attrs[i];
-      }
-    } catch (e) { /* ignore parse errors */ }
+    const attrs = _parseLtAttrs(element);
+    for (let i = 0; i < attrs.length; i++) {
+      if (attrs[i].a === attrName) return attrs[i];
+    }
     return null;
   }
 
@@ -1700,32 +1906,25 @@
    * @returns {void}
    */
   function _buildValueSections(container, entry) {
-    if (entry.old_value) {
-      const sec1 = document.createElement("div");
-      sec1.className = "lt-history__value-section";
-      const lbl1 = document.createElement("div");
-      lbl1.className = "lt-history__value-label";
-      lbl1.textContent = "Before";
-      const txt1 = document.createElement("div");
-      txt1.className = "lt-history__value-text";
-      txt1.textContent = entry.old_value;
-      sec1.appendChild(lbl1);
-      sec1.appendChild(txt1);
-      container.appendChild(sec1);
+    /**
+     * @param {string} label - Section heading ("Before" / "After").
+     * @param {string} text  - Value to display.
+     */
+    function addSection(label, text) {
+      const sec = document.createElement("div");
+      sec.className = "lt-history__value-section";
+      const lbl = document.createElement("div");
+      lbl.className = "lt-history__value-label";
+      lbl.textContent = label;
+      const txt = document.createElement("div");
+      txt.className = "lt-history__value-text";
+      txt.textContent = text;
+      sec.appendChild(lbl);
+      sec.appendChild(txt);
+      container.appendChild(sec);
     }
-    if (entry.new_value) {
-      const sec2 = document.createElement("div");
-      sec2.className = "lt-history__value-section";
-      const lbl2 = document.createElement("div");
-      lbl2.className = "lt-history__value-label";
-      lbl2.textContent = "After";
-      const txt2 = document.createElement("div");
-      txt2.className = "lt-history__value-text";
-      txt2.textContent = entry.new_value;
-      sec2.appendChild(lbl2);
-      sec2.appendChild(txt2);
-      container.appendChild(sec2);
-    }
+    if (entry.old_value) addSection("Before", entry.old_value);
+    if (entry.new_value) addSection("After", entry.new_value);
   }
 
   /**
@@ -1874,7 +2073,7 @@
   function _showActivateConfirm() {
     actionBarConfirming = true;
     const count = selectedElements.length;
-    const lang = (document.documentElement.lang || "").toLowerCase() || "unknown";
+    const lang = _pageLang() || "unknown";
     actionBar.innerHTML =
       '<span class="lt-action-bar__warning">' +
       "This will activate " + count + " translation(s) for language \"" + lang + "\". Continue?" +
@@ -1906,23 +2105,21 @@
         // Inline text span
         const msgid = el.dataset.ltMsgid;
         const context = el.dataset.ltContext || "";
-        const key = msgid + "\x00" + context;
+        const key = _entryKey(msgid, context);
         if (!seen[key]) {
           seen[key] = true;
           msgids.push({ msgid: msgid, context: context });
         }
       } else if (el.dataset.ltAttrs) {
         // Attribute element — collect all preview entries
-        try {
-          const attrs = JSON.parse(el.dataset.ltAttrs);
-          for (let j = 0; j < attrs.length; j++) {
-            const aKey = attrs[j].m + "\x00" + (attrs[j].c || "");
-            if (!seen[aKey]) {
-              seen[aKey] = true;
-              msgids.push({ msgid: attrs[j].m, context: attrs[j].c || "" });
-            }
+        const attrs = _parseLtAttrs(el);
+        for (let j = 0; j < attrs.length; j++) {
+          const aKey = _entryKey(attrs[j].m, attrs[j].c);
+          if (!seen[aKey]) {
+            seen[aKey] = true;
+            msgids.push({ msgid: attrs[j].m, context: attrs[j].c || "" });
           }
-        } catch (e) { /* ignore */ }
+        }
       }
     }
 
@@ -1932,7 +2129,7 @@
       return;
     }
 
-    const lang = (document.documentElement.lang || "").toLowerCase();
+    const lang = _pageLang();
 
     try {
       const data = await api.bulkActivate(msgids, lang);
@@ -1954,15 +2151,15 @@
     /** @type {Object<string, boolean>} */
     const lookup = {};
     for (let i = 0; i < PREVIEW_ENTRIES.length; i++) {
-      const e = PREVIEW_ENTRIES[i];
-      lookup[e.m + "\x00" + (e.c || "")] = true;
+      const pe = PREVIEW_ENTRIES[i];
+      lookup[_entryKey(pe.m, pe.c)] = true;
     }
 
-    // Mark inline text spans
-    const spans = document.querySelectorAll(".lt-translatable");
+    // Mark inline text elements (lt-t elements created by resolveMarkers)
+    const spans = document.querySelectorAll("lt-t");
     for (let s = 0; s < spans.length; s++) {
       const sp = spans[s];
-      const spKey = (sp.dataset.ltMsgid || "") + "\x00" + (sp.dataset.ltContext || "");
+      const spKey = _entryKey(sp.dataset.ltMsgid || "", sp.dataset.ltContext || "");
       if (lookup[spKey]) {
         sp.classList.add("lt-preview");
       }
@@ -1971,16 +2168,14 @@
     // Mark attribute-translatable elements
     const attrEls = document.querySelectorAll("[data-lt-attrs]");
     for (let a = 0; a < attrEls.length; a++) {
-      try {
-        const attrs = JSON.parse(attrEls[a].dataset.ltAttrs || "[]");
-        for (let j = 0; j < attrs.length; j++) {
-          const aKey = (attrs[j].m || "") + "\x00" + (attrs[j].c || "");
-          if (lookup[aKey]) {
-            attrEls[a].classList.add("lt-preview");
-            break;
-          }
+      const attrs = _parseLtAttrs(/** @type {HTMLElement} */ (attrEls[a]));
+      for (let j = 0; j < attrs.length; j++) {
+        const aKey = _entryKey(attrs[j].m || "", attrs[j].c || "");
+        if (lookup[aKey]) {
+          attrEls[a].classList.add("lt-preview");
+          break;
         }
-      } catch (e) { /* ignore parse errors */ }
+      }
     }
 
     _createActionBar();
@@ -2048,8 +2243,8 @@
     function (e) {
       if (state !== "active") return;
 
-      // Check for inline text span first
-      const span = e.target.closest(".lt-translatable");
+      // Check for inline text element first
+      const span = e.target.closest("lt-t");
       if (span) {
         e.preventDefault();
         e.stopPropagation();
@@ -2078,13 +2273,8 @@
           return;
         }
 
-        let attrs;
-        try {
-          attrs = JSON.parse(attrEl.dataset.ltAttrs);
-        } catch (err) {
-          return;
-        }
-        if (!attrs || !attrs.length) return;
+        const attrs = _parseLtAttrs(attrEl);
+        if (!attrs.length) return;
 
         openModal(attrEl, attrs[0]);
       }
@@ -2092,9 +2282,13 @@
     true
   ); // Use capture phase to intercept before other handlers
 
-  // ─── Edit Mode Restore After Reload ──────────────────
+  // ─── ZWC Marker Resolution + Edit Mode Restore ───────
 
   document.addEventListener("DOMContentLoaded", function () {
+    // Resolve ZWC markers in text nodes and attribute values
+    resolveMarkers();
+
+    // Restore edit mode after reload (if persisted in sessionStorage)
     try {
       if (sessionStorage.getItem(_EDIT_MODE_KEY)) {
         sessionStorage.removeItem(_EDIT_MODE_KEY);
@@ -2103,16 +2297,15 @@
         }
       }
     } catch (e) { /* private browsing / quota */ }
-  });
 
-  // ─── Preview Mode Auto-Activation ───────────────────
-
-  if (PREVIEW) {
-    document.addEventListener("DOMContentLoaded", function () {
-      activateEditMode();
+    // Preview mode auto-activation
+    if (PREVIEW) {
+      if (state === "inactive") {
+        activateEditMode();
+      }
       _initPreviewMode();
-    });
-  }
+    }
+  });
 
   // ─── Shortcut Hint (sticky bar) ──────────────────────
 
@@ -2306,27 +2499,9 @@
     const editEl = _hintBar.querySelector('[data-mode="edit"]');
     const previewEl = _hintBar.querySelector('[data-mode="preview"]');
     const tipEl = _hintBar.querySelector(".lt-hint__tip");
-    if (editEl) {
-      if (state === "active" || state === "editing") {
-        editEl.classList.add("lt-hint__action--active");
-      } else {
-        editEl.classList.remove("lt-hint__action--active");
-      }
-    }
-    if (previewEl) {
-      if (PREVIEW) {
-        previewEl.classList.add("lt-hint__action--active");
-      } else {
-        previewEl.classList.remove("lt-hint__action--active");
-      }
-    }
-    if (tipEl) {
-      if (PREVIEW) {
-        tipEl.classList.add("lt-hint__tip--visible");
-      } else {
-        tipEl.classList.remove("lt-hint__tip--visible");
-      }
-    }
+    if (editEl) editEl.classList.toggle("lt-hint__action--active", state === "active" || state === "editing");
+    if (previewEl) previewEl.classList.toggle("lt-hint__action--active", PREVIEW);
+    if (tipEl) tipEl.classList.toggle("lt-hint__tip--visible", PREVIEW);
   }
 
   _showShortcutHint();

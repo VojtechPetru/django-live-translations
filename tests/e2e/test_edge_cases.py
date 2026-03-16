@@ -86,7 +86,7 @@ class TestEdgeCases:
         page_as_superuser.route(f"**{API_PREFIX}/translations/?*", intercept_get)
         try:
             activate_edit_mode(page_as_superuser)
-            page_as_superuser.locator('.lt-translatable[data-lt-msgid="demo.title"]').first.click()
+            page_as_superuser.locator('lt-t[data-lt-msgid="demo.title"]').first.click()
             # Dialog may open and close quickly on error; the key assertion is the error toast
             toast = page_as_superuser.locator(".lt-toast")
             expect(toast).to_be_visible(timeout=5000)
@@ -108,7 +108,7 @@ class TestEdgeCases:
         check_active_toggle(page_as_superuser)
         page_as_superuser.locator(".lt-btn--save").click()
         expect(page_as_superuser.locator("dialog.lt-dialog[open]")).to_be_hidden(timeout=5000)
-        span = page_as_superuser.locator('.lt-translatable[data-lt-msgid="demo.title"]').first
+        span = page_as_superuser.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span).to_have_text("Second Concurrent")
         # Cleanup
         api_restore_po_default(page_as_superuser, base_url, "demo.title", ["en"])
@@ -127,7 +127,7 @@ class TestEdgeCases:
         api_restore_po_default(page_as_superuser, base_url, "demo.title", ["en"])
 
     def test_blocktrans_with_placeholder_renders_correctly(self, page_as_superuser: Page) -> None:
-        span = page_as_superuser.locator('.lt-translatable[data-lt-msgid="edit_mode.toggle_hint %(key)s"]').first
+        span = page_as_superuser.locator('lt-t[data-lt-msgid="edit_mode.toggle_hint %(key)s"]').first
         expect(span).to_be_visible()
         text = span.text_content() or ""
         # The placeholder %(key)s should be substituted with "Shift+T" or similar
@@ -135,23 +135,23 @@ class TestEdgeCases:
         assert "Shift" in text or "shift" in text.lower()
 
     def test_gettext_lazy_produces_translatable_spans(self, page_as_superuser: Page) -> None:
-        span = page_as_superuser.locator('.lt-translatable[data-lt-msgid="demo.description"]')
+        span = page_as_superuser.locator('lt-t[data-lt-msgid="demo.description"]')
         assert span.count() >= 1
         expect(span.first).to_be_visible()
 
     def test_gettext_produces_translatable_spans(self, page_as_superuser: Page) -> None:
-        span = page_as_superuser.locator('.lt-translatable[data-lt-msgid="demo.welcome"]')
+        span = page_as_superuser.locator('lt-t[data-lt-msgid="demo.welcome"]')
         assert span.count() >= 1
         expect(span.first).to_be_visible()
 
     def test_trans_tag_produces_translatable_spans(self, page_as_superuser: Page) -> None:
-        span = page_as_superuser.locator('.lt-translatable[data-lt-msgid="demo.title"]')
+        span = page_as_superuser.locator('lt-t[data-lt-msgid="demo.title"]')
         assert span.count() >= 1
         expect(span.first).to_be_visible()
 
     def test_trans_as_var_produces_translatable_spans(self, page_as_superuser: Page) -> None:
         """{% trans '...' as X %} should produce translatable spans where {{ X }} is rendered."""
-        spans = page_as_superuser.locator('.lt-translatable[data-lt-msgid="asvar.reused_label"]')
+        spans = page_as_superuser.locator('lt-t[data-lt-msgid="asvar.reused_label"]')
         # The variable is used in 2 text positions
         assert spans.count() >= 2
         expect(spans.first).to_be_visible()
@@ -160,7 +160,7 @@ class TestEdgeCases:
     def test_trans_as_var_in_attribute(self, page_as_superuser: Page) -> None:
         """{% trans '...' as X %} used in title="" should produce data-lt-attrs."""
         el = page_as_superuser.locator("[data-lt-attrs]").filter(
-            has=page_as_superuser.locator('.lt-translatable[data-lt-msgid="asvar.reused_label"]')
+            has=page_as_superuser.locator('lt-t[data-lt-msgid="asvar.reused_label"]')
         )
         assert el.count() >= 1
         attrs_json = el.first.get_attribute("data-lt-attrs")
@@ -186,7 +186,7 @@ class TestEdgeCases:
         check_active_toggle(page_as_superuser)
         page_as_superuser.locator(".lt-btn--save").click()
         expect(page_as_superuser.locator("dialog.lt-dialog[open]")).to_be_hidden(timeout=5000)
-        span = page_as_superuser.locator('.lt-translatable[data-lt-msgid="demo.title"]').first
+        span = page_as_superuser.locator('lt-t[data-lt-msgid="demo.title"]').first
         # textContent should show the literal text, not execute it
         text_content = span.text_content()
         assert text_content is not None
@@ -205,7 +205,7 @@ class TestEdgeCases:
         check_active_toggle(page_as_superuser)
         page_as_superuser.locator(".lt-btn--save").click()
         expect(page_as_superuser.locator("dialog.lt-dialog[open]")).to_be_hidden(timeout=5000)
-        span = page_as_superuser.locator('.lt-translatable[data-lt-msgid="demo.title"]').first
+        span = page_as_superuser.locator('lt-t[data-lt-msgid="demo.title"]').first
         text_content = span.text_content()
         assert text_content is not None
         assert len(text_content) >= 1000

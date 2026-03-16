@@ -1,4 +1,5 @@
 import json
+import pathlib
 import typing as t
 import unittest.mock
 
@@ -32,6 +33,22 @@ def _clear_conf_caches():
     conf.get_settings.cache_clear()
     conf.get_backend_instance.cache_clear()
     conf.get_permission_checker.cache_clear()
+
+
+@pytest.fixture
+def make_db_backend():
+    """Factory that creates a DatabaseBackend with a mocked PO backend (no .po files needed)."""
+    from live_translations.backends import db
+
+    def _factory() -> db.DatabaseBackend:
+        backend = db.DatabaseBackend(locale_dir=pathlib.Path("/tmp"), domain="django")
+        mock_po = unittest.mock.MagicMock()
+        mock_po.get_translations.return_value = {}
+        mock_po.get_hint.return_value = ""
+        backend._po_backend = mock_po
+        return backend
+
+    return _factory
 
 
 @pytest.fixture

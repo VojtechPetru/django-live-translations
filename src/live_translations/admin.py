@@ -14,6 +14,13 @@ __all__ = ["TranslationEntryAdmin"]
 _MSGID_MAX_LEN = 60
 _MSGSTR_MAX_LEN = 80
 
+
+def _truncate(value: str, max_len: int) -> str:
+    if len(value) > max_len:
+        return value[: max_len - 3] + "..."
+    return value
+
+
 try:
     import unfold.admin  # type: ignore[missing-import]
 
@@ -53,24 +60,12 @@ class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
     ]
 
     @django.contrib.admin.display(description="Message ID")
-    def msgid_short(
-        self,
-        obj: models.TranslationEntry,
-    ) -> str:
-        value = obj.msgid
-        if len(value) > _MSGID_MAX_LEN:
-            return value[: _MSGID_MAX_LEN - 3] + "..."
-        return value
+    def msgid_short(self, obj: models.TranslationEntry) -> str:
+        return _truncate(obj.msgid, _MSGID_MAX_LEN)
 
     @django.contrib.admin.display(description="Translation")
-    def msgstr_short(
-        self,
-        obj: models.TranslationEntry,
-    ) -> str:
-        value = obj.msgstr
-        if len(value) > _MSGSTR_MAX_LEN:
-            return value[: _MSGSTR_MAX_LEN - 3] + "..."
-        return value
+    def msgstr_short(self, obj: models.TranslationEntry) -> str:
+        return _truncate(obj.msgstr, _MSGSTR_MAX_LEN)
 
     @django.contrib.admin.display(description="Default (read-only)")
     def po_default_display(

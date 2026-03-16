@@ -10,5 +10,7 @@ urlpatterns = [
 
 urlpatterns += i18n_patterns(
     django.urls.path("admin/", django.contrib.admin.site.urls),
+    django.urls.path("quick-login/", views.quick_login, name="quick_login"),
+    django.urls.path("quick-logout/", views.quick_logout, name="quick_logout"),
     django.urls.path("", views.home, name="home"),
 )

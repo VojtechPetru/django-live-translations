@@ -42,11 +42,26 @@ def login(page: Page, base_url: str, username: str, password: str) -> None:
     page.fill("#id_password", password)
     page.click('input[type="submit"]')
     page.wait_for_url("**/admin/**")
+    assert "/login/" not in page.url, f"Login failed for user '{username}' — still on login page: {page.url}"
 
 
 # ---------------------------------------------------------------------------
 # Edit mode
 # ---------------------------------------------------------------------------
+
+
+def enable_preview(page: Page, base_url: str) -> None:
+    """Enable preview mode via cookie and reload."""
+    page.context.add_cookies([{"name": "lt_preview", "value": "1", "url": base_url}])
+    page.reload()
+    page.wait_for_load_state("networkidle")
+
+
+def disable_preview(page: Page, base_url: str) -> None:
+    """Disable preview mode via cookie and reload."""
+    page.context.add_cookies([{"name": "lt_preview", "value": "", "url": base_url}])
+    page.reload()
+    page.wait_for_load_state("networkidle")
 
 
 def activate_edit_mode(page: Page) -> None:
@@ -81,7 +96,7 @@ def open_modal(page: Page, msgid: str, *, attr: bool = False) -> None:
             msgid,
         )
     else:
-        page.locator(f'.lt-translatable[data-lt-msgid="{msgid}"]').first.click()
+        page.locator(f'lt-t[data-lt-msgid="{msgid}"]').first.click()
     expect(page.locator("dialog.lt-dialog[open]")).to_be_visible(timeout=3000)
 
 

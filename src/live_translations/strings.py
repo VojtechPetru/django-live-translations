@@ -1,205 +1,170 @@
-"""TranslatableString and gettext monkey-patching for live translation editing.
+"""Zero-width character markers and gettext monkey-patching for live translation editing.
 
-TranslatableString is a str subclass that carries the original msgid.
-When rendered in Django templates via {{ variable }}, the autoescape system
-calls __html__() which produces a text-safe marker. The middleware later
-resolves markers into <span> wrappers (text content) or plain text with
-data-lt-attrs metadata (HTML attributes).
+Patched gettext/pgettext functions append an invisible 18-character ZWC marker
+(encoding a per-request string-table ID) to each translated string.  The marker
+survives Django's autoescaping because ZWC characters are not HTML-special.
 
-In non-HTML contexts (JSON, emails, DB), it behaves as a normal str.
+The middleware injects the string table as ``window.__LT_STRINGS__`` and the
+client-side JS strips the markers, builds an internal registry, and wraps text
+nodes in temporary ``<span>`` elements only while edit mode is active.
 """
 
-import base64
 import contextvars
 import logging
-import re
 import typing as t
 
-import django.template.base
-import django.utils.formats
-import django.utils.functional
-import django.utils.html
-import django.utils.safestring
 import django.utils.translation
 
-from live_translations.types import MsgKey, OverrideMap
+if t.TYPE_CHECKING:
+    import types
+
+from live_translations.types import MsgKey, OverrideMap, StringId
 
 __all__ = [
-    "MARKER_END",
-    "MARKER_RE",
-    "MARKER_SEP",
-    "MARKER_START",
-    "TranslatableString",
+    "ZWC_BOUNDARY",
+    "encode_zwc",
+    "get_string_registry",
     "install_gettext_patch",
     "lt_active",
     "lt_current_user",
     "lt_preview_overrides",
-    "make_marker",
+    "register_string",
+    "reset_string_registry",
 ]
 
 logger = logging.getLogger("live_translations")
 
-# -- Marker format --
-# Text-safe markers use ASCII control characters as delimiters.
-# They contain no HTML special chars (<, >, ", ', &) so they're
-# valid in both text content and HTML attribute values.
-#
-# Format: \x02 base64(msgid) \x01 base64(ctx) \x01 base64(content) \x01 flag \x03
-#   flag: "r" = raw content (needs HTML escaping)
-#          "e" = already escaped by Django's template engine
+# ---------------------------------------------------------------------------
+# Zero-width character encoding
+# ---------------------------------------------------------------------------
+# Format: FEFF + 16 x (200B | 200C) + FEFF = 18 invisible chars
+# Supports IDs 0-65535 (one per unique MsgKey per request).
 
-MARKER_START = "\x02"
-MARKER_SEP = "\x01"
-MARKER_END = "\x03"
+ZWC_0: t.Final[str] = "\u200b"  # ZERO WIDTH SPACE  → bit 0
+ZWC_1: t.Final[str] = "\u200c"  # ZERO WIDTH NON-JOINER → bit 1
+ZWC_BOUNDARY: t.Final[str] = "\ufeff"  # BOM / ZWNBSP → marker boundary
 
-MARKER_RE = re.compile(
-    MARKER_START
-    + r"([A-Za-z0-9+/=]*)"  # group 1: base64 msgid
-    + MARKER_SEP
-    + r"([A-Za-z0-9+/=]*)"  # group 2: base64 context
-    + MARKER_SEP
-    + r"([A-Za-z0-9+/=]*)"  # group 3: base64 content
-    + MARKER_SEP
-    + r"([re])"  # group 4: flag
-    + MARKER_END
-)
+_ZWC_BITS: t.Final[int] = 16
+_ZWC_MAX_ID: t.Final[int] = (1 << _ZWC_BITS) - 1
 
 
-def _b64e(s: str) -> str:
-    return base64.b64encode(s.encode()).decode()
+def encode_zwc(n: StringId) -> str:
+    """Encode a string-table ID as 18 zero-width characters."""
+    if n < 0 or n > _ZWC_MAX_ID:
+        raise ValueError(f"StringId out of range: {n}")
+    bits = format(n, f"0{_ZWC_BITS}b")
+    return ZWC_BOUNDARY + "".join(ZWC_1 if b == "1" else ZWC_0 for b in bits) + ZWC_BOUNDARY
 
 
-def _b64d(s: str) -> str:
-    return base64.b64decode(s).decode()
+# ---------------------------------------------------------------------------
+# Per-request contextvars
+# ---------------------------------------------------------------------------
 
-
-def make_marker(
-    content: str,
-    msgid: str,
-    context: str = "",
-    *,
-    escaped: bool = False,
-) -> str:
-    """Build a text-safe marker containing translation metadata.
-
-    Args:
-        content: The translated text.
-        msgid: The gettext message ID.
-        context: The gettext message context (pgettext).
-        escaped: True if content is already HTML-escaped (from template tags).
-    """
-    flag = "e" if escaped else "r"
-    return django.utils.safestring.mark_safe(  # noqa: S308  # type: ignore[return-value]
-        MARKER_START
-        + _b64e(msgid)
-        + MARKER_SEP
-        + _b64e(context)
-        + MARKER_SEP
-        + _b64e(content)
-        + MARKER_SEP
-        + flag
-        + MARKER_END
-    )
-
-
-# Per-request flag controlling whether TranslatableString produces wrapping spans.
-# Set by LiveTranslationsMiddleware, reset in its finally block.
+# Whether the current request should produce translation markers.
 lt_active: contextvars.ContextVar[bool] = contextvars.ContextVar("lt_active", default=False)
 
 if t.TYPE_CHECKING:
     from django.contrib.auth.models import AbstractBaseUser
 
-# Per-request user reference for history tracking.
-# Set by LiveTranslationsMiddleware, used by history.record_change().
+# Current user reference for history tracking.
 lt_current_user: "contextvars.ContextVar[AbstractBaseUser | None]" = contextvars.ContextVar(
     "lt_current_user", default=None
 )
 
-# Per-request preview overrides: maps (msgid, context) -> msgstr for inactive
-# translations that should be shown in preview mode. Set by the middleware when
-# the lt_preview cookie is present, reset in its finally block.
+# Preview overrides: maps MsgKey → msgstr for inactive translations shown in preview mode.
 lt_preview_overrides: contextvars.ContextVar[OverrideMap | None] = contextvars.ContextVar(
     "lt_preview_overrides", default=None
 )
 
+# ---------------------------------------------------------------------------
+# Per-request string registry
+# ---------------------------------------------------------------------------
 
-class TranslatableString(str):
-    """A str subclass that remembers its gettext msgid for live translation.
+_lt_string_registry: contextvars.ContextVar[list[MsgKey] | None] = contextvars.ContextVar(
+    "lt_string_registry", default=None
+)
+_lt_string_id_map: contextvars.ContextVar[dict[MsgKey, StringId] | None] = contextvars.ContextVar(
+    "lt_string_id_map", default=None
+)
 
-    Behaves identically to str in all contexts except Django template
-    autoescaping, where __html__() produces a <span> wrapper when
-    the lt_active contextvar is True.
+
+def register_string(msgid: str, context: str) -> StringId:
+    """Register a translatable string and return its ID.  Deduplicates by MsgKey."""
+    registry = _lt_string_registry.get()
+    id_map = _lt_string_id_map.get()
+    if registry is None or id_map is None:
+        registry, id_map = [], {}
+        _lt_string_registry.set(registry)
+        _lt_string_id_map.set(id_map)
+    key = MsgKey(msgid, context)
+    existing = id_map.get(key)
+    if existing is not None:
+        return existing
+    string_id: StringId = len(registry)
+    registry.append(key)
+    id_map[key] = string_id
+    return string_id
+
+
+def get_string_registry() -> list[MsgKey]:
+    """Return the current request's string registry for middleware serialization."""
+    return _lt_string_registry.get() or []
+
+
+def reset_string_registry() -> None:
+    """Reset the per-request string registry.  Called in middleware ``finally`` block."""
+    _lt_string_registry.set(None)
+    _lt_string_id_map.set(None)
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+type _GettextFn = t.Callable[[str], str]
+type _PgettextFn = t.Callable[[str, str], str]
+
+
+def _append_marker(result: str, msgid: str, context: str) -> str:
+    """Append a ZWC-encoded string-table ID to a translated string.
+
+    Also applies preview overrides when active.
     """
+    preview = lt_preview_overrides.get(None)
+    if preview is not None:
+        pv = preview.get(MsgKey(msgid, context))
+        if pv is not None:
+            result = pv
+    string_id = register_string(msgid, context)
+    return result + encode_zwc(string_id)
 
-    __slots__ = ("_lt_context", "_lt_msgid")
 
-    _lt_msgid: str
-    _lt_context: str
-
-    def __new__(
-        cls,
-        value: str,
-        msgid: str,
-        context: str = "",
-    ) -> t.Self:
-        instance = super().__new__(cls, value)
-        instance._lt_msgid = msgid
-        instance._lt_context = context
-        return instance
-
-    def __html__(self) -> str:
-        """Called by Django's conditional_escape during template autoescaping.
-
-        When lt_active is True, produces a text-safe marker instead of HTML.
-        The middleware resolves markers into <span> wrappers (text content)
-        or plain text with data-lt-attrs metadata (HTML attributes).
-        """
-        if not lt_active.get(False):
-            return django.utils.html.escape(str.__str__(self))
-
-        return make_marker(str.__str__(self), self._lt_msgid, self._lt_context, escaped=False)
-
-    def __mod__(  # type: ignore[bad-override]
-        self,
-        args: t.Any,
-    ) -> str:
-        """Support %-formatting (used by gettext for %(var)s placeholders).
-
-        Returns a plain str since the formatted result may not match the msgid.
-        """
-        return str.__str__(self) % args
-
-    def format(
-        self,
-        *args: t.Any,
-        **kwargs: t.Any,
-    ) -> str:  # type: ignore[override]
-        """Support .format() — returns plain str."""
-        return str.__str__(self).format(*args, **kwargs)
+# ---------------------------------------------------------------------------
+# Gettext monkey-patching
+# ---------------------------------------------------------------------------
 
 
 def install_gettext_patch() -> None:
-    """Monkey-patch Django's translation system to return TranslatableString.
+    """Monkey-patch Django's translation system to append ZWC markers.
 
-    Called once from AppConfig.ready(). Patches:
-    - _trans.gettext / _trans.pgettext -- for direct calls and {{ var }} rendering
-    - translation.gettext_lazy / pgettext_lazy -- so lazy proxies expose __html__
+    Called once from ``AppConfig.ready()``.  Patches ``_trans.gettext`` and
+    ``_trans.pgettext``.  Lazy variants (``gettext_lazy``, ``pgettext_lazy``)
+    automatically pick up the patches because their proxies delegate to
+    ``_trans.gettext`` / ``_trans.pgettext`` on evaluation.
 
-    Wraps result in TranslatableString when lt_active is True (superuser edit mode).
-    For regular users, the patched functions are a near-zero-cost pass-through.
-    All TranslatableString wrapping is guarded by try/except so failures never
-    affect regular users and degrade gracefully for translators.
+    For regular users (``lt_active=False``), the patched functions are a
+    near-zero-cost pass-through.
     """
-    _trans = django.utils.translation._trans  # type: ignore[attr-defined]
+    _trans: types.ModuleType = django.utils.translation._trans  # type: ignore[attr-defined]
 
     # Force lazy resolution of _trans attributes by accessing them once.
-    # After this, _trans.gettext is a regular attribute (not lazy-loaded).
     try:
-        _orig_gettext = _trans.gettext  # type: ignore[union-attr]
+        _orig_gettext: _GettextFn = _trans.gettext  # type: ignore[union-attr]
     except AttributeError:
         logger.warning("Could not access _trans.gettext -- live translation patching skipped")
         return
 
+    _orig_pgettext: _PgettextFn | None
     try:
         _orig_pgettext = _trans.pgettext  # type: ignore[union-attr]
     except AttributeError:
@@ -212,121 +177,23 @@ def install_gettext_patch() -> None:
         # Django may pass lazy proxy objects; force to str once upfront.
         message = str(message)
         try:
-            preview = lt_preview_overrides.get(None)
-            if preview is not None:
-                pv = preview.get(MsgKey(message, ""))
-                if pv is not None:
-                    return TranslatableString(pv, msgid=message)
-            return TranslatableString(result, msgid=message)
+            return _append_marker(result, message, "")
         except Exception:
-            logger.exception("Failed to wrap gettext result in TranslatableString")
+            logger.exception("Failed to append translation marker")
             return result
 
-    def _patched_pgettext(
-        context: str,
-        message: str,
-    ) -> str:
+    def _patched_pgettext(context: str, message: str) -> str:
         result: str = _orig_pgettext(context, message) if _orig_pgettext is not None else _orig_gettext(message)
         if not lt_active.get(False):
             return result
         # Django may pass lazy proxy objects; force to str once upfront.
-        message = str(message)
-        context = str(context)
+        message, context = str(message), str(context)
         try:
-            preview = lt_preview_overrides.get(None)
-            if preview is not None:
-                pv = preview.get(MsgKey(message, context))
-                if pv is not None:
-                    return TranslatableString(pv, msgid=message, context=context)
-            return TranslatableString(result, msgid=message, context=context)
+            return _append_marker(result, message, context)
         except Exception:
-            logger.exception("Failed to wrap pgettext result in TranslatableString")
+            logger.exception("Failed to append translation marker")
             return result
 
     _trans.gettext = _patched_gettext  # type: ignore[union-attr]
     if _orig_pgettext is not None:
         _trans.pgettext = _patched_pgettext  # type: ignore[union-attr]
-
-    # -- Lazy variants --
-    # Django's gettext_lazy = lazy(gettext, str). The proxy only has str
-    # methods, so __html__ is missing and templates can't produce spans.
-    # We replace it with lazy(func, TranslatableString) so the proxy
-    # class includes __html__. The wrapped function must ALWAYS return
-    # TranslatableString (not just when lt_active is True) because the
-    # proxy dispatches methods to the result type — __html__ checks
-    # lt_active itself and returns plain escaped text for normal users.
-
-    def _gettext_translatable(message: str) -> TranslatableString:
-        # Django may pass lazy proxy objects; force to str once upfront.
-        message = str(message)
-        result = _orig_gettext(message)
-        try:
-            preview = lt_preview_overrides.get(None)
-            if preview is not None:
-                pv = preview.get(MsgKey(message, ""))
-                if pv is not None:
-                    return TranslatableString(pv, msgid=message)
-            return TranslatableString(result, msgid=message)
-        except Exception:
-            logger.exception("Failed to create TranslatableString for lazy gettext")
-            return result  # type: ignore[return-value]
-
-    def _pgettext_translatable(
-        context: str,
-        message: str,
-    ) -> TranslatableString:
-        # Django may pass lazy proxy objects; force to str once upfront.
-        message = str(message)
-        context = str(context)
-        result = _orig_pgettext(context, message) if _orig_pgettext is not None else _orig_gettext(message)
-        try:
-            preview = lt_preview_overrides.get(None)
-            if preview is not None:
-                pv = preview.get(MsgKey(message, context))
-                if pv is not None:
-                    return TranslatableString(pv, msgid=message, context=context)
-            return TranslatableString(result, msgid=message, context=context)
-        except Exception:
-            logger.exception("Failed to create TranslatableString for lazy pgettext")
-            return result  # type: ignore[return-value]
-
-    django.utils.translation.gettext_lazy = django.utils.functional.lazy(  # type: ignore[assignment]
-        _gettext_translatable,  # type: ignore[bad-argument-type]
-        TranslatableString,
-    )
-    if _orig_pgettext is not None:
-        django.utils.translation.pgettext_lazy = django.utils.functional.lazy(  # type: ignore[assignment]
-            _pgettext_translatable,  # type: ignore[bad-argument-type]
-            TranslatableString,
-        )
-
-    # -- Template rendering patch --
-    # Django's render_value_in_context() calls str() on non-str values
-    # (including lazy proxies) before passing to conditional_escape().
-    # str() downcasts TranslatableString to plain str, losing __html__.
-    # Similarly, conditional_escape() calls str() on Promise objects.
-    # We add an early __html__ check so objects that support it (our lazy
-    # proxy, TranslatableString, SafeString) short-circuit correctly.
-    _tpl = django.template.base
-
-    _orig_render_value = _tpl.render_value_in_context
-
-    def _patched_render_value_in_context(
-        value: t.Any,
-        context: t.Any,
-    ) -> str:
-        value = _tpl.template_localtime(value, use_tz=context.use_tz)  # type: ignore[missing-attribute]
-        value = django.utils.formats.localize(value, use_l10n=context.use_l10n)
-        if context.autoescape:
-            if hasattr(value, "__html__"):
-                try:
-                    return t.cast("str", value.__html__())
-                except Exception:
-                    logger.exception("Failed to call __html__() on value")
-                    return t.cast("str", _orig_render_value(value, context))
-            if not issubclass(type(value), str):
-                value = str(value)
-            return t.cast("str", django.utils.html.conditional_escape(value))
-        return str(value)
-
-    _tpl.render_value_in_context = _patched_render_value_in_context

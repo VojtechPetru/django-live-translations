@@ -2,20 +2,8 @@
 
 import re
 
-from helpers import api_delete, api_restore_po_default, api_save
+from helpers import api_delete, api_restore_po_default, api_save, disable_preview, enable_preview
 from playwright.sync_api import Page, expect
-
-
-def _enable_preview(page: Page, base_url: str) -> None:
-    page.context.add_cookies([{"name": "lt_preview", "value": "1", "url": base_url}])
-    page.reload()
-    page.wait_for_load_state("networkidle")
-
-
-def _disable_preview(page: Page, base_url: str) -> None:
-    page.context.add_cookies([{"name": "lt_preview", "value": "", "url": base_url}])
-    page.reload()
-    page.wait_for_load_state("networkidle")
 
 
 class TestPreviewMode:
@@ -33,12 +21,12 @@ class TestPreviewMode:
         preview_flag = page_as_superuser_for_backend.evaluate("() => window.__LT_CONFIG__?.preview")
         assert preview_flag is True
         # Cleanup
-        _disable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        disable_preview(page_as_superuser_for_backend, base_url_for_backend)
 
     def test_preview_cookie_persists_across_pages(
         self, page_as_superuser_for_backend: Page, backend_id: str, base_url_for_backend: str
     ) -> None:
-        _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        enable_preview(page_as_superuser_for_backend, base_url_for_backend)
         page_as_superuser_for_backend.goto(f"{base_url_for_backend}/cs/")
         page_as_superuser_for_backend.wait_for_load_state("networkidle")
         cookies = page_as_superuser_for_backend.context.cookies()
@@ -46,7 +34,7 @@ class TestPreviewMode:
         assert preview_cookie is not None
         assert preview_cookie["value"] == "1"
         # Cleanup — navigate back to EN
-        _disable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        disable_preview(page_as_superuser_for_backend, base_url_for_backend)
         page_as_superuser_for_backend.goto(f"{base_url_for_backend}/en/")
         page_as_superuser_for_backend.wait_for_load_state("networkidle")
 
@@ -60,22 +48,22 @@ class TestPreviewMode:
             {"en": "Preview Amber Text"},
             {"en": False},
         )
-        _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
-        span = page_as_superuser_for_backend.locator('.lt-translatable[data-lt-msgid="demo.title"]').first
+        enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span).to_have_class(re.compile(r"lt-preview"))
         # Cleanup
-        _disable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        disable_preview(page_as_superuser_for_backend, base_url_for_backend)
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
 
     def test_preview_auto_activates_edit_mode(
         self, page_as_superuser_for_backend: Page, backend_id: str, base_url_for_backend: str
     ) -> None:
-        _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        enable_preview(page_as_superuser_for_backend, base_url_for_backend)
         body = page_as_superuser_for_backend.locator("body")
         expect(body).to_have_class(re.compile(r"lt-edit-mode"))
         # Cleanup
-        _disable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        disable_preview(page_as_superuser_for_backend, base_url_for_backend)
 
     def test_active_translations_have_blue_outline_in_preview(
         self, page_as_superuser_for_backend: Page, backend_id: str, base_url_for_backend: str
@@ -94,13 +82,13 @@ class TestPreviewMode:
             {"en": "Inactive About"},
             {"en": False},
         )
-        _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
-        active_span = page_as_superuser_for_backend.locator('.lt-translatable[data-lt-msgid="demo.title"]').first
-        inactive_span = page_as_superuser_for_backend.locator('.lt-translatable[data-lt-msgid="about.heading"]').first
+        enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        active_span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
+        inactive_span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="about.heading"]').first
         expect(active_span).not_to_have_class(re.compile(r"lt-preview"))
         expect(inactive_span).to_have_class(re.compile(r"lt-preview"))
         # Cleanup
-        _disable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        disable_preview(page_as_superuser_for_backend, base_url_for_backend)
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "about.heading", ["en"])
@@ -116,11 +104,11 @@ class TestPreviewMode:
             {"en": "Custom Preview Text"},
             {"en": False},
         )
-        _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
-        span = page_as_superuser_for_backend.locator('.lt-translatable[data-lt-msgid="demo.title"]').first
+        enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span).to_have_text("Custom Preview Text")
         # Cleanup
-        _disable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        disable_preview(page_as_superuser_for_backend, base_url_for_backend)
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
 
@@ -136,7 +124,7 @@ class TestPreviewMode:
         )
         page_as_superuser_for_backend.reload()
         page_as_superuser_for_backend.wait_for_load_state("networkidle")
-        span = page_as_superuser_for_backend.locator('.lt-translatable[data-lt-msgid="demo.title"]').first
+        span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span).to_have_text("Live Translations Demo")
         # Cleanup
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
@@ -152,13 +140,13 @@ class TestPreviewMode:
             {"en": "Will Disappear"},
             {"en": False},
         )
-        _enable_preview(page_as_superuser_for_backend, base_url_for_backend)
-        span = page_as_superuser_for_backend.locator('.lt-translatable[data-lt-msgid="demo.title"]').first
+        enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span).to_have_class(re.compile(r"lt-preview"))
-        _disable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        disable_preview(page_as_superuser_for_backend, base_url_for_backend)
         preview_elements = page_as_superuser_for_backend.locator(".lt-preview")
         expect(preview_elements).to_have_count(0)
-        span_after = page_as_superuser_for_backend.locator('.lt-translatable[data-lt-msgid="demo.title"]').first
+        span_after = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span_after).to_have_text("Live Translations Demo")
         # Cleanup
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])

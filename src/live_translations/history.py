@@ -2,11 +2,15 @@
 
 import difflib
 import re
+import typing as t
 
 import django.db.models
 
 from live_translations import models, strings
 from live_translations.types import DiffSegment, LanguageCode, MsgKey
+
+if t.TYPE_CHECKING:
+    import django.contrib.auth.base_user
 
 __all__ = [
     "compute_diff",
@@ -18,7 +22,7 @@ __all__ = [
 ]
 
 
-def get_user() -> django.db.models.Model | None:
+def get_user() -> "django.contrib.auth.base_user.AbstractBaseUser | None":
     """Read the current user from the contextvar, returning None for anonymous."""
     user = strings.lt_current_user.get(None)
     if user is not None and not getattr(user, "is_authenticated", False):

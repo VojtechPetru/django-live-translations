@@ -28,7 +28,7 @@ def require_translation_permission[F: t.Callable[..., django.http.JsonResponse]]
     """Decorator that returns 403 if the user lacks the configured translation permission."""
 
     @functools.wraps(view)
-    def wrapper(request: django.http.HttpRequest, *args: t.Any, **kwargs: t.Any) -> django.http.JsonResponse:
+    def wrapper(request: django.http.HttpRequest, *args: object, **kwargs: object) -> django.http.JsonResponse:
         checker = conf.get_permission_checker()
         if not checker(request):
             return django.http.JsonResponse({"error": "Forbidden"}, status=403)

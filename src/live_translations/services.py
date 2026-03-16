@@ -7,6 +7,7 @@ import logging
 import re
 import typing as t
 
+import django.db.models
 import django.db.transaction
 import django.utils.translation
 
@@ -25,7 +26,6 @@ from live_translations.types import (
 )
 
 if t.TYPE_CHECKING:
-    import django.db.models  # noqa: TC004
     from django.contrib.auth.base_user import AbstractBaseUser
 
 __all__ = [
@@ -298,37 +298,29 @@ def bulk_activate(*, language: LanguageCode, keys: list[MsgKey]) -> BulkActivate
     return {"ok": True, "activated": len(activated)}
 
 
-@django.db.transaction.atomic
 def activate_entries(*, queryset: django.db.models.QuerySet[models.TranslationEntry]) -> int:
     """Batch activate for admin action. Returns count of updated entries."""
-    to_activate = queryset.filter(is_active=False)
-    affected = [(lang, MsgKey(mid, ctx)) for lang, mid, ctx in to_activate.values_list("language", "msgid", "context")]
-    updated = to_activate.update(is_active=True)
-    if updated:
-        history.record_bulk_action(
-            entries=affected,
-            action=models.TranslationHistory.Action.ACTIVATE,
-            old_value="inactive",
-            new_value="active",
-        )
-        conf.get_backend_instance().bump_catalog_version()
-    return updated
+    return _toggle_entries(queryset=queryset, activate=True)
+
+
+def deactivate_entries(*, queryset: django.db.models.QuerySet[models.TranslationEntry]) -> int:
+    """Batch deactivate for admin action. Returns count of updated entries."""
+    return _toggle_entries(queryset=queryset, activate=False)
 
 
 @django.db.transaction.atomic
-def deactivate_entries(*, queryset: django.db.models.QuerySet[models.TranslationEntry]) -> int:
-    """Batch deactivate for admin action. Returns count of updated entries."""
-    to_deactivate = queryset.filter(is_active=True)
-    affected = [
-        (lang, MsgKey(mid, ctx)) for lang, mid, ctx in to_deactivate.values_list("language", "msgid", "context")
-    ]
-    updated = to_deactivate.update(is_active=False)
+def _toggle_entries(*, queryset: django.db.models.QuerySet[models.TranslationEntry], activate: bool) -> int:
+    candidates = queryset.filter(is_active=not activate)
+    affected = [(lang, MsgKey(mid, ctx)) for lang, mid, ctx in candidates.values_list("language", "msgid", "context")]
+    updated = candidates.update(is_active=activate)
     if updated:
         history.record_bulk_action(
             entries=affected,
-            action=models.TranslationHistory.Action.DEACTIVATE,
-            old_value="active",
-            new_value="inactive",
+            action=models.TranslationHistory.Action.ACTIVATE
+            if activate
+            else models.TranslationHistory.Action.DEACTIVATE,
+            old_value="inactive" if activate else "active",
+            new_value="active" if activate else "inactive",
         )
         conf.get_backend_instance().bump_catalog_version()
     return updated

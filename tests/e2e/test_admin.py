@@ -11,8 +11,6 @@ class TestAdminInterface:
         login(page, db_base_url, *SUPERUSER)
         page.goto(f"{db_base_url}/en/")
         page.wait_for_load_state("networkidle")
-        self._page = page
-        self._base_url = db_base_url
 
     @pytest.fixture(autouse=True)
     def _cleanup_entries(self, page: Page, db_base_url: str) -> None:

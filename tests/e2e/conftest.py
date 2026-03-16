@@ -1,5 +1,6 @@
 """E2E test fixtures — server management, page helpers, backend parameterization."""
 
+import contextlib
 import os
 import shutil
 import signal
@@ -7,6 +8,9 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+
+# Make helpers.py importable without global pythonpath config
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import pytest
 from helpers import STAFF_USER, SUPERUSER, login
@@ -69,13 +73,6 @@ def locale_dir(session_tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def fresh_locale(tmp_path: Path) -> Path:
-    dest = tmp_path / "locale"
-    shutil.copytree(SOURCE_LOCALE_DIR, dest)
-    return dest
-
-
 # ---------------------------------------------------------------------------
 # Django live server (per-session)
 # ---------------------------------------------------------------------------
@@ -132,16 +129,46 @@ def _setup_db(env: dict[str, str]) -> None:
     )
 
 
-def _start_server(env: dict[str, str], port: int) -> subprocess.Popen:
+def _kill_port(port: int) -> None:
+    """Kill any process listening on the given port (best-effort)."""
+    try:
+        result = subprocess.run(
+            ["lsof", "-i", f":{port}", "-t"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        for pid_str in result.stdout.strip().splitlines():
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.kill(int(pid_str), signal.SIGTERM)
+        if result.stdout.strip():
+            time.sleep(1)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+
+
+def _start_server(env: dict[str, str], port: int, tmp_dir: Path) -> subprocess.Popen:
     """Start a Django dev server and wait for it to be ready."""
+    _kill_port(port)
+    stderr_log = tmp_dir / f"server_{port}_stderr.log"
+    stderr_fh = stderr_log.open("w")
     proc = subprocess.Popen(
         [sys.executable, str(MANAGE_PY), "runserver", str(port), "--noreload"],
         cwd=str(EXAMPLE_DIR),
         env=env,
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=stderr_fh,
     )
     _wait_for_server(port)
+    if proc.poll() is not None:
+        stderr_fh.close()
+        stderr_output = stderr_log.read_text()
+        raise RuntimeError(
+            f"Django server exited immediately on port {port} (port likely in use by a stale process). "
+            f"Kill the process manually: lsof -i :{port} -t | xargs kill\n"
+            f"Server stderr: {stderr_output}"
+        )
     return proc
 
 
@@ -157,7 +184,7 @@ def _po_server(locale_dir: Path, session_tmp_path: Path) -> str:
         "PYTHONPATH": str(PROJECT_ROOT / "src"),
     }
     _setup_db(env)
-    proc = _start_server(env, port)
+    proc = _start_server(env, port, session_tmp_path)
     yield f"http://127.0.0.1:{port}"
     proc.send_signal(signal.SIGTERM)
     proc.wait(timeout=5)
@@ -177,15 +204,10 @@ def _db_server(session_tmp_path: Path) -> str:
         "PYTHONPATH": str(PROJECT_ROOT / "src"),
     }
     _setup_db(env)
-    proc = _start_server(env, port)
+    proc = _start_server(env, port, session_tmp_path)
     yield f"http://127.0.0.1:{port}"
     proc.send_signal(signal.SIGTERM)
     proc.wait(timeout=5)
-
-
-@pytest.fixture(scope="session")
-def po_base_url(_po_server: str) -> str:
-    return _po_server
 
 
 @pytest.fixture(scope="session")

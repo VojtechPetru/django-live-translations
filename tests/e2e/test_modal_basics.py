@@ -59,7 +59,7 @@ class TestModalStructure:
                 route.continue_(),
             )[-1],
         )
-        page_as_superuser.locator('.lt-translatable[data-lt-msgid="demo.title"]').first.click()
+        page_as_superuser.locator('lt-t[data-lt-msgid="demo.title"]').first.click()
         expect(page_as_superuser.locator("dialog.lt-dialog[open]")).to_be_visible(timeout=3000)
         # Loading should be visible while waiting
         loading = page_as_superuser.locator(".lt-dialog__loading")

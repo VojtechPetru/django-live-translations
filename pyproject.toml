@@ -58,8 +58,10 @@ ignore = [
 "tests/e2e/**" = ["S101", "S105", "S106", "S108", "S603", "S607", "PLR2004", "PLR0913", "PLR1714", "C420", "INP001"]
 "**/migrations/**" = ["ALL"]
 "example/**" = ["S105", "INP001"]
-"src/live_translations/resolver.py" = ["C901", "PLR0912", "PLR0915"]
 "src/live_translations/strings.py" = ["C901", "PLR0915"]
+
+[tool.pytest.ini_options]
+addopts = "--import-mode=importlib"
 
 [tool.ruff.lint.isort]
 known-first-party = ["live_translations"]

@@ -18,35 +18,37 @@ class LiveTranslationsConfig(django.apps.AppConfig):
     @t.override
     def ready(self) -> None:
         _register_checks()
-        _patch_gettext()
-        _patch_i18n_tags()
+        strings.install_gettext_patch()
 
 
 def _register_checks() -> None:
     @django.core.checks.register("live_translations")
     def check_settings(
-        app_configs: t.Any,
-        **kwargs: t.Any,
+        *,
+        app_configs: t.Sequence[django.apps.AppConfig] | None,
+        databases: t.Sequence[str] | None = None,
+        **kwargs: object,
     ) -> list[django.core.checks.CheckMessage]:
         errors: list[django.core.checks.CheckMessage] = []
 
-        raw: dict[str, t.Any] = getattr(django.conf.settings, "LIVE_TRANSLATIONS", {})
-        valid_keys = set(conf.LiveTranslationsSettings.__annotations__)
-        extra_keys = set(raw) - valid_keys
-        if extra_keys:
-            errors.append(
-                django.core.checks.Warning(
-                    f"Unknown key(s) in LIVE_TRANSLATIONS: {', '.join(sorted(extra_keys))}.",
-                    hint=(
-                        "Valid keys are: "
-                        + ", ".join(sorted(valid_keys))
-                        + ". \n          Use the LiveTranslationsSettings TypedDict as a type hint"
-                        " for your LIVE_TRANSLATIONS setting to catch invalid keys:\n"
-                        '\n          LIVE_TRANSLATIONS: "LiveTranslationsSettings" = {...}'
-                    ),
-                    id="live_translations.W004",
+        raw: object = getattr(django.conf.settings, "LIVE_TRANSLATIONS", {})
+        if isinstance(raw, dict):
+            valid_keys = set(conf.LiveTranslationsSettings.__annotations__)
+            extra_keys = set(raw) - valid_keys
+            if extra_keys:
+                errors.append(
+                    django.core.checks.Warning(
+                        f"Unknown key(s) in LIVE_TRANSLATIONS: {', '.join(sorted(extra_keys))}.",
+                        hint=(
+                            "Valid keys are: "
+                            + ", ".join(sorted(valid_keys))
+                            + ". \n          Use the LiveTranslationsSettings TypedDict as a type hint"
+                            " for your LIVE_TRANSLATIONS setting to catch invalid keys:\n"
+                            '\n          LIVE_TRANSLATIONS: "LiveTranslationsSettings" = {...}'
+                        ),
+                        id="live_translations.W004",
+                    )
                 )
-            )
 
         settings = conf.get_settings()
 
@@ -72,24 +74,3 @@ def _register_checks() -> None:
             errors.extend(conf.get_backend_instance().check())
 
         return errors
-
-
-def _patch_gettext() -> None:
-    strings.install_gettext_patch()
-
-
-def _patch_i18n_tags() -> None:
-    """Override Django's built-in i18n template tags with live translation versions.
-
-    This patches ``django.templatetags.i18n.register.tags`` so that
-    ``{% load i18n %}`` automatically provides marker-wrapping versions
-    of ``{% trans %}``, ``{% blocktrans %}``, and their aliases.
-    """
-    import django.templatetags.i18n
-
-    from live_translations.templatetags import live_translations as lt_tags
-
-    django.templatetags.i18n.register.tags["trans"] = lt_tags.do_live_translate
-    django.templatetags.i18n.register.tags["translate"] = lt_tags.do_live_translate
-    django.templatetags.i18n.register.tags["blocktrans"] = lt_tags.do_live_block_translate
-    django.templatetags.i18n.register.tags["blocktranslate"] = lt_tags.do_live_block_translate
