@@ -16,7 +16,7 @@ The middleware sets `lt_active` to `True` only when the request passes the confi
 Lazy variants (`gettext_lazy`, `pgettext_lazy`) are automatically covered because their proxies delegate to `_trans.gettext` / `_trans.pgettext` on evaluation.
 
 !!! warning "Private API dependency"
-    We patch `django.utils.translation._trans`, which is not a public Django API. This has been stable across Django 4.2 through 5.x, but could break in a future Django release. We test against all supported Django versions in CI.
+    We patch `django.utils.translation._trans`, which is not a public Django API. This has been stable across Django 4.2 through 5.x, but could break in a future Django release. We test against all supported Django and Python versions in CI.
 
 ## Zero-width character markers
 
