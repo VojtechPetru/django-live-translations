@@ -1631,7 +1631,7 @@
     for (let i = 0; i < filtered.length; i++) {
       const entry = filtered[i];
       const item = document.createElement("div");
-      item.className = "lt-history__entry";
+      item.className = "lt-history__entry lt-history__entry--" + entry.action;
 
       const header = document.createElement("div");
       header.className = "lt-history__entry-header";

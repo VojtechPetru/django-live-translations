@@ -20,32 +20,32 @@ class TestFormFieldLabelsTranslatable:
     def test_model_field_label_is_translatable(self, page_as_superuser: Page) -> None:
         """Label from model verbose_name (via fields = [...]) is translatable."""
         activate_edit_mode(page_as_superuser)
-        label = page_as_superuser.locator('lt-t[data-lt-msgid="form.name.label"]')
+        label = page_as_superuser.locator('#tab-manual lt-t[data-lt-msgid="form.name.label"]')
         expect(label).to_have_count(1, timeout=3000)
         expect(label).to_contain_text("Full name")
 
     def test_model_field_email_label_is_translatable(self, page_as_superuser: Page) -> None:
         activate_edit_mode(page_as_superuser)
-        label = page_as_superuser.locator('lt-t[data-lt-msgid="form.email.label"]')
+        label = page_as_superuser.locator('#tab-manual lt-t[data-lt-msgid="form.email.label"]')
         expect(label).to_have_count(1, timeout=3000)
         expect(label).to_contain_text("Email address")
 
     def test_model_field_message_label_is_translatable(self, page_as_superuser: Page) -> None:
         activate_edit_mode(page_as_superuser)
-        label = page_as_superuser.locator('lt-t[data-lt-msgid="form.message.label"]')
+        label = page_as_superuser.locator('#tab-manual lt-t[data-lt-msgid="form.message.label"]')
         expect(label).to_have_count(1, timeout=3000)
         expect(label).to_contain_text("Message")
 
     def test_form_field_label_is_translatable(self, page_as_superuser: Page) -> None:
         """Label set directly on the form class is translatable."""
         activate_edit_mode(page_as_superuser)
-        label = page_as_superuser.locator('lt-t[data-lt-msgid="form.subject.label"]')
+        label = page_as_superuser.locator('#tab-manual lt-t[data-lt-msgid="form.subject.label"]')
         expect(label).to_have_count(1, timeout=3000)
         expect(label).to_contain_text("Subject")
 
     def test_form_field_newsletter_label_is_translatable(self, page_as_superuser: Page) -> None:
         activate_edit_mode(page_as_superuser)
-        label = page_as_superuser.locator('lt-t[data-lt-msgid="form.newsletter.label"]')
+        label = page_as_superuser.locator('#tab-manual lt-t[data-lt-msgid="form.newsletter.label"]')
         expect(label).to_have_count(1, timeout=3000)
         expect(label).to_contain_text("Subscribe to newsletter")
 
@@ -56,31 +56,31 @@ class TestFormFieldHelpTextsTranslatable:
     def test_model_field_help_text_is_translatable(self, page_as_superuser: Page) -> None:
         """help_text from model field (via fields = [...]) is translatable."""
         activate_edit_mode(page_as_superuser)
-        help_span = page_as_superuser.locator('lt-t[data-lt-msgid="form.name.help"]')
+        help_span = page_as_superuser.locator('#tab-manual lt-t[data-lt-msgid="form.name.help"]')
         expect(help_span).to_have_count(1, timeout=3000)
         expect(help_span).to_contain_text("Your first and last name")
 
     def test_model_field_email_help_text_is_translatable(self, page_as_superuser: Page) -> None:
         activate_edit_mode(page_as_superuser)
-        help_span = page_as_superuser.locator('lt-t[data-lt-msgid="form.email.help"]')
+        help_span = page_as_superuser.locator('#tab-manual lt-t[data-lt-msgid="form.email.help"]')
         expect(help_span).to_have_count(1, timeout=3000)
         expect(help_span).to_contain_text("We will never share your email")
 
     def test_model_field_message_help_text_is_translatable(self, page_as_superuser: Page) -> None:
         activate_edit_mode(page_as_superuser)
-        help_span = page_as_superuser.locator('lt-t[data-lt-msgid="form.message.help"]')
+        help_span = page_as_superuser.locator('#tab-manual lt-t[data-lt-msgid="form.message.help"]')
         expect(help_span).to_have_count(1, timeout=3000)
         expect(help_span).to_contain_text("Tell us what you think")
 
     def test_form_field_help_text_is_translatable(self, page_as_superuser: Page) -> None:
         """help_text set directly on the form class is translatable."""
         activate_edit_mode(page_as_superuser)
-        help_span = page_as_superuser.locator('lt-t[data-lt-msgid="form.subject.help"]')
+        help_span = page_as_superuser.locator('#tab-manual lt-t[data-lt-msgid="form.subject.help"]')
         expect(help_span).to_have_count(1, timeout=3000)
         expect(help_span).to_contain_text("A short summary of your message")
 
     def test_form_field_newsletter_help_text_is_translatable(self, page_as_superuser: Page) -> None:
         activate_edit_mode(page_as_superuser)
-        help_span = page_as_superuser.locator('lt-t[data-lt-msgid="form.newsletter.help"]')
+        help_span = page_as_superuser.locator('#tab-manual lt-t[data-lt-msgid="form.newsletter.help"]')
         expect(help_span).to_have_count(1, timeout=3000)
         expect(help_span).to_contain_text("Receive occasional updates by email")
