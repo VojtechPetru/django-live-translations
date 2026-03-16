@@ -115,6 +115,16 @@ The widget:
 
 The `<lt-t>` element was chosen because it's an unknown HTML element that browsers treat as an inline `<span>`-like element, with no default styling or semantic meaning. All widget styles are prefixed with `.lt-` to avoid conflicts with the host page.
 
+## Test suite
+
+The package is tested at multiple levels to catch regressions across the full stack:
+
+- **93 unit tests** covering ZWC encoding, string registry, backends, history tracking, active/inactive state, and error handling (including graceful recovery when the string registry overflows)
+- **272 end-to-end tests** using Playwright against a real Django dev server, covering edit mode, modal editing, save/delete flows, preview mode, bulk activation, history/restore, language switching, attribute translations, permissions, DOM updates, toast notifications, hint bar, admin integration, and edge cases
+- E2E tests run against **both backends** (PO and database), each with their own Django server instance
+- CI matrix tests across **Python 3.12--3.14** and **Django 4.2--6.0**
+- **Type checking** with pyrefly and **linting** with ruff run on every push and PR
+
 ## Performance characteristics
 
 | Scenario | Overhead |

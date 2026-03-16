@@ -5,22 +5,22 @@ on:
   pull_request:
 
 jobs:
-  test:
+  unit-test:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13"]
+        python-version: ["3.12", "3.13", "3.14"]
         django-version: ["4.2", "5.0", "5.1", "5.2", "6.0"]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -e ".[dev]" django==${{ matrix.django-version }}.*
+      - run: pip install -e ".[dev]" ${{ matrix.django-version != 'latest' && format('django=={0}.*', matrix.django-version) || '' }}
       - run: pytest tests/unit
 
-  e2e:
+  e2e-test:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -35,7 +35,7 @@ jobs:
       - run: playwright install --with-deps chromium
       - run: pytest tests/e2e --backend=${{ matrix.backend }}
 
-  typecheck:
+  type-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
