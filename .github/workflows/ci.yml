@@ -20,6 +20,31 @@ jobs:
       - run: pip install -e ".[dev]" django==${{ matrix.django-version }}.*
       - run: pytest tests/unit
 
+  e2e:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [po, db]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[e2e]"
+      - run: playwright install --with-deps chromium
+      - run: pytest tests/e2e --backend=${{ matrix.backend }}
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: pyrefly check
+
   lint:
     runs-on: ubuntu-latest
     steps:
