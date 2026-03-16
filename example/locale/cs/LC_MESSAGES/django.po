@@ -70,3 +70,48 @@ msgstr "Přiřazení do proměnné"
 
 msgid "asvar.reused_label"
 msgstr "Znovupoužitelný překlad"
+
+#. Form section
+msgid "form.heading"
+msgstr "Django formulář"
+
+msgid "form.description"
+msgstr "Popisky a nápovědy níže pochází z verbose_name / help_text — jak na úrovni modelu, tak formuláře."
+
+msgid "form.feedback.verbose_name"
+msgstr "Zpětná vazba"
+
+msgid "form.feedback.verbose_name_plural"
+msgstr "Záznamy zpětné vazby"
+
+#. Model field labels & help texts (via gettext_lazy on the model)
+msgid "form.name.label"
+msgstr "Celé jméno"
+
+msgid "form.name.help"
+msgstr "Vaše jméno a příjmení."
+
+msgid "form.email.label"
+msgstr "E-mailová adresa"
+
+msgid "form.email.help"
+msgstr "Váš e-mail nikdy nesdílíme."
+
+msgid "form.message.label"
+msgstr "Zpráva"
+
+msgid "form.message.help"
+msgstr "Napište nám, co si myslíte."
+
+#. Form-only field labels & help texts (set directly on the form class)
+msgid "form.subject.label"
+msgstr "Předmět"
+
+msgid "form.subject.help"
+msgstr "Krátké shrnutí vaší zprávy."
+
+msgid "form.newsletter.label"
+msgstr "Přihlásit se k odběru novinek"
+
+msgid "form.newsletter.help"
+msgstr "Příležitostné novinky e-mailem."

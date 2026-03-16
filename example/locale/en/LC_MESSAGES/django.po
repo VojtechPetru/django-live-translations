@@ -70,3 +70,48 @@ msgstr "Variable assignment"
 
 msgid "asvar.reused_label"
 msgstr "Reusable translation"
+
+#. Form section
+msgid "form.heading"
+msgstr "Django form"
+
+msgid "form.description"
+msgstr "Labels and help texts below come from verbose_name / help_text — both model-level and form-level."
+
+msgid "form.feedback.verbose_name"
+msgstr "Feedback"
+
+msgid "form.feedback.verbose_name_plural"
+msgstr "Feedback entries"
+
+#. Model field labels & help texts (via gettext_lazy on the model)
+msgid "form.name.label"
+msgstr "Full name"
+
+msgid "form.name.help"
+msgstr "Your first and last name."
+
+msgid "form.email.label"
+msgstr "Email address"
+
+msgid "form.email.help"
+msgstr "We will never share your email."
+
+msgid "form.message.label"
+msgstr "Message"
+
+msgid "form.message.help"
+msgstr "Tell us what you think."
+
+#. Form-only field labels & help texts (set directly on the form class)
+msgid "form.subject.label"
+msgstr "Subject"
+
+msgid "form.subject.help"
+msgstr "A short summary of your message."
+
+msgid "form.newsletter.label"
+msgstr "Subscribe to newsletter"
+
+msgid "form.newsletter.help"
+msgstr "Receive occasional updates by email."

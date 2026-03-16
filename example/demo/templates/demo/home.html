@@ -17,6 +17,14 @@
         .via { font-size: 0.7rem; color: #aaa; font-weight: 400; margin-left: 0.5em; }
         p .via { display: block; margin-left: 0; margin-bottom: 0.15em; }
         .has-tooltip { cursor: help; border-bottom: 1px dashed #ccc; }
+        .form-row { margin-bottom: 1rem; }
+        .form-row label { display: block; font-weight: 500; margin-bottom: 0.25rem; }
+        .form-row input, .form-row textarea { width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; font: inherit; }
+        .form-row textarea { resize: vertical; min-height: 4rem; }
+        .form-row .helptext { display: block; font-size: 0.8rem; color: #888; margin-top: 0.25rem; }
+        .form-row.checkbox-row { display: flex; align-items: center; gap: 0.5rem; }
+        .form-row.checkbox-row input { width: auto; }
+        .form-row.checkbox-row label { margin-bottom: 0; }
     </style>
 </head>
 <body>
@@ -64,6 +72,29 @@
             {% verbatim %}<span class="via">{% trans … as %} reused</span>{% endverbatim %}
             {{ reused }}
         </p>
+    </div>
+
+    <div class="card">
+        <h2>{% trans "form.heading" %} {% verbatim %}<span class="via">{% trans %}</span>{% endverbatim %}</h2>
+        <p style="margin-bottom: 1rem; font-size: 0.85rem; color: #888;">
+            {% verbatim %}<span class="via">{% trans %}</span>{% endverbatim %}
+            {% trans "form.description" %}
+        </p>
+        {% for field in form %}
+            {% if field.field.widget.input_type == "checkbox" %}
+                <div class="form-row checkbox-row">
+                    {{ field }}
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {% if field.help_text %}<span class="helptext">{{ field.help_text }}</span>{% endif %}
+                </div>
+            {% else %}
+                <div class="form-row">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.help_text %}<span class="helptext">{{ field.help_text }}</span>{% endif %}
+                </div>
+            {% endif %}
+        {% endfor %}
     </div>
 
     <div class="hint">
