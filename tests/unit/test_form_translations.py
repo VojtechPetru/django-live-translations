@@ -12,6 +12,8 @@ render as translatable markers in Django forms:
    markers when rendered in templates.
 """
 
+import base64
+
 import django.utils.html
 import django.utils.text
 
@@ -126,4 +128,4 @@ class TestCapfirstPreservesTranslatableString:
             html = result.__html__()
         finally:
             lt_active.reset(token)
-        assert "form.name.label" in html  # msgid is encoded in the marker
+        assert base64.b64encode(b"form.name.label").decode() in html  # msgid is base64-encoded in the marker

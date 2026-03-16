@@ -30,13 +30,17 @@ msgid "about.heading"
 msgstr "About this page"
 
 msgid "about.description"
-msgstr "This page demonstrates the live translations widget. Log in as a superuser and press Shift+T to activate edit mode."
+msgstr ""
+"This page demonstrates the live translations widget. Log in as a superuser "
+"and press Shift+T to activate edit mode."
 
 msgid "how_it_works.heading"
 msgstr "How it works"
 
 msgid "edit_mode.toggle_hint %(key)s"
-msgstr "Press %(key)s to toggle edit mode. Translated strings will be highlighted — click any one to open the editor."
+msgstr ""
+"Press %(key)s to toggle edit mode. Translated strings will be highlighted — "
+"click any one to open the editor."
 
 msgid "features.heading"
 msgstr "Features"
@@ -76,7 +80,9 @@ msgid "form.heading"
 msgstr "Django form"
 
 msgid "form.description"
-msgstr "Labels and help texts below come from verbose_name / help_text — both model-level and form-level."
+msgstr ""
+"Labels and help texts below come from verbose_name / help_text — both model-"
+"level and form-level."
 
 msgid "form.feedback.verbose_name"
 msgstr "Feedback"

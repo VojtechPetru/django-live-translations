@@ -108,6 +108,12 @@ class LiveTranslateNode(django.template.Node):
         msgid = _extract_trans_msgid(self.original_node)
         msg_context = _resolve_message_context(self.original_node, context)
 
+        # The original TranslateNode.render() may already produce a marker
+        # if the resolved lazy proxy has __html__ (e.g. via the retroactive
+        # proxy patch). Avoid double-wrapping.
+        if strings.MARKER_START in rendered:
+            return rendered
+
         return _wrap_marker(rendered, msgid, msg_context)
 
 
@@ -140,6 +146,11 @@ class LiveBlockTranslateNode(django.template.Node):
 
         msgid = self._extract_msgid()
         msg_context = _resolve_message_context(self.original_node, context)
+
+        # Same guard as LiveTranslateNode: avoid double-wrapping if
+        # the inner render already produced a marker.
+        if strings.MARKER_START in rendered:
+            return rendered
 
         return _wrap_marker(rendered, msgid, msg_context)
 

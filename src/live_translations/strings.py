@@ -177,6 +177,32 @@ class TranslatableString(str):
         """Support .format() — returns plain str."""
         return str.__str__(self).format(*args, **kwargs)
 
+    # -- String-preserving methods for capfirst() --
+    # capfirst does x[0].upper() + x[1:]. These methods keep
+    # _lt_msgid/_lt_context intact so the type survives the chain.
+
+    def __getitem__(self, key: int | slice) -> "TranslatableString":  # type: ignore[override]
+        return TranslatableString(super().__getitem__(key), msgid=self._lt_msgid, context=self._lt_context)
+
+    def upper(self) -> "TranslatableString":  # type: ignore[override]
+        return TranslatableString(super().upper(), msgid=self._lt_msgid, context=self._lt_context)
+
+    def __add__(self, other: str) -> "TranslatableString":  # type: ignore[override]
+        return TranslatableString(super().__add__(other), msgid=self._lt_msgid, context=self._lt_context)
+
+    def __radd__(self, other: str) -> "TranslatableString":
+        return TranslatableString(other.__add__(self), msgid=self._lt_msgid, context=self._lt_context)
+
+    def __str__(self) -> str:
+        """Prevent str() from downcasting to plain str.
+
+        Without this, str(TranslatableString(...)) creates a new plain str,
+        losing __html__ and all translation metadata. This matters when
+        Django's lazy proxy __str__ calls str(self.__cast__()) — the __cast__
+        returns TranslatableString, but str() would discard the subclass.
+        """
+        return self
+
 
 def install_gettext_patch() -> None:
     """Monkey-patch Django's translation system to return TranslatableString.
@@ -290,6 +316,30 @@ def install_gettext_patch() -> None:
             logger.exception("Failed to create TranslatableString for lazy pgettext")
             return result  # type: ignore[return-value]
 
+    # -- Retroactive proxy patch --
+    # Model fields are defined at import time (before ready()), so their
+    # lazy strings use the original gettext_lazy = lazy(gettext, str).
+    # These proxies lack __html__. Inject it into the original proxy class
+    # so existing lazy strings produce markers when rendered in templates.
+    _orig_lazy_sample = django.utils.translation.gettext_lazy("")
+    _orig_lazy_cls = type(_orig_lazy_sample)
+
+    def _orig_lazy_html(self: object) -> str:
+        resolved = str(self)
+        if hasattr(resolved, "__html__"):
+            return resolved.__html__()  # type: ignore[attr-defined]
+        return django.utils.html.escape(resolved)
+
+    if not hasattr(_orig_lazy_cls, "__html__"):
+        _orig_lazy_cls.__html__ = _orig_lazy_html  # type: ignore[attr-defined]
+
+    # Same for pgettext_lazy if available
+    if _orig_pgettext is not None:
+        _orig_plazy_sample = django.utils.translation.pgettext_lazy("", "")
+        _orig_plazy_cls = type(_orig_plazy_sample)
+        if not hasattr(_orig_plazy_cls, "__html__"):
+            _orig_plazy_cls.__html__ = _orig_lazy_html  # type: ignore[attr-defined]
+
     django.utils.translation.gettext_lazy = django.utils.functional.lazy(  # type: ignore[assignment]
         _gettext_translatable,  # type: ignore[bad-argument-type]
         TranslatableString,
@@ -321,6 +371,12 @@ def install_gettext_patch() -> None:
             if hasattr(value, "__html__"):
                 try:
                     return t.cast("str", value.__html__())
+                except AttributeError:
+                    # Lazy proxy objects have __html__ on the class (from TranslatableString),
+                    # so hasattr returns True. But when called, the proxy resolves the lazy
+                    # function first — if that falls back to a plain str (see error handling
+                    # in _gettext_translatable), the resolved str has no __html__, raising this.
+                    return t.cast("str", _orig_render_value(value, context))
                 except Exception:
                     logger.exception("Failed to call __html__() on value")
                     return t.cast("str", _orig_render_value(value, context))

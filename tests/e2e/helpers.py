@@ -42,6 +42,7 @@ def login(page: Page, base_url: str, username: str, password: str) -> None:
     page.fill("#id_password", password)
     page.click('input[type="submit"]')
     page.wait_for_url("**/admin/**")
+    assert "/login/" not in page.url, f"Login failed for user '{username}' — still on login page: {page.url}"
 
 
 # ---------------------------------------------------------------------------

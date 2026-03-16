@@ -30,13 +30,17 @@ msgid "about.heading"
 msgstr "O této stránce"
 
 msgid "about.description"
-msgstr "Tato stránka demonstruje widget pro živé překlady. Přihlaste se jako superuživatel a stiskněte Shift+T pro aktivaci režimu úprav."
+msgstr ""
+"Tato stránka demonstruje widget pro živé překlady. Přihlaste se jako "
+"superuživatel a stiskněte Shift+T pro aktivaci režimu úprav."
 
 msgid "how_it_works.heading"
 msgstr "Jak to funguje"
 
 msgid "edit_mode.toggle_hint %(key)s"
-msgstr "Stiskněte %(key)s pro přepnutí režimu úprav. Přeložené řetězce budou zvýrazněny — klikněte na libovolný pro otevření editoru."
+msgstr ""
+"Stiskněte %(key)s pro přepnutí režimu úprav. Přeložené řetězce budou "
+"zvýrazněny — klikněte na libovolný pro otevření editoru."
 
 msgid "features.heading"
 msgstr "Funkce"
@@ -76,7 +80,9 @@ msgid "form.heading"
 msgstr "Django formulář"
 
 msgid "form.description"
-msgstr "Popisky a nápovědy níže pochází z verbose_name / help_text — jak na úrovni modelu, tak formuláře."
+msgstr ""
+"Popisky a nápovědy níže pochází z verbose_name / help_text — jak na úrovni "
+"modelu, tak formuláře."
 
 msgid "form.feedback.verbose_name"
 msgstr "Zpětná vazba"
