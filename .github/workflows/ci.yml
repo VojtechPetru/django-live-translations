@@ -65,6 +65,17 @@ jobs:
       - run: playwright install --with-deps chromium
       - run: pytest tests/e2e --backend=${{ matrix.backend }} -q
 
+  benchmark:
+    needs: [lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[bench]"
+      - run: pytest tests/benchmarks/test_overhead_ci.py -v -s --benchmark-disable
+
   type-check:
     runs-on: ubuntu-latest
     steps:

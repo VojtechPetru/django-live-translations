@@ -125,6 +125,7 @@ The package is tested at multiple levels to catch regressions across the full st
 - CI matrix tests across **Python 3.12--3.14** and **Django 4.2--6.0**
 - CI enforces **90%+ unit test coverage**; e2e coverage is tracked separately
 - **Type checking** with pyrefly and **linting** with ruff run on every push and PR
+- **Benchmarks** verify runtime overhead stays within bounds: < 10% for normal users, < 100% for translators. Normal users (not authorized for live translation) only pay for a single contextvar lookup per `gettext()` call: no markers, no injection, no response modification. In practice the overhead is ~1-2% in a pure translation-rendering scenario (no DB hits, network I/O, etc.), so in real applications the relative cost is even lower. Run with `pytest tests/benchmarks/`.
 
 ## Performance characteristics
 

@@ -21,6 +21,14 @@ e2e-po *args:
 e2e-db *args:
     uv run pytest tests/e2e --backend=db {{ args }}
 
+# Run performance benchmarks (pytest-benchmark)
+bench *args:
+    uv run pytest tests/benchmarks/test_request.py {{ args }}
+
+# Run overhead ratio checks (CI-safe, always prints results)
+bench-ci *args:
+    uv run pytest tests/benchmarks/test_overhead_ci.py -v -s --benchmark-disable {{ args }}
+
 # Revert .po files to their git-committed state
 revert-po:
     git checkout HEAD -- example/locale/
