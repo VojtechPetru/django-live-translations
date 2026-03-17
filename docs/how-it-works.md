@@ -58,6 +58,19 @@ The middleware (`LiveTranslationsMiddleware`) has three jobs:
 
 The middleware skips Django admin URLs (`/admin/`) entirely to avoid interfering with the admin interface.
 
+``` mermaid
+graph TD
+    A[Request arrives] --> B{API or admin path?}
+    B -->|Yes| C[Return early<br>API dispatch or pass through]
+    B -->|No| H{User is translator?}
+    H -->|No| I[Return response unmodified<br>no markers were added]
+    H -->|Yes| K{HTML response?}
+    K -->|No| N[Strip ZWC markers]
+    N --> O[Return clean response]
+    K -->|Yes| L["Inject CSS + config script<br>+ widget JS before &lt;/body&gt;"]
+    L --> M[Return enriched HTML]
+```
+
 ## Catalog injection (database backend)
 
 The database backend needs to make DB-stored overrides visible to Django's `gettext()` without modifying `.po` files. It does this by writing directly into Django's internal translation catalog objects.
