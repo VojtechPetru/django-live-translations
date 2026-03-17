@@ -3,13 +3,14 @@
 import typing as t
 
 import django.contrib.admin
+import django.contrib.auth
 import django.db.models
 import django.http
 import django.utils.html
 
 from live_translations import models, services
 
-__all__ = ["TranslationEntryAdmin"]
+__all__ = ["ModifiedByFilter", "TranslationEntryAdmin", "TranslationHistoryAdmin"]
 
 _MSGID_MAX_LEN = 60
 _MSGSTR_MAX_LEN = 80
@@ -29,6 +30,43 @@ except ImportError:
     BaseModelAdmin = django.contrib.admin.ModelAdmin  # type: ignore[misc, assignment]
 
 
+class ModifiedByFilter(django.contrib.admin.SimpleListFilter):
+    """Filter TranslationEntry by the user who modified it (via TranslationHistory)."""
+
+    title = "modified by"
+    parameter_name = "modified_by"
+
+    def lookups(
+        self,
+        request: django.http.HttpRequest,
+        model_admin: t.Any,
+    ) -> list[tuple[str, str]]:
+        user_ids = (
+            models.TranslationHistory.objects.filter(user__isnull=False).values_list("user", flat=True).distinct()
+        )
+        user_model = django.contrib.auth.get_user_model()
+        users = user_model.objects.filter(pk__in=user_ids).order_by("pk")
+        return [(str(u.pk), str(u)) for u in users]
+
+    def queryset(
+        self,
+        request: django.http.HttpRequest,
+        queryset: django.db.models.QuerySet[models.TranslationEntry],
+    ) -> django.db.models.QuerySet[models.TranslationEntry] | None:
+        if self.value():
+            return queryset.filter(
+                django.db.models.Exists(
+                    models.TranslationHistory.objects.filter(
+                        user_id=self.value(),
+                        msgid=django.db.models.OuterRef("msgid"),
+                        context=django.db.models.OuterRef("context"),
+                        language=django.db.models.OuterRef("language"),
+                    )
+                )
+            )
+        return None
+
+
 @django.contrib.admin.register(models.TranslationEntry)
 class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
     list_display = [
@@ -39,7 +77,7 @@ class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
         "is_active",
         "updated_at",
     ]
-    list_filter = ["language", "context", "is_active"]
+    list_filter = ["language", "context", "is_active", ModifiedByFilter]
     search_fields = ["msgid", "msgstr", "context"]
     readonly_fields = ["po_default_display"]
     ordering = ["msgid", "language"]
@@ -134,3 +172,52 @@ class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
         self.message_user(request, f"{updated} translation(s) deactivated.")
 
     actions = ["activate_translations", "deactivate_translations"]
+
+
+@django.contrib.admin.register(models.TranslationHistory)
+class TranslationHistoryAdmin(BaseModelAdmin):  # type: ignore[misc]
+    list_display = [
+        "created_at",
+        "action",
+        "language",
+        "msgid_short",
+        "context",
+        "user",
+    ]
+    list_filter = ["action", "language", "user"]
+    search_fields = ["msgid", "context"]
+    readonly_fields = [
+        "language",
+        "msgid",
+        "context",
+        "action",
+        "old_value",
+        "new_value",
+        "user",
+        "created_at",
+    ]
+    ordering = ["-created_at"]
+
+    @django.contrib.admin.display(description="Message ID")
+    def msgid_short(self, obj: models.TranslationHistory) -> str:
+        return _truncate(obj.msgid, _MSGID_MAX_LEN)
+
+    def has_add_permission(
+        self,
+        request: django.http.HttpRequest,
+    ) -> bool:
+        return False
+
+    def has_change_permission(
+        self,
+        request: django.http.HttpRequest,
+        obj: models.TranslationHistory | None = None,
+    ) -> bool:
+        return False
+
+    def has_delete_permission(
+        self,
+        request: django.http.HttpRequest,
+        obj: models.TranslationHistory | None = None,
+    ) -> bool:
+        return False

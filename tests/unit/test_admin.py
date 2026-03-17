@@ -3,7 +3,10 @@
 import unittest.mock
 
 import django.contrib.admin
+import django.contrib.auth
+import django.test
 import django.utils.html
+import pytest
 
 from live_translations import admin, models, services
 from live_translations.types import MsgKey
@@ -275,3 +278,180 @@ class TestDeactivateTranslations:
             ma.deactivate_translations(request, queryset)
 
         mock_msg.assert_called_once_with(request, "0 translation(s) deactivated.")
+
+
+# ---------------------------------------------------------------------------
+# TranslationHistoryAdmin
+# ---------------------------------------------------------------------------
+
+
+def _get_history_admin_instance() -> admin.TranslationHistoryAdmin:
+    return django.contrib.admin.site._registry[models.TranslationHistory]  # type: ignore[return-value]
+
+
+class TestTranslationHistoryAdminRegistration:
+    def test_admin_is_registered(self) -> None:
+        assert models.TranslationHistory in django.contrib.admin.site._registry
+
+    def test_list_display(self) -> None:
+        ma = _get_history_admin_instance()
+        assert "created_at" in ma.list_display
+        assert "action" in ma.list_display
+        assert "language" in ma.list_display
+        assert "msgid_short" in ma.list_display
+        assert "user" in ma.list_display
+
+    def test_list_filter(self) -> None:
+        ma = _get_history_admin_instance()
+        assert "action" in ma.list_filter
+        assert "language" in ma.list_filter
+        assert "user" in ma.list_filter
+
+    def test_search_fields(self) -> None:
+        ma = _get_history_admin_instance()
+        assert "msgid" in ma.search_fields
+        assert "context" in ma.search_fields
+
+    def test_all_fields_readonly(self) -> None:
+        ma = _get_history_admin_instance()
+        assert "language" in ma.readonly_fields
+        assert "msgid" in ma.readonly_fields
+        assert "action" in ma.readonly_fields
+        assert "old_value" in ma.readonly_fields
+        assert "new_value" in ma.readonly_fields
+        assert "user" in ma.readonly_fields
+        assert "created_at" in ma.readonly_fields
+
+
+class TestTranslationHistoryAdminPermissions:
+    def test_no_add_permission(self) -> None:
+        ma = _get_history_admin_instance()
+        request = unittest.mock.MagicMock()
+        assert ma.has_add_permission(request) is False
+
+    def test_no_change_permission(self) -> None:
+        ma = _get_history_admin_instance()
+        request = unittest.mock.MagicMock()
+        assert ma.has_change_permission(request) is False
+        assert ma.has_change_permission(request, obj=unittest.mock.MagicMock()) is False
+
+    def test_no_delete_permission(self) -> None:
+        ma = _get_history_admin_instance()
+        request = unittest.mock.MagicMock()
+        assert ma.has_delete_permission(request) is False
+        assert ma.has_delete_permission(request, obj=unittest.mock.MagicMock()) is False
+
+
+class TestTranslationHistoryMsgidShort:
+    def test_short_msgid(self) -> None:
+        ma = _get_history_admin_instance()
+        obj = models.TranslationHistory(msgid="short")
+        assert ma.msgid_short(obj) == "short"
+
+    def test_long_msgid_truncated(self) -> None:
+        ma = _get_history_admin_instance()
+        obj = models.TranslationHistory(msgid="a" * 100)
+        result = ma.msgid_short(obj)
+        assert len(result) == admin._MSGID_MAX_LEN
+        assert result.endswith("...")
+
+
+# ---------------------------------------------------------------------------
+# ModifiedByFilter
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+class TestModifiedByFilter:
+    def _make_filter(self, value: str | None = None) -> admin.ModifiedByFilter:
+        params = {"modified_by": value} if value else {}
+        return admin.ModifiedByFilter(
+            request=unittest.mock.MagicMock(),
+            params=params,
+            model=models.TranslationEntry,
+            model_admin=_get_admin_instance(),
+        )
+
+    def test_lookups_empty_when_no_history(self) -> None:
+        f = self._make_filter()
+        request = unittest.mock.MagicMock()
+        lookups = f.lookups(request, _get_admin_instance())
+        assert lookups == []
+
+    def test_lookups_returns_users_with_history(self) -> None:
+        user_model = django.contrib.auth.get_user_model()
+        user = user_model.objects.create_user(username="editor", password="test")  # type: ignore[union-attr]
+        models.TranslationHistory.objects.create(
+            language="cs",
+            msgid="hello",
+            context="",
+            action=models.TranslationHistory.Action.CREATE,
+            user=user,
+        )
+
+        f = self._make_filter()
+        request = unittest.mock.MagicMock()
+        lookups = f.lookups(request, _get_admin_instance())
+        assert len(lookups) == 1
+        assert lookups[0][0] == str(user.pk)
+
+    def test_queryset_returns_none_when_no_value(self) -> None:
+        f = self._make_filter(value=None)
+        request = unittest.mock.MagicMock()
+        qs = models.TranslationEntry.objects.all()
+        result = f.queryset(request, qs)
+        assert result is None
+
+    def test_queryset_filters_by_user(self) -> None:
+        user_model = django.contrib.auth.get_user_model()
+        alice = user_model.objects.create_user(username="alice", password="test")  # type: ignore[union-attr]
+        bob = user_model.objects.create_user(username="bob", password="test")  # type: ignore[union-attr]
+
+        # Create two entries
+        entry_alice = models.TranslationEntry.objects.create(
+            language="cs",
+            msgid="hello",
+            context="",
+            msgstr="Ahoj",
+            is_active=True,
+        )
+        entry_bob = models.TranslationEntry.objects.create(
+            language="en",
+            msgid="bye",
+            context="",
+            msgstr="Bye",
+            is_active=True,
+        )
+
+        # History: alice modified "hello", bob modified "bye"
+        models.TranslationHistory.objects.create(
+            language="cs",
+            msgid="hello",
+            context="",
+            action=models.TranslationHistory.Action.CREATE,
+            user=alice,
+        )
+        models.TranslationHistory.objects.create(
+            language="en",
+            msgid="bye",
+            context="",
+            action=models.TranslationHistory.Action.CREATE,
+            user=bob,
+        )
+
+        # Filter by alice
+        f = self._make_filter(value=str(alice.pk))
+        request = unittest.mock.MagicMock()
+        result = f.queryset(request, models.TranslationEntry.objects.all())
+        assert result is not None
+        assert list(result) == [entry_alice]
+
+        # Filter by bob
+        f = self._make_filter(value=str(bob.pk))
+        result = f.queryset(request, models.TranslationEntry.objects.all())
+        assert result is not None
+        assert list(result) == [entry_bob]
+
+    def test_modified_by_in_entry_admin_list_filter(self) -> None:
+        ma = _get_admin_instance()
+        assert admin.ModifiedByFilter in ma.list_filter
