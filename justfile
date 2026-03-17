@@ -25,6 +25,10 @@ e2e-db *args:
 revert-po:
     git checkout HEAD -- example/locale/
 
+# Run the demo app dev server
+demo *args:
+    uv run python example/manage.py runserver {{ args }}
+
 # Serve docs locally
 docs-serve:
     uv run zensical serve
