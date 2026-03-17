@@ -217,7 +217,9 @@
       }
       if (!matches.length) continue;
 
-      // Process markers right-to-left to preserve indices when splitting
+      // Process markers right-to-left to preserve indices when splitting.
+      // After each iteration we update `tn` to the content node to the LEFT
+      // of the processed marker so the next (leftward) marker can be found.
       for (let mi = matches.length - 1; mi >= 0; mi--) {
         const m = matches[mi];
         const mIdx = /** @type {number} */ (m.index);
@@ -226,9 +228,14 @@
         const meta = STRING_TABLE[id];
         if (!meta) continue;
 
+        // Guard: after earlier iterations the text node may have been split
+        // or removed, making the original offset stale.
+        const tnLen = (tn.textContent || "").length;
+        if (mIdx + mLen > tnLen) continue;
+
         // Text AFTER the marker becomes a separate text node (tail)
         const afterStart = mIdx + mLen;
-        if (afterStart < (tn.textContent || "").length) {
+        if (afterStart < tnLen) {
           tn.splitText(afterStart);
         }
 
@@ -274,6 +281,14 @@
         // Clean up empty text node left after marker removal
         if (tn !== nodeToWrap && tn.textContent === "" && tn.parentNode) {
           tn.parentNode.removeChild(tn);
+        }
+
+        // Update tn for the next (leftward) iteration.  contentNode holds
+        // all text to the left of the just-processed marker, including any
+        // remaining markers.  It may have been reparented into <lt-t> but
+        // its textContent is unchanged so the earlier match indices stay valid.
+        if (contentNode && contentNode.nodeType === Node.TEXT_NODE) {
+          tn = /** @type {Text} */ (contentNode);
         }
       }
     }
@@ -994,10 +1009,30 @@
         const pill = document.createElement("button");
         pill.type = "button";
         pill.className = "lt-editor__tab" + (_editLang === lang ? " lt-editor__tab--active" : "");
+
+        // Leading dot (inactive override / marked for deletion)
+        var leadDot = document.createElement("span");
+        leadDot.className = "lt-editor__dot";
+        leadDot.dataset.role = "status";
         if (entry.has_override && entry.is_active === false) {
-          pill.classList.add("lt-editor__tab--inactive-override");
+          leadDot.classList.add("lt-editor__dot--inactive");
+          leadDot.dataset.tip = "Inactive override";
+        } else {
+          leadDot.style.display = "none";
         }
-        pill.textContent = meta ? meta.flag + "  " + meta.name : lang.toUpperCase();
+        pill.appendChild(leadDot);
+
+        // Label text
+        var label = document.createTextNode(meta ? meta.flag + "  " + meta.name : lang.toUpperCase());
+        pill.appendChild(label);
+
+        // Trailing dot (unsaved changes)
+        var trailDot = document.createElement("span");
+        trailDot.className = "lt-editor__dot";
+        trailDot.dataset.role = "dirty";
+        trailDot.style.display = "none";
+        pill.appendChild(trailDot);
+
         pill.dataset.lang = lang;
         pill.addEventListener("click", function () {
           if (_editLang === lang) return;
@@ -1086,23 +1121,37 @@
         dirty = _isLangDirty(lang);
         activeNow = _editedActiveFlags[lang] !== undefined ? _editedActiveFlags[lang] : ACTIVE_BY_DEFAULT;
       }
-      if (dirty) {
-        tabs[i].classList.add("lt-editor__tab--dirty");
-      } else {
-        tabs[i].classList.remove("lt-editor__tab--dirty");
-      }
-      // Red dot: marked for deletion (supersedes amber dot)
-      if (markedForDelete) {
-        tabs[i].classList.add("lt-editor__tab--marked-delete");
-        tabs[i].classList.remove("lt-editor__tab--inactive-override");
-      } else {
-        tabs[i].classList.remove("lt-editor__tab--marked-delete");
-        // Amber dot: override exists on server but current active state is off
-        const entry = (_editData && _editData.translations[lang]) || {};
-        if (entry.has_override && !activeNow) {
-          tabs[i].classList.add("lt-editor__tab--inactive-override");
+      // Trailing dot: unsaved changes
+      var trailDot = tabs[i].querySelector('[data-role="dirty"]');
+      if (trailDot) {
+        if (dirty) {
+          trailDot.classList.add("lt-editor__dot--dirty");
+          trailDot.dataset.tip = "Unsaved changes";
+          trailDot.style.display = "";
         } else {
-          tabs[i].classList.remove("lt-editor__tab--inactive-override");
+          trailDot.classList.remove("lt-editor__dot--dirty");
+          delete trailDot.dataset.tip;
+          trailDot.style.display = "none";
+        }
+      }
+      // Leading dot: deletion (red) supersedes inactive override (amber)
+      var leadDot = tabs[i].querySelector('[data-role="status"]');
+      if (leadDot) {
+        leadDot.classList.remove("lt-editor__dot--delete", "lt-editor__dot--inactive");
+        if (markedForDelete) {
+          leadDot.classList.add("lt-editor__dot--delete");
+          leadDot.dataset.tip = "Marked for deletion";
+          leadDot.style.display = "";
+        } else {
+          const entry = (_editData && _editData.translations[lang]) || {};
+          if (entry.has_override && !activeNow) {
+            leadDot.classList.add("lt-editor__dot--inactive");
+            leadDot.dataset.tip = "Inactive override";
+            leadDot.style.display = "";
+          } else {
+            delete leadDot.dataset.tip;
+            leadDot.style.display = "none";
+          }
         }
       }
     }
@@ -1212,7 +1261,9 @@
 
     const toggleWrap = document.createElement("label");
     toggleWrap.className = "lt-field__toggle";
-    if (markedForDelete || (!hasOverride && currentVal === poDefault)) {
+    if (markedForDelete) {
+      toggleWrap.style.visibility = "hidden";
+    } else if (!hasOverride && currentVal === poDefault) {
       toggleWrap.style.display = "none";
     }
 
