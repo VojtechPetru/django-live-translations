@@ -5,7 +5,6 @@ import unittest.mock
 
 import django.contrib.auth.models
 import django.http
-import django.test
 import pytest
 
 from live_translations import history, models, strings
@@ -567,7 +566,7 @@ class TestHistoryView:
 
 @pytest.mark.django_db
 class TestMiddlewareContextvar:
-    def test_sets_user_for_authenticated_request(self):
+    def test_sets_user_for_authenticated_request(self, make_request):
         user = django.contrib.auth.models.User.objects.create_user(
             username="admin",
             password="test",
@@ -583,9 +582,7 @@ class TestMiddlewareContextvar:
         from live_translations.middleware import LiveTranslationsMiddleware
 
         mw = LiveTranslationsMiddleware(capturing_view)
-        factory = django.test.RequestFactory()
-        request = factory.get("/some-page/")
-        request.user = user
+        request = make_request("get", "/some-page/", user=user)
 
         with (
             unittest.mock.patch("live_translations.conf.get_backend_instance"),
@@ -598,7 +595,7 @@ class TestMiddlewareContextvar:
 
         assert captured_user == user
 
-    def test_sets_none_for_anonymous(self):
+    def test_sets_none_for_anonymous(self, make_request):
         captured_user = "sentinel"
 
         def capturing_view(request):
@@ -609,9 +606,7 @@ class TestMiddlewareContextvar:
         from live_translations.middleware import LiveTranslationsMiddleware
 
         mw = LiveTranslationsMiddleware(capturing_view)
-        factory = django.test.RequestFactory()
-        request = factory.get("/some-page/")
-        request.user = unittest.mock.MagicMock(is_authenticated=False)
+        request = make_request("get", "/some-page/", anonymous=True)
 
         with (
             unittest.mock.patch("live_translations.conf.get_backend_instance"),
@@ -624,16 +619,14 @@ class TestMiddlewareContextvar:
 
         assert captured_user is None  # type: ignore[unnecessary-comparison]
 
-    def test_resets_after_request(self):
+    def test_resets_after_request(self, make_request):
         def noop_view(request):
             return django.http.HttpResponse("ok")
 
         from live_translations.middleware import LiveTranslationsMiddleware
 
         mw = LiveTranslationsMiddleware(noop_view)
-        factory = django.test.RequestFactory()
-        request = factory.get("/some-page/")
-        request.user = unittest.mock.MagicMock(is_authenticated=True)
+        request = make_request("get", "/some-page/", has_permission=True)
 
         with (
             unittest.mock.patch("live_translations.conf.get_backend_instance"),

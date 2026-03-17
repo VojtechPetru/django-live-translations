@@ -56,7 +56,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/unit/**" = ["S101", "S105", "S106", "S108", "PLR2004", "PLR0913", "INP001"]
+"tests/unit/**" = ["S101", "S105", "S106", "S108", "PLR2004", "PLR0913", "SIM117", "INP001"]
 "tests/e2e/**" = ["S101", "S105", "S106", "S108", "S603", "S607", "PLR2004", "PLR0913", "PLR1714", "C420", "INP001"]
 "**/migrations/**" = ["ALL"]
 "example/**" = ["S105", "INP001"]
@@ -71,6 +71,17 @@ known-first-party = ["live_translations"]
 [tool.pyrefly]
 project-includes = ["src", "tests/unit"]
 python-version = "3.12"
+
+[tool.coverage.run]
+source = ["src/live_translations"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "if t.TYPE_CHECKING:",
+    "pragma: no cover",
+    "except ImportError",
+]
+fail_under = 90
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/live_translations"]
