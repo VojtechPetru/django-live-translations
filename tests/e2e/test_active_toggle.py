@@ -76,9 +76,9 @@ class TestActiveToggle:
         # Toggle to inactive (uncheck) — should mark the tab as dirty/inactive-override
         expect(toggle_input).not_to_be_checked()
         en_tab = page_as_superuser.locator('.lt-editor__tab[data-lang="en"]')
-        # The tab should have the dirty modifier since text differs from loaded value
-        tab_classes = en_tab.get_attribute("class") or ""
-        assert "lt-editor__tab--dirty" in tab_classes or "lt-editor__tab--inactive-override" in tab_classes
+        # The dirty dot inside the tab should be visible since text differs from loaded value
+        dirty_dot = en_tab.locator('[data-role="dirty"]')
+        expect(dirty_dot).to_be_visible()
 
     def test_toggle_resets_when_text_reverted_to_default(self, page_as_superuser: Page) -> None:
         open_modal(page_as_superuser, "demo.title")

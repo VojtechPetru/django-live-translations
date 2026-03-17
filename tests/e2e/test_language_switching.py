@@ -64,7 +64,8 @@ class TestLanguageSwitching:
         en_textarea = page_as_superuser.locator("#lt-input-en")
         en_textarea.fill("Dirty change")
         en_tab = page_as_superuser.locator('.lt-editor__tab[data-lang="en"]')
-        expect(en_tab).to_have_class(re.compile(r"--dirty"))
+        dirty_dot = en_tab.locator('[data-role="dirty"]')
+        expect(dirty_dot).to_be_visible()
 
     def test_dirty_dot_disappears_when_reverted(self, page_as_superuser: Page) -> None:
         open_modal(page_as_superuser, "demo.title")
@@ -73,9 +74,10 @@ class TestLanguageSwitching:
         original_value = en_textarea.input_value()
         en_textarea.fill("Temporary change")
         en_tab = page_as_superuser.locator('.lt-editor__tab[data-lang="en"]')
-        expect(en_tab).to_have_class(re.compile(r"--dirty"))
+        dirty_dot = en_tab.locator('[data-role="dirty"]')
+        expect(dirty_dot).to_be_visible()
         en_textarea.fill(original_value)
-        expect(en_tab).not_to_have_class(re.compile(r"--dirty"))
+        expect(dirty_dot).to_be_hidden()
 
     def test_inactive_override_tab_has_amber_dot(
         self, page_as_superuser_for_backend: Page, backend_id: str, base_url_for_backend: str
@@ -94,7 +96,9 @@ class TestLanguageSwitching:
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
         en_tab = page_as_superuser_for_backend.locator('.lt-editor__tab[data-lang="en"]')
-        expect(en_tab).to_have_class(re.compile(r"--inactive-override"))
+        status_dot = en_tab.locator('[data-role="status"]')
+        expect(status_dot).to_be_visible()
+        expect(status_dot).to_have_class(re.compile(r"lt-editor__dot--inactive"))
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
 
@@ -113,7 +117,9 @@ class TestLanguageSwitching:
         delete_btn = page_as_superuser_for_backend.locator(".lt-btn--delete-override")
         delete_btn.click()
         en_tab = page_as_superuser_for_backend.locator('.lt-editor__tab[data-lang="en"]')
-        expect(en_tab).to_have_class(re.compile(r"--marked-delete"))
+        status_dot = en_tab.locator('[data-role="status"]')
+        expect(status_dot).to_be_visible()
+        expect(status_dot).to_have_class(re.compile(r"lt-editor__dot--delete"))
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
 

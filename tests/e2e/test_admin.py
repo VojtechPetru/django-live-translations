@@ -1,7 +1,7 @@
 """E2E tests for Django admin interface — DB backend only."""
 
 import pytest
-from helpers import API_PREFIX, SUPERUSER, api_delete, api_save, login
+from helpers import API_PREFIX, SUPERUSER, api_save, login
 from playwright.sync_api import Page, expect
 
 
@@ -77,7 +77,6 @@ class TestAdminInterface:
         po_default = page.locator(".po-default-display, .readonly, .help")
         body_text = page.locator("#content").text_content() or ""
         assert "Live Translations Demo" in body_text or po_default.count() > 0
-        api_delete(page, db_base_url, "demo.title", ["en"])
 
     def test_admin_delete_single_entry(self, page: Page, db_base_url: str) -> None:
         api_save(page, db_base_url, "admin.test.delete", {"en": "To Delete"}, {"en": True})
