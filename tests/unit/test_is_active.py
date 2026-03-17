@@ -81,6 +81,22 @@ class TestInjectOverrides:
         assert mock_catalog["active_key"] == "Active Value"
         assert "inactive_key" not in mock_catalog
 
+    def test_survives_missing_catalog_attribute(self):
+        """inject_overrides must not crash if Django removes the private _catalog attr."""
+        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", is_active=True)
+
+        backend = db.DatabaseBackend(locale_dir=pathlib.Path("/tmp"), domain="django")
+        mock_trans = unittest.mock.MagicMock(spec=["_info"])  # no _catalog attr
+
+        with (
+            unittest.mock.patch.object(backend, "_get_po_backend"),
+            unittest.mock.patch(
+                "django.utils.translation.trans_real.translation",
+                return_value=mock_trans,
+            ),
+        ):
+            backend.inject_overrides()  # should not raise
+
 
 @pytest.mark.django_db
 class TestGetTranslations:

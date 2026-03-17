@@ -162,23 +162,34 @@ class DatabaseBackend(base.TranslationBackend):
             # Table doesn't exist yet (before migrations).
             return
 
-        by_lang: dict[str, list[tuple[str, str, str]]] = {}
+        by_lang: dict[LanguageCode, list[MsgKey]] = {}
+        msgstr_map: dict[tuple[LanguageCode, MsgKey], str] = {}
         for language, msgid, context, msgstr in rows:
-            by_lang.setdefault(language, []).append((msgid, context, msgstr))
+            msg_key = MsgKey(msgid, context)
+            by_lang.setdefault(language, []).append(msg_key)
+            msgstr_map[(language, msg_key)] = msgstr
 
-        for lang, entries in by_lang.items():
+        for lang, keys in by_lang.items():
             try:
                 trans_obj: django.utils.translation.trans_real.DjangoTranslation = (
                     django.utils.translation.trans_real.translation(lang)
                 )
             except Exception:  # noqa: BLE001, S112
                 continue
-            catalog: django.utils.translation.trans_real.TranslationCatalog | None = trans_obj._catalog  # type: ignore[assignment]
+            try:
+                catalog: django.utils.translation.trans_real.TranslationCatalog | None = trans_obj._catalog  # type: ignore[assignment]
+            except AttributeError:
+                logger.warning(
+                    "DjangoTranslation object has no '_catalog' attribute. "
+                    "This Django version may have changed its translation internals — "
+                    "translation overrides will not be injected."
+                )
+                return
             if catalog is None:
                 continue
-            for msgid, context, msgstr in entries:
-                key = f"{context}\x04{msgid}" if context else msgid
-                catalog[key] = msgstr
+            for msg_key in keys:
+                catalog_key = f"{msg_key.context}\x04{msg_key.msgid}" if msg_key.context else msg_key.msgid
+                catalog[catalog_key] = msgstr_map[(lang, msg_key)]
 
     @t.override
     def get_translations(
