@@ -30,7 +30,7 @@ API_PREFIX = "/__live-translations__"
 
 _DEFAULT_BACKEND = "live_translations.backends.po.POFileBackend"
 _DEFAULT_CACHE = "default"
-_DEFAULT_DOMAIN = "django"
+_DEFAULT_GETTEXT_DOMAIN = "django"
 _DEFAULT_PERMISSION_CHECK = "live_translations.conf.default_permission_check"
 _DEFAULT_SHORTCUT_EDIT = "ctrl+shift+e"
 _DEFAULT_SHORTCUT_PREVIEW = "ctrl+shift+p"
@@ -69,9 +69,17 @@ class LiveTranslationsSettings(t.TypedDict, total=False):
     """Django cache alias used for cross-process invalidation of translation
     overrides. Only relevant for ``DatabaseBackend``. Default: ``"default"``."""
 
-    DOMAIN: str
-    """Gettext domain — the basename of ``.po``/``.mo`` files
-    (e.g. ``"django"`` resolves to ``django.po``). Default: ``"django"``."""
+    GETTEXT_DOMAIN: str
+    """Gettext domain used to locate ``.po`` and ``.mo`` files.
+
+    The value is the basename of the catalog files inside each
+    ``{lang}/LC_MESSAGES/`` directory.  For example, ``"django"`` (the
+    default) resolves to ``django.po`` / ``django.mo``, while
+    ``"djangojs"`` targets ``djangojs.po`` / ``djangojs.mo``.
+
+    Most projects only use the default ``"django"`` domain.  Set this if
+    your translatable strings live in a different gettext domain (e.g.
+    ``"djangojs"`` for JavaScript catalogs).  Default: ``"django"``."""
 
     LANGUAGES: list[LanguageCode]
     """Language codes available for live editing. Falls back to the codes
@@ -108,7 +116,7 @@ class LiveTranslationsConf:
     backend: str = _DEFAULT_BACKEND
     cache: str = _DEFAULT_CACHE
     locale_dir: pathlib.Path = pathlib.Path()
-    domain: str = _DEFAULT_DOMAIN
+    gettext_domain: str = _DEFAULT_GETTEXT_DOMAIN
     permission_check: str = _DEFAULT_PERMISSION_CHECK
     translation_active_by_default: bool = False
     shortcut_edit: str = _DEFAULT_SHORTCUT_EDIT
@@ -151,7 +159,7 @@ def get_settings() -> LiveTranslationsConf:
         backend=_to_dotted_path(raw.get("BACKEND", _DEFAULT_BACKEND)),
         cache=raw.get("CACHE", _DEFAULT_CACHE),
         locale_dir=locale_dir,
-        domain=raw.get("DOMAIN", _DEFAULT_DOMAIN),
+        gettext_domain=raw.get("GETTEXT_DOMAIN", _DEFAULT_GETTEXT_DOMAIN),
         permission_check=_to_dotted_path(raw.get("PERMISSION_CHECK", _DEFAULT_PERMISSION_CHECK)),
         translation_active_by_default=raw.get("TRANSLATION_ACTIVE_BY_DEFAULT", False),
         shortcut_edit=raw.get("SHORTCUT_EDIT", _DEFAULT_SHORTCUT_EDIT),
@@ -177,6 +185,6 @@ def get_backend_instance() -> "TranslationBackend":
     cls: type[TranslationBackend] = django.utils.module_loading.import_string(settings.backend)
     return cls(
         locale_dir=settings.locale_dir,
-        domain=settings.domain,
+        domain=settings.gettext_domain,
         cache_alias=settings.cache,
     )

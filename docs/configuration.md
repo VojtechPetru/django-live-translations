@@ -32,7 +32,7 @@ LIVE_TRANSLATIONS = {
 |---------|------|---------|-------------|
 | `BACKEND` | `str \| type` | `"live_translations.backends.po.POFileBackend"` | Translation storage backend. Dotted import path or class reference. |
 | `CACHE` | `str` | `"default"` | Django cache alias for cross-process invalidation. Only used by `DatabaseBackend`. |
-| `DOMAIN` | `str` | `"django"` | Gettext domain - the basename of `.po`/`.mo` files (e.g. `"django"` resolves to `django.po`). |
+| `GETTEXT_DOMAIN` | `str` | `"django"` | Gettext domain — the basename of `.po`/`.mo` catalog files (e.g. `"django"` resolves to `django.po`/`django.mo`, `"djangojs"` to `djangojs.po`/`djangojs.mo`). |
 | `LANGUAGES` | `list[str]` | From `settings.LANGUAGES` | Language codes available for editing. Set explicitly to expose only a subset. |
 | `LOCALE_DIR` | `str \| Path` | `LOCALE_PATHS[0]` or `BASE_DIR/locale` | Path to the locale directory containing `{lang}/LC_MESSAGES/` subdirectories. |
 | `PERMISSION_CHECK` | `str \| Callable` | Superuser check | Callable `(HttpRequest) -> bool` that controls access to the editing UI. Accepts a dotted path or function reference. |

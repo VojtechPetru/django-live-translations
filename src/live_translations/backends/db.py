@@ -259,9 +259,14 @@ class DatabaseBackend(base.TranslationBackend):
         new_active_states: dict[LanguageCode, bool] = {}
         for lang, msgstr in translations.items():
             old_entry = existing.get(lang)
-            old_text_values[lang] = old_entry.msgstr if old_entry else ""
-
             is_active = active_flags.get(lang, fallback_active) if active_flags else fallback_active
+
+            # Skip creating a new DB row when nothing changed from the .po default.
+            # This prevents phantom entries for languages the caller didn't intend to edit.
+            if old_entry is None and msgstr == po_defaults.get(lang, "") and is_active == fallback_active:
+                continue
+
+            old_text_values[lang] = old_entry.msgstr if old_entry else ""
             new_active_states[lang] = is_active
             if old_entry is not None:
                 old_active_states[lang] = old_entry.is_active

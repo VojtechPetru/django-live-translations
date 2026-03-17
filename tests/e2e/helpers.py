@@ -144,6 +144,21 @@ def uncheck_active_toggle(page: Page, lang: str = "en") -> None:
 # ---------------------------------------------------------------------------
 
 
+def api_get_translations(
+    page: Page,
+    base_url: str,
+    msgid: str,
+    *,
+    context: str = "",
+) -> dict:
+    """Fetch translation data for a msgid via the API."""
+    response = page.request.get(
+        f"{base_url}{API_PREFIX}/translations/",
+        params={"msgid": msgid, "context": context},
+    )
+    return response.json()
+
+
 def api_save(
     page: Page,
     base_url: str,

@@ -1409,7 +1409,7 @@
     const msgid = attrData ? attrData.m : currentSpan.dataset.ltMsgid;
     const context = attrData ? attrData.c : (currentSpan.dataset.ltContext || "");
 
-    // Separate languages into save vs delete groups
+    // Separate languages into save vs delete groups (only include dirty languages)
     const translations = {};
     const activeFlags = {};
     const langsToDelete = [];
@@ -1419,6 +1419,7 @@
         langsToDelete.push(lang);
         continue;
       }
+      if (!_isLangDirty(lang)) continue;
       translations[lang] = _editedValues[lang] !== undefined ? _editedValues[lang] : "";
       activeFlags[lang] = _editedActiveFlags[lang] !== undefined ? _editedActiveFlags[lang] : ACTIVE_BY_DEFAULT;
     }

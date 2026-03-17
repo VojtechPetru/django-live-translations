@@ -546,3 +546,115 @@ class TestBulkActivateView:
         )
         response = views.bulk_activate(request)
         assert response.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# No phantom entries — save_translations must not create DB rows for
+# languages whose value matches the .po default when no override exists yet.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+class TestSaveNoPhantomEntries:
+    """DatabaseBackend.save_translations should skip creating entries for
+    languages that match the .po default and have no existing DB override."""
+
+    @pytest.fixture(autouse=True)
+    def _backend(self, make_db_backend):
+        self._make_backend = make_db_backend
+
+    def test_unchanged_language_not_saved(self, settings):
+        """Sending en+cs where only en differs from PO default: only en gets a row.
+
+        The active flag for cs matches TRANSLATION_ACTIVE_BY_DEFAULT (False),
+        so no override is needed.
+        """
+        settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en", "cs"], "TRANSLATION_ACTIVE_BY_DEFAULT": False}
+        conf.get_settings.cache_clear()
+
+        backend = self._make_backend()
+        with (
+            unittest.mock.patch.object(backend, "get_defaults", return_value={"en": "Hello", "cs": "Ahoj"}),
+            unittest.mock.patch.object(backend, "bump_catalog_version"),
+        ):
+            backend.save_translations(
+                MsgKey("hello", ""),
+                {"en": "Hi there", "cs": "Ahoj"},  # cs unchanged
+                active_flags={"en": True, "cs": False},  # cs flag matches default
+            )
+
+        assert models.TranslationEntry.objects.count() == 1
+        entry = models.TranslationEntry.objects.get()
+        assert entry.language == "en"
+        assert entry.msgstr == "Hi there"
+
+    def test_all_unchanged_creates_no_entries(self, settings):
+        """If every language matches its PO default and active flags match the setting, no rows are created."""
+        settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en", "cs"], "TRANSLATION_ACTIVE_BY_DEFAULT": True}
+        conf.get_settings.cache_clear()
+
+        backend = self._make_backend()
+        with (
+            unittest.mock.patch.object(backend, "get_defaults", return_value={"en": "Hello", "cs": "Ahoj"}),
+            unittest.mock.patch.object(backend, "bump_catalog_version"),
+        ):
+            backend.save_translations(
+                MsgKey("hello", ""),
+                {"en": "Hello", "cs": "Ahoj"},
+                active_flags={"en": True, "cs": True},
+            )
+
+        assert models.TranslationEntry.objects.count() == 0
+
+    def test_existing_entry_still_updated_even_if_matches_default(self, settings):
+        """An existing DB row is always updated, even when the new value matches the PO default."""
+        settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en"]}
+        conf.get_settings.cache_clear()
+
+        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Old override", context="")
+
+        backend = self._make_backend()
+        with (
+            unittest.mock.patch.object(backend, "get_defaults", return_value={"en": "Hello"}),
+            unittest.mock.patch.object(backend, "bump_catalog_version"),
+        ):
+            backend.save_translations(MsgKey("hello", ""), {"en": "Hello"}, active_flags={"en": True})
+
+        entry = models.TranslationEntry.objects.get()
+        assert entry.msgstr == "Hello"
+        assert entry.is_active is True
+
+    def test_non_default_active_flag_creates_entry(self, settings):
+        """If value matches PO default but active flag differs from the setting, an entry is created."""
+        settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en"], "TRANSLATION_ACTIVE_BY_DEFAULT": False}
+        conf.get_settings.cache_clear()
+
+        backend = self._make_backend()
+        with (
+            unittest.mock.patch.object(backend, "get_defaults", return_value={"en": "Hello"}),
+            unittest.mock.patch.object(backend, "bump_catalog_version"),
+        ):
+            # Value matches PO default, but active flag (True) differs from setting (False)
+            backend.save_translations(MsgKey("hello", ""), {"en": "Hello"}, active_flags={"en": True})
+
+        assert models.TranslationEntry.objects.count() == 1
+        entry = models.TranslationEntry.objects.get()
+        assert entry.is_active is True
+
+    def test_missing_po_default_treated_as_empty(self, settings):
+        """A language with no PO default is treated as empty string for comparison."""
+        settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en", "de"]}
+        conf.get_settings.cache_clear()
+
+        backend = self._make_backend()
+        with (
+            # Only en has a PO default; de has no entry
+            unittest.mock.patch.object(backend, "get_defaults", return_value={"en": "Hello"}),
+            unittest.mock.patch.object(backend, "bump_catalog_version"),
+        ):
+            backend.save_translations(
+                MsgKey("hello", ""),
+                {"en": "Hello", "de": ""},  # both match their defaults (en="Hello", de="")
+            )
+
+        assert models.TranslationEntry.objects.count() == 0

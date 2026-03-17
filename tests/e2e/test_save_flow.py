@@ -4,6 +4,7 @@ import pytest
 from helpers import (
     SUPERUSER,
     api_delete,
+    api_get_translations,
     api_restore_po_default,
     api_save,
     check_active_toggle,
@@ -136,6 +137,72 @@ class TestSaveFlowDBBackend:
         page.wait_for_load_state("networkidle")
         span = page.locator('lt-t[data-lt-msgid="demo.title"]')
         expect(span).to_have_text("Live Translations Demo")
+        api_delete(page, db_base_url, "demo.title", ["en"])
+
+
+class TestSaveNoPhantomEntries:
+    """Saving one language must not create DB overrides for other languages."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, page: Page, db_base_url: str) -> None:
+        login(page, db_base_url, *SUPERUSER)
+        page.goto(f"{db_base_url}/en/")
+        page.wait_for_load_state("networkidle")
+        # Clean slate: remove any leftover overrides from previous tests
+        api_delete(page, db_base_url, "demo.title", ["en", "cs"])
+
+    def test_api_save_single_lang_no_override_on_other(self, page: Page, db_base_url: str) -> None:
+        """Saving only EN via API must not create a DB override for CS."""
+        api_save(page, db_base_url, "demo.title", {"en": "Only English"}, {"en": True})
+
+        data = api_get_translations(page, db_base_url, "demo.title")
+        assert data["translations"]["en"]["has_override"] is True
+        assert data["translations"]["cs"]["has_override"] is False
+
+        api_delete(page, db_base_url, "demo.title", ["en"])
+
+    def test_api_save_both_langs_unchanged_lang_no_override(self, page: Page, db_base_url: str) -> None:
+        """Sending both languages where CS text + active flag match the PO default
+        must not create a CS override (backend defense-in-depth)."""
+        # Get PO defaults first
+        defaults = api_get_translations(page, db_base_url, "demo.title")
+        cs_default = defaults["translations"]["cs"]["msgstr"]
+
+        # Save both, but CS value matches PO default and active flag matches
+        # TRANSLATION_ACTIVE_BY_DEFAULT (False on the E2E server).
+        api_save(
+            page,
+            db_base_url,
+            "demo.title",
+            {"en": "Changed English", "cs": cs_default},
+            {"en": True, "cs": False},
+        )
+
+        data = api_get_translations(page, db_base_url, "demo.title")
+        assert data["translations"]["en"]["has_override"] is True
+        assert data["translations"]["cs"]["has_override"] is False
+
+        api_delete(page, db_base_url, "demo.title", ["en"])
+
+    def test_widget_save_single_lang_no_phantom(self, page: Page, db_base_url: str) -> None:
+        """Editing only EN in the widget must not create a CS override."""
+        open_modal(page, "demo.title")
+        wait_for_fields_loaded(page)
+
+        # Edit only EN
+        textarea = page.locator("#lt-input-en")
+        textarea.fill("Widget English Only")
+        check_active_toggle(page, "en")
+
+        # Do NOT touch CS tab at all
+        page.locator(".lt-btn--save").click()
+        expect(page.locator("dialog.lt-dialog[open]")).to_be_hidden(timeout=5000)
+
+        # Verify CS has no override
+        data = api_get_translations(page, db_base_url, "demo.title")
+        assert data["translations"]["en"]["has_override"] is True
+        assert data["translations"]["cs"]["has_override"] is False
+
         api_delete(page, db_base_url, "demo.title", ["en"])
 
 
