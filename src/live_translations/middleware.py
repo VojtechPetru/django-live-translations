@@ -14,6 +14,7 @@ import typing as t
 import django.http
 import django.middleware.csrf
 import django.templatetags.static
+import django.urls
 import django.utils.translation
 
 from live_translations import conf, strings, views
@@ -67,8 +68,9 @@ class LiveTranslationsMiddleware:
 
         conf.get_backend_instance().ensure_current()
 
-        # Skip admin URLs entirely
-        if request.path.startswith("/admin/"):
+        # Skip admin URLs entirely (use resolver so it works regardless of
+        # URL prefix, e.g. when admin is inside i18n_patterns).
+        if self._is_admin_path(request.path):
             return self.get_response(request)
 
         checker = conf.get_permission_checker()
@@ -104,6 +106,15 @@ class LiveTranslationsMiddleware:
             return response
         finally:
             strings.reset_string_registry()
+
+    @staticmethod
+    def _is_admin_path(path: str) -> bool:
+        """Return True if *path* resolves to the Django admin app."""
+        try:
+            match = django.urls.resolve(path)
+        except Exception:  # noqa: BLE001
+            return False
+        return getattr(match, "app_name", None) == "admin"
 
     @staticmethod
     def _dispatch_api(

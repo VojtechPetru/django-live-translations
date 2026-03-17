@@ -161,7 +161,14 @@ class TestHandleRequest:
         inner = unittest.mock.MagicMock(return_value=inner_response)
         mw = LiveTranslationsMiddleware(inner)
 
-        with _patch_middleware_deps():
+        with (
+            _patch_middleware_deps(),
+            unittest.mock.patch.object(
+                LiveTranslationsMiddleware,
+                "_is_admin_path",
+                return_value=True,
+            ),
+        ):
             request = make_request("get", "/admin/some-model/")
             response = mw(request)
 
