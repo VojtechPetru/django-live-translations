@@ -15,3 +15,5 @@ example/db.sqlite3
 .claude/
 site/
 .coverage
+.benchmarks/
+.cache/
