@@ -29,7 +29,7 @@ class TestActiveToggle:
             {"en": False},
         )
         page_as_superuser.reload()
-        page_as_superuser.wait_for_load_state("networkidle")
+        page_as_superuser.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
         # Toggle should be visible because the value differs from PO default

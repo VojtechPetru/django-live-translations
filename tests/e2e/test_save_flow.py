@@ -9,7 +9,7 @@ from helpers import (
     api_save,
     check_active_toggle,
     close_modal,
-    login,
+    fast_login,
     open_modal,
     uncheck_active_toggle,
     wait_for_fields_loaded,
@@ -106,9 +106,9 @@ class TestSaveFlowPOBackend:
 class TestSaveFlowDBBackend:
     @pytest.fixture(autouse=True)
     def _setup(self, page: Page, db_base_url: str) -> None:
-        login(page, db_base_url, *SUPERUSER)
+        fast_login(page, db_base_url, *SUPERUSER)
         page.goto(f"{db_base_url}/en/")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
     def test_save_creates_translation_entry(self, page: Page, db_base_url: str) -> None:
         result = api_save(page, db_base_url, "demo.title", {"en": "DB Created"}, {"en": True})
@@ -126,7 +126,7 @@ class TestSaveFlowDBBackend:
     def test_save_active_override_changes_displayed_text(self, page: Page, db_base_url: str) -> None:
         api_save(page, db_base_url, "demo.title", {"en": "DB Active"}, {"en": True})
         page.reload()
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
         span = page.locator('lt-t[data-lt-msgid="demo.title"]')
         expect(span).to_have_text("DB Active")
         api_delete(page, db_base_url, "demo.title", ["en"])
@@ -134,7 +134,7 @@ class TestSaveFlowDBBackend:
     def test_save_inactive_override_does_not_change_displayed_text(self, page: Page, db_base_url: str) -> None:
         api_save(page, db_base_url, "demo.title", {"en": "DB Inactive"}, {"en": False})
         page.reload()
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
         span = page.locator('lt-t[data-lt-msgid="demo.title"]')
         expect(span).to_have_text("Live Translations Demo")
         api_delete(page, db_base_url, "demo.title", ["en"])
@@ -145,9 +145,9 @@ class TestSaveNoPhantomEntries:
 
     @pytest.fixture(autouse=True)
     def _setup(self, page: Page, db_base_url: str) -> None:
-        login(page, db_base_url, *SUPERUSER)
+        fast_login(page, db_base_url, *SUPERUSER)
         page.goto(f"{db_base_url}/en/")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
         # Clean slate: remove any leftover overrides from previous tests
         api_delete(page, db_base_url, "demo.title", ["en", "cs"])
 

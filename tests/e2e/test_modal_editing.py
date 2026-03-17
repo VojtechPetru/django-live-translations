@@ -18,7 +18,7 @@ class TestModalEditing:
         # Ensure PO default is restored in case a previous test left dirty state
         api_restore_po_default(page_as_superuser, base_url, "demo.title", ["en"])
         page_as_superuser.reload()
-        page_as_superuser.wait_for_load_state("networkidle")
+        page_as_superuser.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
         textarea = page_as_superuser.locator("#lt-input-en")
@@ -40,7 +40,7 @@ class TestModalEditing:
         # Ensure PO default is restored in case a previous test left dirty state
         api_restore_po_default(page_as_superuser, base_url, "demo.title", ["en"])
         page_as_superuser.reload()
-        page_as_superuser.wait_for_load_state("networkidle")
+        page_as_superuser.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
         po_default = page_as_superuser.locator(".lt-field__po-default")

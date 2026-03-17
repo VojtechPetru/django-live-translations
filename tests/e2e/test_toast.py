@@ -71,7 +71,7 @@ class TestToastNotifications:
             expect(toast).to_be_visible(timeout=5000)
             # Close modal if open, then click again
             page_as_superuser.keyboard.press("Escape")
-            page_as_superuser.wait_for_timeout(500)
+            expect(page_as_superuser.locator("dialog.lt-dialog[open]")).to_have_count(0, timeout=2000)
             self._click_span_with_intercepted_api(page_as_superuser)
             # Only one toast should exist
             expect(page_as_superuser.locator(".lt-toast")).to_have_count(1, timeout=3000)
@@ -88,7 +88,7 @@ class TestToastNotifications:
         api_save(page, base_url, "demo.title", {"en": "Bulk Toast Test"}, {"en": False})
         page.context.add_cookies([{"name": "lt_preview", "value": "1", "url": base_url}])
         page.reload()
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         span = page.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span).to_have_class(re.compile(r"lt-preview"))

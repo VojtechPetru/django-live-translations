@@ -13,7 +13,7 @@ class TestPreviewMode:
         # Keyboard shortcut sets cookie and triggers page reload
         with page_as_superuser_for_backend.expect_navigation():
             page_as_superuser_for_backend.keyboard.press("Control+Shift+KeyP")
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         cookies = page_as_superuser_for_backend.context.cookies()
         preview_cookie = next((c for c in cookies if c["name"] == "lt_preview"), None)
         assert preview_cookie is not None
@@ -28,7 +28,7 @@ class TestPreviewMode:
     ) -> None:
         enable_preview(page_as_superuser_for_backend, base_url_for_backend)
         page_as_superuser_for_backend.goto(f"{base_url_for_backend}/cs/")
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         cookies = page_as_superuser_for_backend.context.cookies()
         preview_cookie = next((c for c in cookies if c["name"] == "lt_preview"), None)
         assert preview_cookie is not None
@@ -36,7 +36,7 @@ class TestPreviewMode:
         # Cleanup — navigate back to EN
         disable_preview(page_as_superuser_for_backend, base_url_for_backend)
         page_as_superuser_for_backend.goto(f"{base_url_for_backend}/en/")
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
 
     def test_preview_shows_inactive_with_amber_outline(
         self, page_as_superuser_for_backend: Page, backend_id: str, base_url_for_backend: str
@@ -123,7 +123,7 @@ class TestPreviewMode:
             {"en": False},
         )
         page_as_superuser_for_backend.reload()
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span).to_have_text("Live Translations Demo")
         # Cleanup

@@ -45,7 +45,7 @@ class TestHintBar:
     def test_preview_button_sets_cookie_and_reloads(self, page_as_superuser: Page) -> None:
         preview_btn = page_as_superuser.locator('.lt-hint__action[data-mode="preview"]')
         preview_btn.click()
-        page_as_superuser.wait_for_load_state("networkidle")
+        page_as_superuser.wait_for_load_state("domcontentloaded")
         cookies = page_as_superuser.context.cookies()
         preview_cookie = [c for c in cookies if c["name"] == "lt_preview"]
         assert len(preview_cookie) == 1
@@ -57,10 +57,10 @@ class TestHintBar:
         preview_btn = page_as_superuser.locator('.lt-hint__action[data-mode="preview"]')
         # First click: enable preview
         preview_btn.click()
-        page_as_superuser.wait_for_load_state("networkidle")
+        page_as_superuser.wait_for_load_state("domcontentloaded")
         # Second click: disable preview
         page_as_superuser.locator('.lt-hint__action[data-mode="preview"]').click()
-        page_as_superuser.wait_for_load_state("networkidle")
+        page_as_superuser.wait_for_load_state("domcontentloaded")
         cookies = page_as_superuser.context.cookies()
         preview_cookie = [c for c in cookies if c["name"] == "lt_preview" and c["value"] == "1"]
         assert len(preview_cookie) == 0
@@ -110,7 +110,7 @@ class TestHintBar:
             saved_pos,
         )
         page_as_superuser.goto(f"{base_url}/en/")
-        page_as_superuser.wait_for_load_state("networkidle")
+        page_as_superuser.wait_for_load_state("domcontentloaded")
         bar = page_as_superuser.locator(".lt-hint")
         expect(bar).to_be_visible()
         box = bar.bounding_box()
@@ -139,6 +139,6 @@ class TestHintBar:
         # Enter preview mode
         preview_btn = page_as_superuser.locator('.lt-hint__action[data-mode="preview"]')
         preview_btn.click()
-        page_as_superuser.wait_for_load_state("networkidle")
+        page_as_superuser.wait_for_load_state("domcontentloaded")
         tip_after = page_as_superuser.locator(".lt-hint__tip")
         expect(tip_after).to_have_class(re.compile(r"lt-hint__tip--visible"))

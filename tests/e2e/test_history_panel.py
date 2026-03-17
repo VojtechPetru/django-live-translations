@@ -38,7 +38,7 @@ class TestHistoryPanel:
         # creates a DB override + history, defeating the "empty" expectation.
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en", "cs"])
         page_as_superuser_for_backend.reload()
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
         page_as_superuser_for_backend.locator(".lt-btn--history").click()
@@ -59,7 +59,7 @@ class TestHistoryPanel:
             {"en": True},
         )
         page_as_superuser_for_backend.reload()
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
         page_as_superuser_for_backend.locator(".lt-btn--history").click()
@@ -87,7 +87,7 @@ class TestHistoryPanel:
             {"en": True},
         )
         page_as_superuser_for_backend.reload()
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
         page_as_superuser_for_backend.locator(".lt-btn--history").click()
@@ -112,7 +112,7 @@ class TestHistoryPanel:
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
         page_as_superuser_for_backend.reload()
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
         page_as_superuser_for_backend.locator(".lt-btn--history").click()
@@ -138,7 +138,7 @@ class TestHistoryPanel:
             {"en": True},
         )
         page_as_superuser_for_backend.reload()
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
         page_as_superuser_for_backend.locator(".lt-btn--history").click()
@@ -166,7 +166,7 @@ class TestHistoryPanel:
             {"en": False},
         )
         page_as_superuser_for_backend.reload()
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
         page_as_superuser_for_backend.locator(".lt-btn--history").click()
@@ -194,7 +194,7 @@ class TestHistoryPanel:
             {"en": True},
         )
         page_as_superuser_for_backend.reload()
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
         page_as_superuser_for_backend.locator(".lt-btn--history").click()
@@ -226,7 +226,7 @@ class TestHistoryPanel:
             {"en": True},
         )
         page_as_superuser_for_backend.reload()
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
         page_as_superuser_for_backend.locator(".lt-btn--history").click()
@@ -257,7 +257,7 @@ class TestHistoryPanel:
             {"en": True},
         )
         page_as_superuser_for_backend.reload()
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
         page_as_superuser_for_backend.locator(".lt-btn--history").click()
@@ -287,7 +287,7 @@ class TestHistoryPanel:
             {"en": True},
         )
         page_as_superuser_for_backend.reload()
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
         page_as_superuser_for_backend.locator(".lt-btn--history").click()
@@ -310,7 +310,7 @@ class TestHistoryPanel:
             {"en": True},
         )
         page_as_superuser_for_backend.reload()
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
         page_as_superuser_for_backend.locator(".lt-btn--history").click()
@@ -333,7 +333,7 @@ class TestHistoryPanel:
             {"en": True, "cs": True},
         )
         page_as_superuser_for_backend.reload()
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
         page_as_superuser_for_backend.locator(".lt-btn--history").click()
@@ -365,7 +365,7 @@ class TestHistoryPanel:
             {"cs": True},
         )
         page_as_superuser_for_backend.reload()
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
         page_as_superuser_for_backend.locator(".lt-btn--history").click()
@@ -398,7 +398,7 @@ class TestHistoryPanel:
             {"en": False},
         )
         page_as_superuser_for_backend.reload()
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
         page_as_superuser_for_backend.locator(".lt-btn--history").click()

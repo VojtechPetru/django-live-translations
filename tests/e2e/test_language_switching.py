@@ -34,7 +34,7 @@ class TestLanguageSwitching:
         # Ensure PO defaults are clean
         api_restore_po_default(page_as_superuser, base_url, "demo.title", ["en", "cs"])
         page_as_superuser.reload()
-        page_as_superuser.wait_for_load_state("networkidle")
+        page_as_superuser.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
         cs_tab = page_as_superuser.locator('.lt-editor__tab[data-lang="cs"]')
@@ -92,7 +92,7 @@ class TestLanguageSwitching:
             {"en": False},
         )
         page_as_superuser_for_backend.reload()
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
         en_tab = page_as_superuser_for_backend.locator('.lt-editor__tab[data-lang="en"]')
@@ -111,7 +111,7 @@ class TestLanguageSwitching:
             page_as_superuser_for_backend, base_url_for_backend, "demo.title", {"en": "For Delete Mark"}, {"en": True}
         )
         page_as_superuser_for_backend.reload()
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
         delete_btn = page_as_superuser_for_backend.locator(".lt-btn--delete-override")
@@ -127,7 +127,7 @@ class TestLanguageSwitching:
         # Ensure PO defaults are clean before checking
         api_restore_po_default(page_as_superuser, base_url, "demo.title", ["en", "cs"])
         page_as_superuser.goto(f"{base_url}/cs/")
-        page_as_superuser.wait_for_load_state("networkidle")
+        page_as_superuser.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
         cs_tab = page_as_superuser.locator('.lt-editor__tab[data-lang="cs"]')
@@ -137,4 +137,4 @@ class TestLanguageSwitching:
         # Navigate back to EN for other tests
         close_modal(page_as_superuser)
         page_as_superuser.goto(f"{base_url}/en/")
-        page_as_superuser.wait_for_load_state("networkidle")
+        page_as_superuser.wait_for_load_state("domcontentloaded")

@@ -2,6 +2,7 @@
 
 import json
 import re
+from typing import Any
 
 from playwright.sync_api import Page, expect
 
@@ -45,6 +46,28 @@ def login(page: Page, base_url: str, username: str, password: str) -> None:
     assert "/login/" not in page.url, f"Login failed for user '{username}' — still on login page: {page.url}"
 
 
+_AUTH_COOKIES: dict[tuple[str, str], Any] = {}
+
+
+def fast_login(page: Page, base_url: str, username: str, password: str) -> None:
+    """Set auth cookies, performing the actual login only once per (server, user) pair.
+
+    On the first call for a given (base_url, username), logs in via a temporary
+    browser context and caches the resulting cookies.  Subsequent calls just
+    inject the cached cookies — no page navigation or form submission required.
+    """
+    key = (base_url, username)
+    if key not in _AUTH_COOKIES:
+        browser = page.context.browser
+        assert browser is not None
+        ctx = browser.new_context()
+        tmp = ctx.new_page()
+        login(tmp, base_url, username, password)
+        _AUTH_COOKIES[key] = ctx.cookies()
+        ctx.close()
+    page.context.add_cookies(_AUTH_COOKIES[key])
+
+
 # ---------------------------------------------------------------------------
 # Edit mode
 # ---------------------------------------------------------------------------
@@ -54,14 +77,14 @@ def enable_preview(page: Page, base_url: str) -> None:
     """Enable preview mode via cookie and reload."""
     page.context.add_cookies([{"name": "lt_preview", "value": "1", "url": base_url}])
     page.reload()
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
 
 
 def disable_preview(page: Page, base_url: str) -> None:
     """Disable preview mode via cookie and reload."""
     page.context.add_cookies([{"name": "lt_preview", "value": "", "url": base_url}])
     page.reload()
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
 
 
 def activate_edit_mode(page: Page) -> None:

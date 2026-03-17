@@ -191,7 +191,7 @@ class TestBulkActivate:
         toast = page_as_superuser_for_backend.locator(".lt-toast--success")
         expect(toast).to_be_visible(timeout=5000)
         expect(toast).to_contain_text("activated")
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         # After reload, the span should no longer have amber outline
         span_after = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span_after).not_to_have_class(re.compile(r"lt-preview"))
@@ -219,7 +219,7 @@ class TestBulkActivate:
         page_as_superuser_for_backend.locator(".lt-action-bar__confirm").click()
         toast = page_as_superuser_for_backend.locator(".lt-toast--success")
         expect(toast).to_be_visible(timeout=5000)
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         # EN should be active now (text shows override)
         span_en = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span_en).to_have_text("EN Activated")

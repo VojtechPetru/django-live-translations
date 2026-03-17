@@ -61,7 +61,7 @@ class TestInPlaceDomUpdates:
             {"en": True},
         )
         page_as_superuser_for_backend.reload()
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span).to_have_text("Custom Override")
         open_modal(page_as_superuser_for_backend, "demo.title")

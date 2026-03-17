@@ -30,7 +30,7 @@ class TestDeleteOverride:
         # delete button visible (the exact opposite of what this test checks).
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en", "cs"])
         page_as_superuser_for_backend.reload()
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
         delete_btn = page_as_superuser_for_backend.locator(".lt-btn--delete-override")
@@ -47,7 +47,7 @@ class TestDeleteOverride:
             {"en": True},
         )
         page_as_superuser_for_backend.reload()
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
         delete_btn = page_as_superuser_for_backend.locator(".lt-btn--delete-override")
@@ -66,7 +66,7 @@ class TestDeleteOverride:
             {"en": True},
         )
         page_as_superuser_for_backend.reload()
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
         delete_btn = page_as_superuser_for_backend.locator(".lt-btn--delete-override")
@@ -88,7 +88,7 @@ class TestDeleteOverride:
             {"en": True},
         )
         page_as_superuser_for_backend.reload()
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
         delete_btn = page_as_superuser_for_backend.locator(".lt-btn--delete-override")
@@ -112,7 +112,7 @@ class TestDeleteOverride:
             {"en": True},
         )
         page_as_superuser_for_backend.reload()
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
         delete_btn = page_as_superuser_for_backend.locator(".lt-btn--delete-override")
@@ -134,7 +134,7 @@ class TestDeleteOverride:
             {"en": True},
         )
         page_as_superuser_for_backend.reload()
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
         delete_btn = page_as_superuser_for_backend.locator(".lt-btn--delete-override")
@@ -157,7 +157,7 @@ class TestDeleteOverride:
             {"en": True},
         )
         page_as_superuser_for_backend.reload()
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
         delete_btn = page_as_superuser_for_backend.locator(".lt-btn--delete-override")
@@ -183,7 +183,7 @@ class TestDeleteOverride:
             {"en": True, "cs": True},
         )
         page_as_superuser_for_backend.reload()
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
 
@@ -223,7 +223,7 @@ class TestDeleteOverride:
             {"en": True, "cs": True},
         )
         page_as_superuser_for_backend.reload()
-        page_as_superuser_for_backend.wait_for_load_state("networkidle")
+        page_as_superuser_for_backend.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
 

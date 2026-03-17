@@ -13,7 +13,7 @@ class TestPersistence:
         # Simulate: set the key manually and reload, edit mode should auto-activate
         page_as_superuser.evaluate("() => sessionStorage.setItem('lt_edit_mode', '1')")
         page_as_superuser.goto(f"{base_url}/en/")
-        page_as_superuser.wait_for_load_state("networkidle")
+        page_as_superuser.wait_for_load_state("domcontentloaded")
         expect(page_as_superuser.locator("body")).to_have_class(re.compile(r"lt-edit-mode"), timeout=3000)
 
     def test_edit_mode_not_persisted_on_regular_toggle(self, page_as_superuser: Page) -> None:
@@ -27,7 +27,7 @@ class TestPersistence:
         cookies = page_as_superuser.context.cookies()
         assert any(c["name"] == "lt_preview" and c["value"] == "1" for c in cookies)
         page_as_superuser.reload()
-        page_as_superuser.wait_for_load_state("networkidle")
+        page_as_superuser.wait_for_load_state("domcontentloaded")
         cookies_after = page_as_superuser.context.cookies()
         assert any(c["name"] == "lt_preview" and c["value"] == "1" for c in cookies_after)
         preview_flag = page_as_superuser.evaluate("() => window.__LT_CONFIG__?.preview")
@@ -40,7 +40,7 @@ class TestPersistence:
         # Toggle preview off via keyboard (triggers page reload)
         with page_as_superuser.expect_navigation():
             page_as_superuser.keyboard.press("Control+Shift+KeyP")
-        page_as_superuser.wait_for_load_state("networkidle")
+        page_as_superuser.wait_for_load_state("domcontentloaded")
         cookies_after = page_as_superuser.context.cookies()
         assert not any(c["name"] == "lt_preview" and c["value"] == "1" for c in cookies_after)
 
@@ -60,7 +60,7 @@ class TestPersistence:
         assert "x" in pos
         assert "y" in pos
         page_as_superuser.goto(f"{base_url}/en/")
-        page_as_superuser.wait_for_load_state("networkidle")
+        page_as_superuser.wait_for_load_state("domcontentloaded")
         bar_after = page_as_superuser.locator(".lt-hint")
         expect(bar_after).to_be_visible()
         box_after = bar_after.bounding_box()

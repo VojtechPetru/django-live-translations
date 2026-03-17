@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import pytest
-from helpers import PO_DEFAULTS, STAFF_USER, SUPERUSER, api_delete, login
+from helpers import PO_DEFAULTS, STAFF_USER, SUPERUSER, api_delete, fast_login
 from playwright.sync_api import Page
 
 # All known msgids used across tests — derived from PO_DEFAULTS
@@ -243,9 +243,9 @@ def base_url_for_backend(backend_id: str, _po_server: str, _db_server: str) -> s
 @pytest.fixture
 def page_as_superuser(page: Page, base_url: str) -> Page:
     """Logged-in superuser on the home page."""
-    login(page, base_url, *SUPERUSER)
+    fast_login(page, base_url, *SUPERUSER)
     page.goto(f"{base_url}/en/")
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
     return page
 
 
@@ -259,9 +259,9 @@ def page_as_superuser_for_backend(
     each test to ensure full isolation — previous test failures or incomplete
     cleanup can no longer cascade.
     """
-    login(page, base_url_for_backend, *SUPERUSER)
+    fast_login(page, base_url_for_backend, *SUPERUSER)
     page.goto(f"{base_url_for_backend}/en/")
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
 
     if backend_id == "db":
         # 1. Delete all known overrides via API (runs inside the server
@@ -289,7 +289,9 @@ def page_as_superuser_for_backend(
             capture_output=True,
         )
 
-        # 3. Reload so the page reflects the clean state.
+        # 3. Reload so the page reflects the clean state.  Use networkidle
+        #    here to ensure the subprocess's SQLite WAL writes are visible
+        #    to the Django server's connection before proceeding.
         page.reload()
         page.wait_for_load_state("networkidle")
 
@@ -299,9 +301,9 @@ def page_as_superuser_for_backend(
 @pytest.fixture
 def page_as_regular_user(page: Page, base_url: str) -> Page:
     """Logged-in staff (non-superuser) on the home page."""
-    login(page, base_url, *STAFF_USER)
+    fast_login(page, base_url, *STAFF_USER)
     page.goto(f"{base_url}/en/")
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
     return page
 
 
@@ -309,5 +311,5 @@ def page_as_regular_user(page: Page, base_url: str) -> Page:
 def page_anonymous(page: Page, base_url: str) -> Page:
     """Unauthenticated page on the home page."""
     page.goto(f"{base_url}/en/")
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
     return page
