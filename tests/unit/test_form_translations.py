@@ -91,37 +91,37 @@ class TestEncodeZwc:
 
 class TestStringRegistry:
     def test_register_returns_incrementing_ids(self) -> None:
-        id0 = register_string("hello", "")
-        id1 = register_string("world", "")
+        id0 = register_string(MsgKey("hello", ""))
+        id1 = register_string(MsgKey("world", ""))
         assert id0 == 0
         assert id1 == 1
 
     def test_deduplication_same_key(self) -> None:
-        id0 = register_string("hello", "ctx")
-        id1 = register_string("hello", "ctx")
+        id0 = register_string(MsgKey("hello", "ctx"))
+        id1 = register_string(MsgKey("hello", "ctx"))
         assert id0 == id1
 
     def test_different_context_different_id(self) -> None:
-        id0 = register_string("hello", "")
-        id1 = register_string("hello", "ctx")
+        id0 = register_string(MsgKey("hello", ""))
+        id1 = register_string(MsgKey("hello", "ctx"))
         assert id0 != id1
 
     def test_get_registry(self) -> None:
         from live_translations.strings import get_string_registry
 
-        register_string("a", "")
-        register_string("b", "ctx")
+        register_string(MsgKey("a", ""))
+        register_string(MsgKey("b", "ctx"))
         registry = get_string_registry()
         assert registry == [MsgKey("a", ""), MsgKey("b", "ctx")]
 
     def test_reset_clears_registry(self) -> None:
         from live_translations.strings import get_string_registry
 
-        register_string("a", "")
+        register_string(MsgKey("a", ""))
         reset_string_registry()
         assert get_string_registry() == []
         # IDs restart from 0
-        assert register_string("a", "") == 0
+        assert register_string(MsgKey("a", "")) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +141,7 @@ class TestCapfirstPreservesMarker:
         try:
             from live_translations.strings import _append_marker
 
-            text = _append_marker("full name", "form.name.label", "")
+            text = _append_marker("full name", MsgKey("form.name.label", ""))
             result = django.utils.text.capfirst(text)
             assert result.startswith("Full name")
             assert ZWC_BOUNDARY in result
@@ -182,3 +182,56 @@ class TestFormattingPreservesMarker:
         template = "Hello {name}" + marker
         result = template.format(name="World")
         assert result == "Hello World" + marker
+
+
+# ---------------------------------------------------------------------------
+# 6. encode_zwc overflow does not break the page
+# ---------------------------------------------------------------------------
+
+
+class TestEncodeZwcOverflowIsSafe:
+    """When the string registry exceeds 65535 entries, encode_zwc raises ValueError.
+
+    The patched gettext catches this and returns the original translation
+    without a marker. The page renders normally -- the string just won't
+    be editable via the widget.
+    """
+
+    def test_patched_gettext_returns_original_on_overflow(self) -> None:
+        import unittest.mock
+
+        from live_translations.strings import _append_marker
+
+        token = lt_active.set(True)
+        try:
+            # Simulate overflow by making encode_zwc raise ValueError
+            with unittest.mock.patch(
+                "live_translations.strings.encode_zwc",
+                side_effect=ValueError("StringId out of range"),
+            ):
+                from live_translations.strings import _append_marker
+
+                # _append_marker is called inside the try/except in patched gettext.
+                # Call it directly to verify it raises, which the patched gettext catches.
+                with pytest.raises(ValueError, match="out of range"):
+                    _append_marker("translated text", MsgKey("msgid", ""))
+        finally:
+            lt_active.reset(token)
+
+    def test_patched_gettext_gracefully_handles_overflow(self) -> None:
+        """Full integration: patched gettext returns unmarked string on overflow."""
+        import unittest.mock
+
+        import django.utils.translation
+
+        token = lt_active.set(True)
+        try:
+            with unittest.mock.patch(
+                "live_translations.strings.encode_zwc",
+                side_effect=ValueError("StringId out of range"),
+            ):
+                result = django.utils.translation.gettext("hello")
+                # Should return a plain string without ZWC markers
+                assert ZWC_BOUNDARY not in result
+        finally:
+            lt_active.reset(token)

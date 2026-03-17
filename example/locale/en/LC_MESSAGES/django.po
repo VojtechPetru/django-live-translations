@@ -32,7 +32,7 @@ msgstr "About this page"
 msgid "about.description"
 msgstr ""
 "This page demonstrates the live translations widget. Log in as a superuser "
-"and press Shift+T to activate edit mode."
+"and press Ctrl+Shift+E to activate edit mode."
 
 msgid "how_it_works.heading"
 msgstr "How it works"
@@ -73,7 +73,8 @@ msgid "attrs.alt_text"
 msgstr "A placeholder image demonstrating translated alt text"
 
 msgid "attrs.alt_hint"
-msgstr "This image has a translated alt attribute — inspect it in your browser."
+msgstr ""
+"This image has a translated alt attribute — inspect it in your browser."
 
 msgid "asvar.heading"
 msgstr "Variable assignment"

@@ -13,3 +13,5 @@ example/db.sqlite3
 .opencode/
 .superset/
 .claude/
+site/
+.coverage

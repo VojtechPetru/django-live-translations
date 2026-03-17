@@ -24,8 +24,11 @@ class TestDeleteOverride:
     def test_delete_button_hidden_when_no_override(
         self, page_as_superuser_for_backend: Page, backend_id: str, base_url_for_backend: str
     ) -> None:
+        # Fixture already cleaned DB overrides; just ensure none exist via API.
+        # NOTE: do NOT call api_restore_po_default here — on the DB backend it
+        # creates a new TranslationEntry, making has_override=True and the
+        # delete button visible (the exact opposite of what this test checks).
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en", "cs"])
-        api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en", "cs"])
         page_as_superuser_for_backend.reload()
         page_as_superuser_for_backend.wait_for_load_state("networkidle")
         open_modal(page_as_superuser_for_backend, "demo.title")

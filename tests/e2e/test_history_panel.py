@@ -33,8 +33,10 @@ class TestHistoryPanel:
     ) -> None:
         if backend_id == "po":
             pytest.skip(f"Skipping on {backend_id} backend")
+        # Fixture already cleaned all overrides + history.  Only call
+        # api_delete (NOT api_restore_po_default) to be safe — the latter
+        # creates a DB override + history, defeating the "empty" expectation.
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en", "cs"])
-        api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en", "cs"])
         page_as_superuser_for_backend.reload()
         page_as_superuser_for_backend.wait_for_load_state("networkidle")
         open_modal(page_as_superuser_for_backend, "demo.title")
@@ -370,7 +372,7 @@ class TestHistoryPanel:
         expect(page_as_superuser_for_backend.locator(".lt-history__timeline")).to_be_visible(timeout=5000)
         all_entries_before = page_as_superuser_for_backend.locator(".lt-history__entry")
         total_count = all_entries_before.count()
-        cs_pill = page_as_superuser_for_backend.locator(".lt-history__filter-pill").filter(has_text="cs")
+        cs_pill = page_as_superuser_for_backend.locator(".lt-history__filter-pill").filter(has_text="Czech")
         cs_pill.click()
         expect(cs_pill).to_have_class(re.compile(r"--active"))
         visible_entries = page_as_superuser_for_backend.locator(".lt-history__entry:visible")

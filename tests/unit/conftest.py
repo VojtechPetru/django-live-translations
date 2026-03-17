@@ -8,6 +8,9 @@ import django.conf
 import django.test
 import pytest
 
+if t.TYPE_CHECKING:
+    from django.contrib.auth.base_user import AbstractBaseUser
+
 from live_translations import conf
 
 
@@ -17,8 +20,24 @@ def pytest_configure() -> None:
         INSTALLED_APPS=[
             "django.contrib.contenttypes",
             "django.contrib.auth",
+            "django.contrib.admin",
+            "django.contrib.sessions",
+            "django.contrib.messages",
+            "django.contrib.staticfiles",
             "live_translations",
         ],
+        TEMPLATES=[
+            {
+                "BACKEND": "django.template.backends.django.DjangoTemplates",
+                "OPTIONS": {
+                    "context_processors": [
+                        "django.contrib.auth.context_processors.auth",
+                        "django.contrib.messages.context_processors.messages",
+                    ],
+                },
+            },
+        ],
+        STATIC_URL="/static/",
         USE_TZ=True,
     )
     django.setup()
@@ -53,14 +72,34 @@ def make_db_backend():
 
 @pytest.fixture
 def make_request():
-    def _make(method: t.Literal["get", "post"], path: str, *, data: dict | None = None, has_permission: bool = True):
+    def _make(
+        method: t.Literal["get", "post"],
+        path: str,
+        *,
+        data: dict | None = None,
+        raw_body: bytes | None = None,
+        has_permission: bool = True,
+        anonymous: bool = False,
+        user: "AbstractBaseUser | None" = None,
+    ):
         factory = django.test.RequestFactory(enforce_csrf_checks=False)
         if method == "get":
             request = factory.get(path, data or {})
+        elif raw_body is not None:
+            request = factory.post(path, data=raw_body, content_type="application/json")
+            request._dont_enforce_csrf_checks = True  # type: ignore[missing-attribute]
         else:
             request = factory.post(path, data=json.dumps(data or {}), content_type="application/json")
             request._dont_enforce_csrf_checks = True  # type: ignore[missing-attribute]
-        request.user = unittest.mock.MagicMock(is_authenticated=has_permission, is_superuser=has_permission)
+
+        if anonymous:
+            from django.contrib.auth.models import AnonymousUser
+
+            request.user = AnonymousUser()
+        elif user is not None:
+            request.user = user  # type: ignore[assignment]
+        else:
+            request.user = unittest.mock.MagicMock(is_authenticated=has_permission, is_superuser=has_permission)
         return request
 
     return _make
