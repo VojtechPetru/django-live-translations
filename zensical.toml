@@ -27,6 +27,7 @@ features = [
   "content.action.edit",
   "content.action.view",
   "content.code.copy",
+  "content.tabs.link",
 ]
 
 [project.theme.palette]
@@ -38,5 +39,9 @@ accent = "indigo"
 [project.markdown_extensions.md_in_html]
 [project.markdown_extensions.pymdownx.highlight]
 [project.markdown_extensions.pymdownx.superfences]
+[project.markdown_extensions.pymdownx.tabbed]
+alternate_style = true
+
+[project.markdown_extensions.pymdownx.blocks.caption]
 [project.markdown_extensions.admonition]
 [project.markdown_extensions.pymdownx.details]

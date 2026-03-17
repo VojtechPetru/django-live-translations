@@ -5,7 +5,10 @@
 django-live-translations lets authorized users edit translations directly on any page of your Django application. Toggle edit mode, click any translatable string, and save changes that take effect immediately - no deployment, no restarts, no context switching to `.po` file editors.
 
 <!-- TODO: replace with actual screenshot -->
-![Edit mode overview](assets/screenshots/edit-mode.png)
+![Edit mode overview](assets/screenshots/edit-mode.png){ loading=lazy }
+/// caption
+Edit mode overview
+///
 
 ## Features
 
@@ -21,9 +24,23 @@ django-live-translations lets authorized users edit translations directly on any
 
 ## Quick start
 
-```bash
-pip install django-live-translations
-```
+=== "uv"
+
+    ```bash
+    uv add django-live-translations
+    ```
+
+=== "poetry"
+
+    ```bash
+    poetry add django-live-translations
+    ```
+
+=== "pip"
+
+    ```bash
+    pip install django-live-translations
+    ```
 
 ```python
 # settings.py

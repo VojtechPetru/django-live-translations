@@ -4,15 +4,23 @@
 
 Install the package from PyPI:
 
-```bash
-pip install django-live-translations
-```
+=== "uv"
 
-Or with `uv`:
+    ```bash
+    uv add django-live-translations
+    ```
 
-```bash
-uv add django-live-translations
-```
+=== "poetry"
+
+    ```bash
+    poetry add django-live-translations
+    ```
+
+=== "pip"
+
+    ```bash
+    pip install django-live-translations
+    ```
 
 ## Setup
 
@@ -78,7 +86,10 @@ See the [Configuration](configuration.md) page for all available options.
 4. Translatable strings will be highlighted with blue dashed outlines
 
 <!-- TODO: replace with actual screenshot -->
-![Edit mode activated](assets/screenshots/getting-started.png)
+![Edit mode activated](assets/screenshots/getting-started.png){ loading=lazy }
+/// caption
+Edit mode activated with translatable strings highlighted
+///
 
 Click any highlighted string to open the translation editor.
 
