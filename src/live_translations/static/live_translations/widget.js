@@ -1372,16 +1372,12 @@
       activeFlags[lang] = _editedActiveFlags[lang] !== undefined ? _editedActiveFlags[lang] : ACTIVE_BY_DEFAULT;
     }
 
-    // Build parallel work: save non-deleted languages + delete marked ones
-    const work = [];
-    if (Object.keys(translations).length > 0) {
-      work.push(api.saveTranslations(msgid, context, translations, activeFlags));
-    }
-    if (langsToDelete.length > 0) {
-      work.push(api.deleteTranslation(msgid, context, langsToDelete));
-    }
+    // Run save and delete sequentially — SQLite cannot handle concurrent
+    // write transactions from parallel requests ("database is locked").
+    var hasSave = Object.keys(translations).length > 0;
+    var hasDelete = langsToDelete.length > 0;
 
-    if (work.length === 0) {
+    if (!hasSave && !hasDelete) {
       saveBtn.disabled = false;
       saveBtn.textContent = "Save";
       closeModal();
@@ -1389,11 +1385,14 @@
     }
 
     try {
-      const results = await Promise.all(work);
-      // Use display from the last response (most current state)
-      let display = null;
-      for (let r = 0; r < results.length; r++) {
-        if (results[r] && results[r].display) display = results[r].display;
+      var display = null;
+      if (hasSave) {
+        var saveResult = await api.saveTranslations(msgid, context, translations, activeFlags);
+        if (saveResult && saveResult.display) display = saveResult.display;
+      }
+      if (hasDelete) {
+        var deleteResult = await api.deleteTranslation(msgid, context, langsToDelete);
+        if (deleteResult && deleteResult.display) display = deleteResult.display;
       }
       if (display) {
         _updateDomInPlace(msgid, context, display.text, display.is_preview_entry);
@@ -1664,8 +1663,9 @@
         header.appendChild(sep1);
       }
 
-      const time = document.createElement("span");
+      const time = document.createElement("time");
       time.className = "lt-history__time";
+      time.setAttribute("datetime", entry.created_at);
       time.textContent = _formatTime(entry.created_at);
       time.title = new Date(entry.created_at).toLocaleString();
       header.appendChild(time);
@@ -2134,7 +2134,8 @@
     try {
       const data = await api.bulkActivate(msgids, lang);
       showToast(data.activated + " translation(s) activated", "success");
-      _reloadPage();
+      // Delay reload so the user (and tests) can see the success toast.
+      setTimeout(_reloadPage, 1500);
     } catch (err) {
       showToast("Bulk activate failed: " + err.message, "error");
       if (confirmBtn) confirmBtn.disabled = false;
@@ -2249,11 +2250,21 @@
         e.preventDefault();
         e.stopPropagation();
 
-        // Shift+click on preview elements toggles selection
-        if (e.shiftKey && PREVIEW && span.classList.contains("lt-preview")) {
-          _toggleSelected(span);
-          window.getSelection().removeAllRanges();
-          return;
+        // Shift+click in preview mode: if the lt-t lives inside an
+        // attribute-translatable element that has a preview marker, select
+        // the *parent* attribute element (not the inner text span).
+        if (e.shiftKey && PREVIEW) {
+          var parentAttr = span.closest("[data-lt-attrs]");
+          if (parentAttr && parentAttr.classList.contains("lt-preview")) {
+            _toggleSelected(parentAttr);
+            window.getSelection().removeAllRanges();
+            return;
+          }
+          if (span.classList.contains("lt-preview")) {
+            _toggleSelected(span);
+            window.getSelection().removeAllRanges();
+            return;
+          }
         }
 
         openModal(span);

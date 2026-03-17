@@ -13,8 +13,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import pytest
-from helpers import STAFF_USER, SUPERUSER, login
+from helpers import PO_DEFAULTS, STAFF_USER, SUPERUSER, api_delete, login
 from playwright.sync_api import Page
+
+# All known msgids used across tests — derived from PO_DEFAULTS
+ALL_MSGIDS = sorted({msgid for msgid, _ in PO_DEFAULTS})
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -191,20 +194,25 @@ def _po_server(locale_dir: Path, session_tmp_path: Path) -> str:
 
 
 @pytest.fixture(scope="session")
-def _db_server(session_tmp_path: Path) -> str:
+def _db_env(session_tmp_path: Path) -> dict[str, str]:
+    """Environment variables for the DB backend Django process."""
+    return {
+        **os.environ,
+        "DJANGO_SETTINGS_MODULE": DB_SETTINGS,
+        "LT_E2E_LOCALE_DIR": str(session_tmp_path / "locale_db"),
+        "LT_E2E_DB_PATH": str(session_tmp_path / "db_test.sqlite3"),
+        "PYTHONPATH": str(PROJECT_ROOT / "src"),
+    }
+
+
+@pytest.fixture(scope="session")
+def _db_server(_db_env: dict[str, str], session_tmp_path: Path) -> str:
     """Start a Django dev server with Database backend. Returns base URL."""
     port = 8112
     locale_dest = session_tmp_path / "locale_db"
     shutil.copytree(SOURCE_LOCALE_DIR, locale_dest)
-    env = {
-        **os.environ,
-        "DJANGO_SETTINGS_MODULE": DB_SETTINGS,
-        "LT_E2E_LOCALE_DIR": str(locale_dest),
-        "LT_E2E_DB_PATH": str(session_tmp_path / "db_test.sqlite3"),
-        "PYTHONPATH": str(PROJECT_ROOT / "src"),
-    }
-    _setup_db(env)
-    proc = _start_server(env, port, session_tmp_path)
+    _setup_db(_db_env)
+    proc = _start_server(_db_env, port, session_tmp_path)
     yield f"http://127.0.0.1:{port}"
     proc.send_signal(signal.SIGTERM)
     proc.wait(timeout=5)
@@ -242,11 +250,49 @@ def page_as_superuser(page: Page, base_url: str) -> Page:
 
 
 @pytest.fixture
-def page_as_superuser_for_backend(page: Page, base_url_for_backend: str) -> Page:
-    """Logged-in superuser for parameterized backend tests."""
+def page_as_superuser_for_backend(
+    page: Page, backend_id: str, base_url_for_backend: str, _db_env: dict[str, str]
+) -> Page:
+    """Logged-in superuser for parameterized backend tests.
+
+    For the DB backend, resets all translation overrides and history before
+    each test to ensure full isolation — previous test failures or incomplete
+    cleanup can no longer cascade.
+    """
     login(page, base_url_for_backend, *SUPERUSER)
     page.goto(f"{base_url_for_backend}/en/")
     page.wait_for_load_state("networkidle")
+
+    if backend_id == "db":
+        # 1. Delete all known overrides via API (runs inside the server
+        #    process, correctly bumps the catalog version so the next
+        #    request re-injects from a now-empty DB).
+        for msgid in ALL_MSGIDS:
+            api_delete(page, base_url_for_backend, msgid, ["en", "cs"])
+
+        # 2. Wipe TranslationHistory via manage.py shell — uses the Django
+        #    ORM in a separate process which respects SQLite WAL-mode
+        #    visibility.  The API delete calls above create DELETE history
+        #    entries that would pollute tests checking for empty or specific
+        #    history state.
+        subprocess.run(
+            [
+                sys.executable,
+                str(MANAGE_PY),
+                "shell",
+                "-c",
+                "from live_translations.models import TranslationHistory; TranslationHistory.objects.all().delete()",
+            ],
+            cwd=str(EXAMPLE_DIR),
+            env=_db_env,
+            check=True,
+            capture_output=True,
+        )
+
+        # 3. Reload so the page reflects the clean state.
+        page.reload()
+        page.wait_for_load_state("networkidle")
+
     return page
 
 

@@ -1,5 +1,5 @@
 import pytest
-from helpers import api_delete, api_restore_po_default, api_save, close_modal, open_modal, wait_for_fields_loaded
+from helpers import api_delete, api_restore_po_default, api_save, open_modal, wait_for_fields_loaded
 from playwright.sync_api import Page, expect
 
 
@@ -278,8 +278,7 @@ class TestHistoryRestore:
         older_entry.locator(".lt-history__restore-btn").click()
         older_entry.locator(".lt-history__restore-activate").click()
         page_as_superuser_for_backend.wait_for_timeout(2000)
-        # Reopen modal and check history again
-        close_modal(page_as_superuser_for_backend)
+        # The restore action closes the dialog automatically, so just reload.
         page_as_superuser_for_backend.reload()
         page_as_superuser_for_backend.wait_for_load_state("networkidle")
         open_modal(page_as_superuser_for_backend, "demo.title")

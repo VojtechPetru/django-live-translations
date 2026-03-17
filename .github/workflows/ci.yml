@@ -21,6 +21,7 @@ jobs:
       - run: pytest tests/unit
 
   e2e-test:
+    needs: [lint, type-check, unit-test]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -31,21 +32,31 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e ".[e2e]"
+      - run: pip install -e ".[dev,e2e]"
       - run: playwright install --with-deps chromium
-      - run: pytest tests/e2e --backend=${{ matrix.backend }}
+      - run: pytest tests/e2e --backend=${{ matrix.backend }} --cov=live_translations --cov-branch -q
+      - run: mv .coverage .coverage.e2e-${{ matrix.backend }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-e2e-${{ matrix.backend }}
+          path: .coverage.e2e-${{ matrix.backend }}
 
   coverage:
+    needs: [e2e-test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e ".[dev,e2e]"
-      - run: playwright install --with-deps chromium
+      - run: pip install -e ".[dev]"
       - run: pytest tests/unit --cov=live_translations --cov-branch -q
-      - run: pytest tests/e2e --backend=both --cov=live_translations --cov-branch --cov-append -q
+      - run: mv .coverage .coverage.unit
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-e2e-*
+          merge-multiple: true
+      - run: coverage combine
       - run: coverage report --fail-under=90
       - run: coverage json -o coverage.json
       - uses: actions/upload-artifact@v4
