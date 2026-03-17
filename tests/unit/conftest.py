@@ -5,9 +5,11 @@ import unittest.mock
 
 import django
 import django.conf
-import django.contrib.auth.base_user
 import django.test
 import pytest
+
+if t.TYPE_CHECKING:
+    from django.contrib.auth.base_user import AbstractBaseUser
 
 from live_translations import conf
 
@@ -78,7 +80,7 @@ def make_request():
         raw_body: bytes | None = None,
         has_permission: bool = True,
         anonymous: bool = False,
-        user: "django.contrib.auth.base_user.AbstractBaseUser | None" = None,
+        user: "AbstractBaseUser | None" = None,
     ):
         factory = django.test.RequestFactory(enforce_csrf_checks=False)
         if method == "get":
