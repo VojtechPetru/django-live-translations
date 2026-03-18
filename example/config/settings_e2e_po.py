@@ -30,5 +30,6 @@ if _db_override:
 
 LIVE_TRANSLATIONS: "LiveTranslationsSettings" = {
     "BACKEND": "live_translations.backends.po.POFileBackend",
+    "LANGUAGES": ["en", "cs", "es"],
     **({"LOCALE_DIR": _locale_override} if _locale_override else {}),
 }

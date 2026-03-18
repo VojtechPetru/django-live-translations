@@ -37,5 +37,6 @@ CACHES = {
 
 LIVE_TRANSLATIONS: "LiveTranslationsSettings" = {
     "BACKEND": "live_translations.backends.db.DatabaseBackend",
+    "LANGUAGES": ["en", "cs", "es"],
     **({"LOCALE_DIR": _locale_override} if _locale_override else {}),
 }

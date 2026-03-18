@@ -18,6 +18,7 @@ Edit translations directly on any page of your Django application. Toggle edit m
 - **Inline editing** - click any translatable string to open a multi-language editor
 - **Live preview** - changes appear on the page instantly after saving
 - **Preview mode** - review inactive translations before making them live
+- **Draft language support** - prepare translations for unpublished languages before going live
 - **Edit history** - word-level diffs with one-click restore
 - **Bulk activation** - select and activate multiple pending translations at once
 - **Two storage backends** - PO files (default) or database with cache-based sync
@@ -115,7 +116,7 @@ The project enforces strict quality standards through pre-commit hooks and CI:
 - **Linting**: `ruff check`
 - **Type checking**: `pyrefly`
 - **Test coverage**: 90%+ required
-- **Test suite**: 380+ unit tests, 270+ Playwright e2e tests
+- **Test suite**: 440+ unit tests, 270+ Playwright e2e tests
 
 ### Pull requests
 

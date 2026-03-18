@@ -1083,6 +1083,78 @@ class TestEdgeCases:
         assert _get_pending(entry) == "Hi greeting"
 
 
+class TestEnsurePo:
+    """_ensure_po auto-creates .po files for missing languages (e.g. drafts)."""
+
+    def test_creates_po_file_when_missing(self, locale_dir: pathlib.Path, settings):
+        settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["de"]}
+        backend = POFileBackend(locale_dir=locale_dir, domain="django")
+
+        po = backend._ensure_po("de")
+
+        assert po is not None
+        po_path = locale_dir / "de" / "LC_MESSAGES" / "django.po"
+        assert po_path.exists()
+
+    def test_creates_parent_directories(self, tmp_path: pathlib.Path, settings):
+        locale_dir = tmp_path / "locale"
+        # Don't create it -- _ensure_po should handle it
+        settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["ja"]}
+        backend = POFileBackend(locale_dir=locale_dir, domain="django")
+
+        po = backend._ensure_po("ja")
+
+        assert po is not None
+        assert (locale_dir / "ja" / "LC_MESSAGES" / "django.po").exists()
+
+    def test_created_file_has_metadata(self, locale_dir: pathlib.Path, settings):
+        settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["ko"]}
+        backend = POFileBackend(locale_dir=locale_dir, domain="django")
+
+        po = backend._ensure_po("ko")
+
+        assert po.metadata.get("Language") == "ko"
+        assert "charset=UTF-8" in po.metadata.get("Content-Type", "")
+
+    def test_returns_existing_file(self, locale_dir: pathlib.Path, settings):
+        _make_po_file(locale_dir, "en", [_make_entry(msgid="hi", msgstr="Hi")])
+        settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en"]}
+        backend = POFileBackend(locale_dir=locale_dir, domain="django")
+
+        po = backend._ensure_po("en")
+
+        assert po.find("hi") is not None
+
+    def test_save_works_after_auto_create(self, locale_dir: pathlib.Path, settings):
+        settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["fr"], "LOCALE_DIR": str(locale_dir)}
+        backend = POFileBackend(locale_dir=locale_dir, domain="django")
+        key = MsgKey(msgid="greeting", context="")
+
+        with unittest.mock.patch("live_translations.backends.po.history"):
+            backend.save_translations(key, {"fr": "Bonjour"}, {"fr": True})
+
+        po = backend._load_po("fr")
+        entry = po.find("greeting")
+        assert entry is not None
+        assert entry.msgstr == "Bonjour"
+
+    def test_cache_invalidated_after_create(self, locale_dir: pathlib.Path, settings):
+        """Auto-created file is correctly loaded into cache (no stale entry)."""
+        settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["pt"]}
+        backend = POFileBackend(locale_dir=locale_dir, domain="django")
+
+        # Pre-populate cache with a fake stale entry
+        po_path = locale_dir / "pt" / "LC_MESSAGES" / "django.po"
+        backend._po_cache[po_path] = (0.0, polib.POFile())
+
+        po = backend._ensure_po("pt")
+
+        # Stale entry should be gone, fresh file loaded
+        assert po_path in backend._po_cache
+        assert backend._po_cache[po_path][0] > 0.0  # Real mtime, not our fake 0.0
+        assert po.metadata.get("Language") == "pt"
+
+
 class TestConstructor:
     def test_accepts_cache_alias(self, locale_dir: pathlib.Path):
         backend = POFileBackend(locale_dir=locale_dir, domain="django", cache_alias="translations")

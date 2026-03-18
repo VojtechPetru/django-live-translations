@@ -14,7 +14,7 @@ class TestLanguageSwitching:
         tabs_container = page_as_superuser.locator(".lt-editor__tabs")
         expect(tabs_container).to_be_visible()
         tabs = page_as_superuser.locator(".lt-editor__tab")
-        expect(tabs).to_have_count(2)
+        expect(tabs).to_have_count(3)
 
     def test_tabs_have_correct_language_codes(self, page_as_superuser: Page) -> None:
         open_modal(page_as_superuser, "demo.title")

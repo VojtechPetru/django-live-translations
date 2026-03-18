@@ -1275,4 +1275,107 @@
   display: inline-flex;
 }
 
+/* ── Language Switcher (in hint bar) ─────────────────── */
+
+.lt-hint__lang {
+  position: relative;
+}
+
+.lt-hint__lang-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: var(--lt-radius);
+  border: none;
+  background: rgba(255, 255, 255, 0.06);
+  font-family: var(--lt-font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  color: #a1a1aa;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  white-space: nowrap;
+}
+
+.lt-hint__lang-trigger:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #d4d4d8;
+}
+
+.lt-hint__lang-menu {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 160px;
+  padding: 4px;
+  background: #27272a;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--lt-radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  z-index: 1;
+}
+
+.lt-hint__lang-menu--open {
+  display: flex;
+  flex-direction: column;
+}
+
+.lt-hint__lang-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--lt-radius);
+  background: none;
+  font-family: var(--lt-font-sans);
+  font-size: 12px;
+  color: #a1a1aa;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.lt-hint__lang-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #e4e4e7;
+}
+
+.lt-hint__lang-item--active {
+  color: #93c5fd;
+  background: rgba(96, 165, 250, 0.1);
+}
+
+.lt-hint__lang-badge {
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+  line-height: 1.4;
+}
+
+/* ── Draft badge in editor tabs ──────────────────────── */
+
+.lt-editor__draft-badge {
+  margin-left: 4px;
+  padding: 1px 5px;
+  border-radius: 9999px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+  line-height: 1.3;
+}
+
 

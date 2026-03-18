@@ -7,7 +7,7 @@ import django.http
 import pytest
 
 from live_translations import conf, strings
-from live_translations.middleware import _ZWC_RE, LiveTranslationsMiddleware
+from live_translations.middleware import _DRAFT_LANG_ATTR, _DRAFT_LANG_COOKIE, _ZWC_RE, LiveTranslationsMiddleware
 from live_translations.types import MsgKey
 
 
@@ -41,12 +41,14 @@ def _mock_backend():
 def _mock_settings(
     *,
     languages: list[str] | None = None,
+    draft_languages: list[str] | None = None,
     active_by_default: bool = False,
     shortcut_edit: str = "ctrl+shift+e",
     shortcut_preview: str = "ctrl+shift+p",
 ) -> conf.LiveTranslationsConf:
     return conf.LiveTranslationsConf(
         languages=languages or ["en", "cs"],
+        draft_languages=draft_languages or [],
         translation_active_by_default=active_by_default,
         shortcut_edit=shortcut_edit,
         shortcut_preview=shortcut_preview,
@@ -64,12 +66,16 @@ def _patch_middleware_deps(
     backend = backend or _mock_backend()
     settings = settings or _mock_settings()
 
+    def _is_draft(lang: str) -> bool:
+        return lang in settings.draft_languages
+
     return unittest.mock.patch.multiple(
         "live_translations.middleware.conf",
         get_backend_instance=unittest.mock.MagicMock(return_value=backend),
         get_permission_checker=unittest.mock.MagicMock(return_value=lambda _req: permission),
         is_preview_request=unittest.mock.MagicMock(return_value=is_preview),
         get_settings=unittest.mock.MagicMock(return_value=settings),
+        is_draft_language=unittest.mock.MagicMock(side_effect=_is_draft),
     )
 
 
@@ -720,6 +726,66 @@ class TestLoadPreviewOverrides:
         assert result == {}
         backend.get_inactive_overrides.assert_not_called()
 
+    def test_explicit_language_overrides_get_language(self):
+        """When language kwarg is passed, get_language() is not used."""
+        backend = _mock_backend()
+        expected = {MsgKey("hello", ""): "Hola"}
+        backend.get_inactive_overrides.return_value = expected
+
+        with unittest.mock.patch("live_translations.middleware.conf.get_backend_instance", return_value=backend):
+            with unittest.mock.patch(
+                "live_translations.middleware.django.utils.translation.get_language", return_value="en"
+            ):
+                result = LiveTranslationsMiddleware._load_preview_overrides(language="ja")
+
+        assert result == expected
+        backend.get_inactive_overrides.assert_called_once_with("ja")
+
+
+class TestPreviewWithDraftLanguage:
+    """Preview mode combined with draft language cookie."""
+
+    def test_preview_loads_overrides_for_draft_language(self, make_request):
+        """When both preview and draft cookie are set, preview overrides use the draft language."""
+        backend = _mock_backend()
+        draft_overrides = {MsgKey("hello", ""): "Hola"}
+        backend.get_inactive_overrides.return_value = draft_overrides
+
+        inner_response = _html_response("<html><body>Hi</body></html>")
+        inner = unittest.mock.MagicMock(return_value=inner_response)
+        mw = LiveTranslationsMiddleware(inner)
+
+        settings = _mock_settings(languages=["en", "ja"], draft_languages=["ja"])
+        with _patch_middleware_deps(permission=True, is_preview=True, backend=backend, settings=settings):
+            request = make_request("get", "/page/")
+            request.COOKIES[_DRAFT_LANG_COOKIE] = "ja"
+            request.COOKIES["lt_preview"] = "1"
+            mw(request)
+
+        backend.get_inactive_overrides.assert_called_once_with("ja")
+
+    def test_admin_path_skips_draft_processing(self, make_request):
+        """Admin path early-returns before draft cookie is checked."""
+        inner_response = _html_response("<html><body>Admin</body></html>")
+        inner = unittest.mock.MagicMock(return_value=inner_response)
+        mw = LiveTranslationsMiddleware(inner)
+
+        settings = _mock_settings(languages=["en", "ja"], draft_languages=["ja"])
+        with (
+            _patch_middleware_deps(permission=True, settings=settings),
+            unittest.mock.patch.object(
+                LiveTranslationsMiddleware,
+                "_is_admin_path",
+                return_value=True,
+            ),
+        ):
+            request = make_request("get", "/admin/some-model/")
+            request.COOKIES[_DRAFT_LANG_COOKIE] = "ja"
+            response = mw(request)
+
+        assert response is inner_response
+        assert not hasattr(request, _DRAFT_LANG_ATTR)
+
 
 class TestCallUserContextvar:
     """Tests for lt_current_user contextvar set/reset in __call__."""
@@ -819,3 +885,193 @@ class TestZwcRegex:
     def test_no_match_without_boundaries(self):
         marker = "\u200b" * 16
         assert _ZWC_RE.search(marker) is None
+
+
+class TestDraftLanguageOverride:
+    """Draft language cookie detection and translation activation."""
+
+    def test_draft_cookie_stores_lang_on_request(self, make_request):
+        """_handle_request stores draft lang on request but does NOT activate yet."""
+        inner_response = _html_response("<html><body>Hi</body></html>")
+        inner = unittest.mock.MagicMock(return_value=inner_response)
+        mw = LiveTranslationsMiddleware(inner)
+
+        settings = _mock_settings(languages=["en", "cs", "ja"], draft_languages=["ja"])
+        with _patch_middleware_deps(permission=True, settings=settings):
+            request = make_request("get", "/page/")
+            request.COOKIES[_DRAFT_LANG_COOKIE] = "ja"
+            with unittest.mock.patch("live_translations.middleware.django.utils.translation.activate") as mock_activate:
+                mw(request)
+
+            # Activation must NOT happen in _handle_request (would break i18n_patterns)
+            mock_activate.assert_not_called()
+            # But draft lang is stored on the request for process_view
+            assert getattr(request, _DRAFT_LANG_ATTR) == "ja"
+
+    def test_process_view_activates_draft_language(self, make_request):
+        """process_view activates the draft language after URL resolution."""
+        mw = LiveTranslationsMiddleware(lambda r: _html_response())
+
+        request = make_request("get", "/page/")
+        setattr(request, _DRAFT_LANG_ATTR, "ja")
+
+        with unittest.mock.patch("live_translations.middleware.django.utils.translation.activate") as mock_activate:
+            result = mw.process_view(request, lambda r: _html_response(), (), {})
+
+        assert result is None
+        mock_activate.assert_called_once_with("ja")
+        assert request.LANGUAGE_CODE == "ja"
+
+    def test_process_view_noop_without_draft(self, make_request):
+        """process_view does nothing when no draft language is set."""
+        mw = LiveTranslationsMiddleware(lambda r: _html_response())
+
+        request = make_request("get", "/page/")
+
+        with unittest.mock.patch("live_translations.middleware.django.utils.translation.activate") as mock_activate:
+            result = mw.process_view(request, lambda r: _html_response(), (), {})
+
+        assert result is None
+        mock_activate.assert_not_called()
+
+    def test_draft_cookie_ignored_for_published_language(self, make_request):
+        inner_response = _html_response("<html><body>Hi</body></html>")
+        inner = unittest.mock.MagicMock(return_value=inner_response)
+        mw = LiveTranslationsMiddleware(inner)
+
+        settings = _mock_settings(languages=["en", "cs"], draft_languages=[])
+        with _patch_middleware_deps(permission=True, settings=settings):
+            request = make_request("get", "/page/")
+            request.COOKIES[_DRAFT_LANG_COOKIE] = "en"
+            mw(request)
+
+            assert not hasattr(request, _DRAFT_LANG_ATTR)
+
+    def test_draft_cookie_ignored_for_non_permitted_user(self, make_request):
+        inner_response = _html_response("<html><body>Hi</body></html>")
+        inner = unittest.mock.MagicMock(return_value=inner_response)
+        mw = LiveTranslationsMiddleware(inner)
+
+        settings = _mock_settings(languages=["en", "ja"], draft_languages=["ja"])
+        with _patch_middleware_deps(permission=False, settings=settings):
+            request = make_request("get", "/page/", has_permission=False)
+            request.COOKIES[_DRAFT_LANG_COOKIE] = "ja"
+            mw(request)
+
+            assert not hasattr(request, _DRAFT_LANG_ATTR)
+
+    def test_draft_cookie_cleared_for_non_permitted_user(self, make_request):
+        inner_response = _html_response("<html><body>Hi</body></html>")
+        inner = unittest.mock.MagicMock(return_value=inner_response)
+        mw = LiveTranslationsMiddleware(inner)
+
+        settings = _mock_settings(languages=["en", "ja"], draft_languages=["ja"])
+        with _patch_middleware_deps(permission=False, settings=settings):
+            request = make_request("get", "/page/", has_permission=False)
+            request.COOKIES[_DRAFT_LANG_COOKIE] = "ja"
+            response = mw(request)
+
+        # The middleware should schedule cookie deletion
+        assert _DRAFT_LANG_COOKIE in str(response.cookies)
+        assert response.cookies[_DRAFT_LANG_COOKIE]["max-age"] == 0
+
+    def test_empty_cookie_ignored(self, make_request):
+        inner_response = _html_response("<html><body>Hi</body></html>")
+        inner = unittest.mock.MagicMock(return_value=inner_response)
+        mw = LiveTranslationsMiddleware(inner)
+
+        settings = _mock_settings(languages=["en", "ja"], draft_languages=["ja"])
+        with _patch_middleware_deps(permission=True, settings=settings):
+            request = make_request("get", "/page/")
+            request.COOKIES[_DRAFT_LANG_COOKIE] = ""
+            with unittest.mock.patch("live_translations.middleware.django.utils.translation.activate") as mock_activate:
+                mw(request)
+
+            mock_activate.assert_not_called()
+
+    def test_unknown_code_ignored(self, make_request):
+        inner_response = _html_response("<html><body>Hi</body></html>")
+        inner = unittest.mock.MagicMock(return_value=inner_response)
+        mw = LiveTranslationsMiddleware(inner)
+
+        settings = _mock_settings(languages=["en", "cs"], draft_languages=[])
+        with _patch_middleware_deps(permission=True, settings=settings):
+            request = make_request("get", "/page/")
+            request.COOKIES[_DRAFT_LANG_COOKIE] = "xx"
+            with unittest.mock.patch("live_translations.middleware.django.utils.translation.activate") as mock_activate:
+                mw(request)
+
+            mock_activate.assert_not_called()
+
+    def test_config_includes_draft_languages_array(self, make_request):
+        response = _html_response("<html><body>X</body></html>")
+        mw = LiveTranslationsMiddleware(lambda r: response)
+        settings = _mock_settings(languages=["en", "cs", "ja"], draft_languages=["ja"])
+
+        with unittest.mock.patch("live_translations.middleware.conf.get_settings", return_value=settings):
+            with unittest.mock.patch("live_translations.middleware.django.middleware.csrf.get_token", return_value="t"):
+                with unittest.mock.patch(
+                    "live_translations.middleware.django.templatetags.static.static",
+                    side_effect=lambda p: f"/static/{p}",
+                ):
+                    mw._inject_assets(make_request("get", "/page/"), response)
+
+        content = response.content.decode()
+        assert 'draftLanguages:["ja"]' in content
+
+    def test_config_empty_draft_languages(self, make_request):
+        response = _html_response("<html><body>X</body></html>")
+        mw = LiveTranslationsMiddleware(lambda r: response)
+        settings = _mock_settings(languages=["en", "cs"], draft_languages=[])
+
+        with unittest.mock.patch("live_translations.middleware.conf.get_settings", return_value=settings):
+            with unittest.mock.patch("live_translations.middleware.django.middleware.csrf.get_token", return_value="t"):
+                with unittest.mock.patch(
+                    "live_translations.middleware.django.templatetags.static.static",
+                    side_effect=lambda p: f"/static/{p}",
+                ):
+                    mw._inject_assets(make_request("get", "/page/"), response)
+
+        content = response.content.decode()
+        assert "draftLanguages:[]" in content
+
+    def test_config_includes_current_language(self, make_request):
+        response = _html_response("<html><body>X</body></html>")
+        mw = LiveTranslationsMiddleware(lambda r: response)
+        settings = _mock_settings(languages=["en", "cs"])
+
+        with unittest.mock.patch("live_translations.middleware.conf.get_settings", return_value=settings):
+            with unittest.mock.patch("live_translations.middleware.django.middleware.csrf.get_token", return_value="t"):
+                with unittest.mock.patch(
+                    "live_translations.middleware.django.templatetags.static.static",
+                    side_effect=lambda p: f"/static/{p}",
+                ):
+                    with unittest.mock.patch(
+                        "live_translations.middleware.django.utils.translation.get_language",
+                        return_value="cs",
+                    ):
+                        mw._inject_assets(make_request("get", "/page/"), response)
+
+        content = response.content.decode()
+        assert "currentLanguage:'cs'" in content
+
+    def test_current_language_reflects_draft_after_process_view(self, make_request):
+        """After process_view activates draft language, _inject_assets uses it for currentLanguage."""
+        response = _html_response("<html><body>X</body></html>")
+        mw = LiveTranslationsMiddleware(lambda r: response)
+        settings = _mock_settings(languages=["en", "ja"], draft_languages=["ja"])
+
+        with unittest.mock.patch("live_translations.middleware.conf.get_settings", return_value=settings):
+            with unittest.mock.patch("live_translations.middleware.django.middleware.csrf.get_token", return_value="t"):
+                with unittest.mock.patch(
+                    "live_translations.middleware.django.templatetags.static.static",
+                    side_effect=lambda p: f"/static/{p}",
+                ):
+                    with unittest.mock.patch(
+                        "live_translations.middleware.django.utils.translation.get_language",
+                        return_value="ja",
+                    ):
+                        mw._inject_assets(make_request("get", "/page/"), response)
+
+        content = response.content.decode()
+        assert "currentLanguage:'ja'" in content

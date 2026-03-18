@@ -105,6 +105,23 @@ class POFileBackend(base.TranslationBackend):
         self._po_cache[path] = (mtime, po)
         return po
 
+    def _ensure_po(self, language: LanguageCode) -> polib.POFile:
+        """Load the PO file, creating it with a minimal header if it doesn't exist."""
+        try:
+            return self._load_po(language)
+        except FileNotFoundError:
+            path = self._po_path(language)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            po = polib.POFile()
+            po.metadata = {
+                "Content-Type": "text/plain; charset=UTF-8",
+                "Content-Transfer-Encoding": "8bit",
+                "Language": language,
+            }
+            po.save(str(path))
+            self._po_cache.pop(path, None)
+            return self._load_po(language)
+
     def _find_entry(
         self,
         po: polib.POFile,
@@ -178,7 +195,7 @@ class POFileBackend(base.TranslationBackend):
         old_active_states: dict[str, bool] = {}
         new_active_states: dict[str, bool] = {}
         for lang, msgstr in translations.items():
-            po = self._load_po(lang)
+            po = self._ensure_po(lang)
             entry = self._find_entry(po, key)
 
             is_active = active_flags.get(lang, fallback_active) if active_flags else fallback_active

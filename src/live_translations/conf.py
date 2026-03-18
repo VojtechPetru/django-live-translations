@@ -21,6 +21,7 @@ __all__ = [
     "get_backend_instance",
     "get_permission_checker",
     "get_settings",
+    "is_draft_language",
     "is_preview_request",
 ]
 
@@ -113,6 +114,7 @@ class LiveTranslationsConf:
     """Resolved configuration for live_translations."""
 
     languages: list[LanguageCode] = dataclasses.field(default_factory=list)
+    draft_languages: list[LanguageCode] = dataclasses.field(default_factory=list)
     backend: str = _DEFAULT_BACKEND
     cache: str = _DEFAULT_CACHE
     locale_dir: pathlib.Path = pathlib.Path()
@@ -143,6 +145,10 @@ def get_settings() -> LiveTranslationsConf:
         if not languages and django.conf.settings.LANGUAGE_CODE:
             languages = [django.conf.settings.LANGUAGE_CODE]
 
+    # Compute draft languages: in LT config but not in Django's LANGUAGES
+    django_language_codes = {code for code, _name in getattr(django.conf.settings, "LANGUAGES", [])}
+    draft_languages = [lang for lang in languages if lang not in django_language_codes]
+
     locale_dir_raw = raw.get("LOCALE_DIR", "")
     if locale_dir_raw:
         locale_dir = pathlib.Path(locale_dir_raw)
@@ -156,6 +162,7 @@ def get_settings() -> LiveTranslationsConf:
 
     return LiveTranslationsConf(
         languages=languages,
+        draft_languages=draft_languages,
         backend=_to_dotted_path(raw.get("BACKEND", _DEFAULT_BACKEND)),
         cache=raw.get("CACHE", _DEFAULT_CACHE),
         locale_dir=locale_dir,
@@ -172,6 +179,11 @@ def get_permission_checker() -> PermissionCheck:
     """Import and return the configured permission check callable (cached)."""
     settings = get_settings()
     return t.cast("PermissionCheck", django.utils.module_loading.import_string(settings.permission_check))
+
+
+def is_draft_language(language: str) -> bool:
+    """Return True if the language is a draft (not in Django's settings.LANGUAGES)."""
+    return language in get_settings().draft_languages
 
 
 def is_preview_request(request: django.http.HttpRequest) -> bool:

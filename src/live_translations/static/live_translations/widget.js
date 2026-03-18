@@ -25,6 +25,8 @@
    * @property {boolean}  [activeByDefault]  - Whether new overrides are active immediately.
    * @property {string}   [shortcutEdit]     - Keyboard shortcut for toggling edit mode.
    * @property {string}   [shortcutPreview]  - Keyboard shortcut for toggling preview mode.
+   * @property {string[]} [draftLanguages]   - Language codes that are drafts (not in Django LANGUAGES).
+   * @property {string}   [currentLanguage]  - Server-resolved current language code.
    * @property {boolean}  [preview]          - Whether preview mode is active.
    * @property {Array<{m:string, c:string}>} [previewEntries] - Inactive override entries for preview.
    */
@@ -143,6 +145,10 @@
   const PREVIEW = CONFIG.preview || false;
   /** @type {Array<{m:string, c:string}>} */
   let PREVIEW_ENTRIES = CONFIG.previewEntries || [];
+  /** @type {string[]} */
+  const DRAFT_LANGUAGES = CONFIG.draftLanguages || [];
+  /** @type {string} */
+  const CURRENT_LANGUAGE = CONFIG.currentLanguage || "";
 
   // ─── String Table & ZWC Marker Resolution ───────────
 
@@ -324,10 +330,37 @@
 
   /**
    * Return the page's language code (lowercase), e.g. "en" or "cs".
+   * Uses server-injected currentLanguage when available, falls back to <html lang>.
    * @returns {string}
    */
   function _pageLang() {
-    return (document.documentElement.lang || "").toLowerCase();
+    return CURRENT_LANGUAGE || (document.documentElement.lang || "").toLowerCase();
+  }
+
+  /**
+   * Switch the page language. Draft languages use the lt_lang cookie + reload.
+   * Published languages attempt URL prefix swap, falling back to django_language cookie.
+   * @param {string} lang - Target language code.
+   * @param {boolean} isDraft - Whether this is a draft language.
+   * @returns {void}
+   */
+  function _switchPageLanguage(lang, isDraft) {
+    if (isDraft) {
+      document.cookie = "lt_lang=" + encodeURIComponent(lang) + "; path=/; max-age=86400; SameSite=Lax";
+      window.location.reload();
+      return;
+    }
+    // Published: clear draft cookie, then use URL prefix swap or django_language cookie
+    document.cookie = "lt_lang=; path=/; max-age=0; path=/";
+    var path = window.location.pathname;
+    var prefixMatch = path.match(/^\/([a-z]{2}(?:-[a-z]{2})?)(\/|$)/i);
+    if (prefixMatch && LANGUAGES.indexOf(prefixMatch[1].toLowerCase()) !== -1) {
+      var newPath = "/" + lang + path.substring(prefixMatch[1].length + 1);
+      window.location.href = newPath + window.location.search + window.location.hash;
+      return;
+    }
+    document.cookie = "django_language=" + encodeURIComponent(lang) + "; path=/; max-age=86400; SameSite=Lax";
+    window.location.reload();
   }
 
   /**
@@ -1026,6 +1059,14 @@
         var label = document.createTextNode(meta ? meta.flag + "  " + meta.name : lang.toUpperCase());
         pill.appendChild(label);
 
+        // Draft badge
+        if (DRAFT_LANGUAGES.indexOf(lang) !== -1) {
+          var draftBadge = document.createElement("span");
+          draftBadge.className = "lt-editor__draft-badge";
+          draftBadge.textContent = "Draft";
+          pill.appendChild(draftBadge);
+        }
+
         // Trailing dot (unsaved changes)
         var trailDot = document.createElement("span");
         trailDot.className = "lt-editor__dot";
@@ -1259,9 +1300,14 @@
     const isActive = _editedActiveFlags[lang];
     const currentVal = _editedValues[lang] || "";
 
+    var isDraftLang = DRAFT_LANGUAGES.indexOf(lang) !== -1;
+
     const toggleWrap = document.createElement("label");
     toggleWrap.className = "lt-field__toggle";
-    if (markedForDelete) {
+    if (isDraftLang) {
+      // Draft languages are always active — hide the toggle entirely
+      toggleWrap.style.display = "none";
+    } else if (markedForDelete) {
       toggleWrap.style.visibility = "hidden";
     } else if (!hasOverride && currentVal === poDefault) {
       toggleWrap.style.display = "none";
@@ -1291,8 +1337,9 @@
     toggleWrap.appendChild(toggleLabelEl);
 
     // Show/hide toggle + auto-resize on input
-    (function (ta, toggle, defaultVal, cb, defaultActive, hadOverride) {
+    (function (ta, toggle, defaultVal, cb, defaultActive, hadOverride, draft) {
       function syncToggle() {
+        if (draft) return; // Draft languages are always active — keep toggle hidden
         const differs = ta.value !== defaultVal;
         toggle.style.display = (differs || hadOverride) ? "" : "none";
         if (!differs && !hadOverride) {
@@ -1305,7 +1352,7 @@
         syncToggle();
         _updateTabDirtyDots();
       });
-    })(textarea, toggleWrap, poDefault, checkbox, ACTIVE_BY_DEFAULT, hasOverride);
+    })(textarea, toggleWrap, poDefault, checkbox, ACTIVE_BY_DEFAULT, hasOverride, isDraftLang);
 
     container.appendChild(textarea);
     container.appendChild(toggleWrap);
@@ -2399,6 +2446,76 @@
     const sep0 = document.createElement("span");
     sep0.className = "lt-hint__sep";
     bar.appendChild(sep0);
+
+    // Language switcher (only shown when multiple languages configured)
+    if (LANGUAGES.length > 1) {
+      var langSwitcher = document.createElement("div");
+      langSwitcher.className = "lt-hint__lang";
+
+      var langTrigger = document.createElement("button");
+      langTrigger.type = "button";
+      langTrigger.className = "lt-hint__lang-trigger";
+      var currentMeta = LANG_META[_pageLang()];
+      langTrigger.textContent = currentMeta
+        ? currentMeta.flag + " " + _pageLang().toUpperCase()
+        : _pageLang().toUpperCase();
+      langTrigger.title = "Switch language";
+
+      var langMenu = document.createElement("div");
+      langMenu.className = "lt-hint__lang-menu";
+
+      for (var li = 0; li < LANGUAGES.length; li++) {
+        (function (lang) {
+          var item = document.createElement("button");
+          item.type = "button";
+          item.className = "lt-hint__lang-item";
+          if (lang === _pageLang()) {
+            item.classList.add("lt-hint__lang-item--active");
+          }
+
+          var meta = LANG_META[lang];
+          var isDraft = DRAFT_LANGUAGES.indexOf(lang) !== -1;
+          item.textContent = meta ? meta.flag + "  " + meta.name : lang.toUpperCase();
+
+          if (isDraft) {
+            var badge = document.createElement("span");
+            badge.className = "lt-hint__lang-badge";
+            badge.textContent = "Draft";
+            item.appendChild(badge);
+          }
+
+          item.addEventListener("click", function (e) {
+            e.stopPropagation();
+            if (_hintDidDrag) return;
+            if (lang === _pageLang()) {
+              langMenu.classList.remove("lt-hint__lang-menu--open");
+              return;
+            }
+            _switchPageLanguage(lang, isDraft);
+          });
+          langMenu.appendChild(item);
+        })(LANGUAGES[li]);
+      }
+
+      langTrigger.addEventListener("click", function (e) {
+        if (_hintDidDrag) return;
+        e.stopPropagation();
+        langMenu.classList.toggle("lt-hint__lang-menu--open");
+      });
+
+      // Close menu when clicking outside
+      document.addEventListener("click", function () {
+        langMenu.classList.remove("lt-hint__lang-menu--open");
+      });
+
+      langSwitcher.appendChild(langTrigger);
+      langSwitcher.appendChild(langMenu);
+      bar.appendChild(langSwitcher);
+
+      var sep1 = document.createElement("span");
+      sep1.className = "lt-hint__sep";
+      bar.appendChild(sep1);
+    }
 
     // Edit mode button
     const editBtn = document.createElement("button");

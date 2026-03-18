@@ -171,12 +171,21 @@ def save_translations(
     if placeholder_errors:
         raise PlaceholderValidationError(placeholder_errors)
 
+    # Draft languages are always active — their translations go straight to
+    # msgstr so they survive makemessages/msgmerge.  The whole language is
+    # unpublished anyway, so "inactive" is meaningless.
+    resolved_flags = dict(active_flags or {})
+    draft_languages = settings.draft_languages
+    for lang in translations:
+        if lang in draft_languages:
+            resolved_flags[lang] = True
+
     backend = conf.get_backend_instance()
     with django.db.transaction.atomic():
         backend.save_translations(
             key,
             translations=translations,
-            active_flags=active_flags or {},
+            active_flags=resolved_flags,
         )
 
     return {
