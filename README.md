@@ -3,6 +3,7 @@
 [![CI](https://github.com/VojtechPetru/django-live-translations/actions/workflows/ci.yml/badge.svg)](https://github.com/VojtechPetru/django-live-translations/actions/workflows/ci.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Django 4.2+](https://img.shields.io/badge/django-4.2+-green.svg)](https://www.djangoproject.com/)
+[![Docs](https://img.shields.io/badge/docs-available-blue.svg)](https://vojtechpetru.github.io/django-live-translations/)
 
 **In-browser translation editing for Django superusers.**
 
@@ -56,7 +57,7 @@ MIDDLEWARE = [
 
 Log in as a superuser and press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd> to activate edit mode.
 
-For the full setup guide, see the [Getting Started](https://vojtechpetru.github.io/django-live-translations/getting-started/) documentation.
+For the full setup guide, see the [documentation](https://vojtechpetru.github.io/django-live-translations/).
 
 ## Demo app
 
@@ -72,10 +73,6 @@ python manage.py runserver
 ```
 
 Open [localhost:8000](http://localhost:8000) and click "Quick Login" to auto-create a superuser.
-
-## Documentation
-
-Full documentation is available at **[vojtechpetru.github.io/django-live-translations](https://vojtechpetru.github.io/django-live-translations/)**.
 
 ## Compatibility
 
