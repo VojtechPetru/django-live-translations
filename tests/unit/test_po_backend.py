@@ -2,7 +2,6 @@
 
 import base64
 import pathlib
-import unittest.mock
 
 import polib
 import pytest
@@ -21,6 +20,21 @@ from live_translations.types import MsgKey
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _restore_translations():
+    """Restore Django's translation cache after each test.
+
+    ``translation_file_changed`` (called by save/activate) clears
+    ``trans_real._translations``.  We snapshot and restore the dict so
+    tests don't leak cache state to one another.
+    """
+    from django.utils.translation import trans_real
+
+    saved = getattr(trans_real, "_translations", {}).copy()
+    yield
+    trans_real._translations = saved  # type: ignore[missing-attribute]
 
 
 @pytest.fixture
@@ -455,12 +469,6 @@ class TestGetInactiveOverrides:
 
 @pytest.mark.django_db
 class TestSaveTranslations:
-    @pytest.fixture(autouse=True)
-    def _mock_reloader(self):
-        with unittest.mock.patch("django.utils.translation.reloader.translation_file_changed") as mock:
-            self.mock_reloader = mock
-            yield
-
     def test_save_new_entry_active(self, po_backend: POFileBackend, settings):
         settings.LIVE_TRANSLATIONS = {
             "LANGUAGES": ["en"],
@@ -601,7 +609,10 @@ class TestSaveTranslations:
         mo_path = po_backend._mo_path("en")
         assert mo_path.exists()
 
-    def test_save_signals_reloader(self, po_backend: POFileBackend, settings):
+    def test_save_notifies_reloader(self, po_backend: POFileBackend, settings):
+        """Saving an active translation triggers the translation reloader (clears trans cache)."""
+        from django.utils.translation import trans_real
+
         settings.LIVE_TRANSLATIONS = {
             "LANGUAGES": ["en"],
             "LOCALE_DIR": str(po_backend.locale_dir),
@@ -609,8 +620,13 @@ class TestSaveTranslations:
         }
         conf.get_settings.cache_clear()
 
+        # Seed the translations cache so we can detect it being cleared
+        trans_real._translations["_sentinel"] = object()  # type: ignore[assignment]
+
         po_backend.save_translations(MsgKey("hello", ""), {"en": "Updated"})
-        self.mock_reloader.assert_called_once()
+
+        # translation_file_changed clears _translations
+        assert "_sentinel" not in trans_real._translations  # type: ignore[missing-attribute]
 
     def test_save_invalidates_po_cache(self, po_backend: POFileBackend, settings):
         settings.LIVE_TRANSLATIONS = {
@@ -747,12 +763,6 @@ class TestSaveTranslations:
 
 
 class TestBulkActivate:
-    @pytest.fixture(autouse=True)
-    def _mock_reloader(self):
-        with unittest.mock.patch("django.utils.translation.reloader.translation_file_changed") as mock:
-            self.mock_reloader = mock
-            yield
-
     def test_activates_pending_entries(self, locale_dir: pathlib.Path, settings):
         entry = polib.POEntry(msgid="hello", msgstr="Original")
         _set_pending(entry, "Pending Value")
@@ -774,12 +784,13 @@ class TestBulkActivate:
     def test_skips_entries_without_pending(self, po_backend: POFileBackend):
         activated = po_backend.bulk_activate("en", [MsgKey("hello", "")])
         assert activated == []
-        self.mock_reloader.assert_not_called()
+        # No .mo file should be created when nothing was activated
+        assert not po_backend._mo_path("en").exists()
 
     def test_skips_missing_entries(self, po_backend: POFileBackend):
         activated = po_backend.bulk_activate("en", [MsgKey("nonexistent", "")])
         assert activated == []
-        self.mock_reloader.assert_not_called()
+        assert not po_backend._mo_path("en").exists()
 
     def test_returns_empty_for_missing_language(self, po_backend: POFileBackend):
         activated = po_backend.bulk_activate("fr", [MsgKey("hello", "")])
@@ -813,7 +824,10 @@ class TestBulkActivate:
 
         assert backend._mo_path("en").exists()
 
-    def test_signals_reloader(self, locale_dir: pathlib.Path, settings):
+    def test_notifies_reloader(self, locale_dir: pathlib.Path, settings):
+        """Activating pending translations triggers the translation reloader."""
+        from django.utils.translation import trans_real
+
         entry = polib.POEntry(msgid="hello", msgstr="Original")
         _set_pending(entry, "Pending")
         _make_po_file(locale_dir, "en", [entry])
@@ -821,9 +835,13 @@ class TestBulkActivate:
         conf.get_settings.cache_clear()
 
         backend = POFileBackend(locale_dir=locale_dir, domain="django")
+
+        # Seed the translations cache so we can detect it being cleared
+        trans_real._translations["_sentinel"] = object()  # type: ignore[assignment]
+
         backend.bulk_activate("en", [MsgKey("hello", "")])
 
-        self.mock_reloader.assert_called_once()
+        assert "_sentinel" not in trans_real._translations  # type: ignore[missing-attribute]
 
     def test_invalidates_cache(self, locale_dir: pathlib.Path, settings):
         entry = polib.POEntry(msgid="hello", msgstr="Original")
@@ -876,7 +894,7 @@ class TestBulkActivate:
     def test_no_save_when_nothing_activated(self, po_backend: POFileBackend):
         """When no entries are actually activated, files shouldn't be saved."""
         po_backend.bulk_activate("en", [MsgKey("hello", "")])
-        self.mock_reloader.assert_not_called()
+        assert not po_backend._mo_path("en").exists()
 
 
 # ===========================================================================
@@ -994,11 +1012,6 @@ class TestGetHint:
 
 
 class TestEdgeCases:
-    @pytest.fixture(autouse=True)
-    def _mock_reloader(self):
-        with unittest.mock.patch("django.utils.translation.reloader.translation_file_changed"):
-            yield
-
     def test_empty_context_treated_as_no_context(self, po_backend: POFileBackend):
         """MsgKey with empty string context should match entries without msgctxt."""
         result = po_backend.get_translations(MsgKey("hello", ""), ["en"])
@@ -1125,13 +1138,14 @@ class TestEnsurePo:
 
         assert po.find("hi") is not None
 
+    @pytest.mark.django_db
     def test_save_works_after_auto_create(self, locale_dir: pathlib.Path, settings):
         settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["fr"], "LOCALE_DIR": str(locale_dir)}
+        conf.get_settings.cache_clear()
         backend = POFileBackend(locale_dir=locale_dir, domain="django")
         key = MsgKey(msgid="greeting", context="")
 
-        with unittest.mock.patch("live_translations.backends.po.history"):
-            backend.save_translations(key, {"fr": "Bonjour"}, {"fr": True})
+        backend.save_translations(key, {"fr": "Bonjour"}, {"fr": True})
 
         po = backend._load_po("fr")
         entry = po.find("greeting")

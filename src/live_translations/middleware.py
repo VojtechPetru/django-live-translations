@@ -169,6 +169,8 @@ class LiveTranslationsMiddleware:
     @staticmethod
     def _strip_zwc(response: django.http.HttpResponse) -> None:
         """Strip ZWC markers from non-HTML responses."""
+        if response.streaming:  # type: ignore[union-attr]
+            return
         content = response.content.decode(response.charset)
         if strings.ZWC_BOUNDARY not in content:
             return

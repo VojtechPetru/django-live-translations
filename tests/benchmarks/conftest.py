@@ -2,8 +2,8 @@
 
 import contextlib
 import pathlib
+import sys
 import typing as t
-import unittest.mock
 
 import django
 import django.conf
@@ -21,6 +21,12 @@ if t.TYPE_CHECKING:
 
 
 def pytest_configure() -> None:
+    # Ensure ``tests`` package is importable for dotted-path settings
+    # (e.g. ``tests.backends.InMemoryBackend``, ``tests.permissions.allow_all``).
+    repo_root = str(pathlib.Path(__file__).resolve().parent.parent.parent)
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+
     django.conf.settings.configure(
         DATABASES={"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}},
         INSTALLED_APPS=[
@@ -272,6 +278,7 @@ RequestFactory = t.Callable[..., django.http.HttpRequest]
 @pytest.fixture
 def make_bench_request() -> RequestFactory:
     """Create a Django HttpRequest with configurable user permissions."""
+    from django.contrib.auth.models import AnonymousUser, User
 
     def _make(
         *,
@@ -280,10 +287,10 @@ def make_bench_request() -> RequestFactory:
     ) -> django.http.HttpRequest:
         factory = django.test.RequestFactory()
         request = factory.get(path)
-        request.user = unittest.mock.MagicMock(  # type: ignore[assignment]
-            is_authenticated=is_superuser,
-            is_superuser=is_superuser,
-        )
+        if is_superuser:
+            request.user = User(username="bench", is_superuser=True, is_active=True)  # type: ignore[assignment]
+        else:
+            request.user = AnonymousUser()  # type: ignore[assignment]
         return request
 
     return _make
@@ -295,7 +302,9 @@ def make_bench_request() -> RequestFactory:
 
 
 @pytest.fixture
-def db_backend_with_overrides(request: pytest.FixtureRequest, transactional_db: None) -> "tuple[int, DatabaseBackend]":
+def db_backend_with_overrides(
+    request: pytest.FixtureRequest, tmp_path: pathlib.Path, transactional_db: None
+) -> "tuple[int, DatabaseBackend]":
     """Populate DB with N overrides per language and return a DatabaseBackend.
 
     Usage: @pytest.mark.parametrize("db_backend_with_overrides", SCALES, indirect=True)
@@ -316,12 +325,13 @@ def db_backend_with_overrides(request: pytest.FixtureRequest, transactional_db: 
     # Populate with n entries per language (80% active / 20% inactive)
     populate_db_overrides(n, LANGUAGES)
 
-    # Create backend pointing at a dummy locale dir (PO fallback not needed)
-    backend = _DatabaseBackend(locale_dir=pathlib.Path("/tmp"), domain="django")
-    mock_po = unittest.mock.MagicMock()
-    mock_po.get_translations.return_value = {}
-    mock_po.get_hint.return_value = ""
-    backend._po_backend = mock_po
+    # Create real PO files so the PO sub-backend has something to read
+    locale_dir = tmp_path / "locale"
+    for lang in LANGUAGES:
+        generate_po_file(n, locale_dir, lang)
+
+    # Create backend with real PO files
+    backend = _DatabaseBackend(locale_dir=locale_dir, domain="django")
 
     # Prime the cache so ensure_current() can detect hit/miss
     cache = django.core.cache.caches["default"]

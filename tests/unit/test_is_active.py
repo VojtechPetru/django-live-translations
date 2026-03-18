@@ -3,8 +3,10 @@
 import json
 import pathlib
 import typing as t
-import unittest.mock
 
+import django.utils.translation
+import django.utils.translation.trans_real
+import polib
 import pytest
 
 from live_translations import conf, models
@@ -13,6 +15,8 @@ from live_translations.types import MsgKey
 
 if t.TYPE_CHECKING:
     from pytest_django.fixtures import SettingsWrapper
+
+    from tests.backends import InMemoryBackend  # type: ignore[import-not-found]
 
 
 @pytest.mark.django_db
@@ -53,7 +57,7 @@ class TestBaseDataclass:
 
 @pytest.mark.django_db
 class TestInjectOverrides:
-    def test_only_active_overrides_injected(self):
+    def test_only_active_overrides_injected(self, tmp_path: pathlib.Path, settings: "SettingsWrapper"):
         models.TranslationEntry.objects.create(language="en", msgid="active_key", msgstr="Active Value", is_active=True)
         models.TranslationEntry.objects.create(
             language="en",
@@ -62,72 +66,61 @@ class TestInjectOverrides:
             is_active=False,
         )
 
-        backend = db.DatabaseBackend(locale_dir=pathlib.Path("/tmp"), domain="django")
-        # Mock the translation object and catalog
-        mock_catalog = {}
-        mock_trans = unittest.mock.MagicMock()
-        mock_trans._catalog = mock_catalog
+        # Create real .po/.mo files so Django can load a catalog for "en"
+        locale_dir = tmp_path / "locale"
+        lc = locale_dir / "en" / "LC_MESSAGES"
+        lc.mkdir(parents=True)
+        po = polib.POFile()
+        po.metadata = {"Content-Type": "text/plain; charset=utf-8", "Language": "en"}
+        po.append(polib.POEntry(msgid="active_key", msgstr="Original Active"))
+        po.append(polib.POEntry(msgid="inactive_key", msgstr="Original Inactive"))
+        po.save(str(lc / "django.po"))
+        po.save_as_mofile(str(lc / "django.mo"))
 
-        with (
-            unittest.mock.patch.object(backend, "_get_po_backend"),
-            unittest.mock.patch(
-                "django.utils.translation.trans_real.translation",
-                return_value=mock_trans,
-            ),
-        ):
-            backend.inject_overrides()
+        settings.LOCALE_PATHS = [str(locale_dir)]
 
-        assert "active_key" in mock_catalog
-        assert mock_catalog["active_key"] == "Active Value"
-        assert "inactive_key" not in mock_catalog
+        # Clear Django's translation cache so it picks up our new locale path
+        if hasattr(django.utils.translation.trans_real, "_translations"):
+            django.utils.translation.trans_real._translations = {}  # type: ignore[missing-attribute]
 
-    def test_survives_missing_catalog_attribute(self):
-        """inject_overrides must not crash if Django removes the private _catalog attr."""
-        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", is_active=True)
+        django.utils.translation.activate("en")
 
-        backend = db.DatabaseBackend(locale_dir=pathlib.Path("/tmp"), domain="django")
-        mock_trans = unittest.mock.MagicMock(spec=["_info"])  # no _catalog attr
+        backend = db.DatabaseBackend(locale_dir=locale_dir, domain="django")
+        backend.inject_overrides()
 
-        with (
-            unittest.mock.patch.object(backend, "_get_po_backend"),
-            unittest.mock.patch(
-                "django.utils.translation.trans_real.translation",
-                return_value=mock_trans,
-            ),
-        ):
-            backend.inject_overrides()  # should not raise
+        trans_obj = django.utils.translation.trans_real.translation("en")
+        catalog = trans_obj._catalog  # type: ignore[missing-attribute]
+
+        assert catalog.get("active_key") == "Active Value"
+        assert catalog.get("inactive_key") != "Inactive Value"
+
+    def test_survives_missing_catalog_attribute(self, tmp_path: pathlib.Path, settings: "SettingsWrapper"):
+        """inject_overrides must not crash if the translation object has no entries to inject."""
+        models.TranslationEntry.objects.create(language="xx_missing", msgid="hello", msgstr="Hi", is_active=True)
+
+        locale_dir = tmp_path / "locale"
+        locale_dir.mkdir(parents=True)
+
+        backend = db.DatabaseBackend(locale_dir=locale_dir, domain="django")
+        # inject_overrides for language "xx_missing" will fail to get a translation
+        # object (since no .mo file exists) and should silently skip -- no crash.
+        backend.inject_overrides()  # should not raise
 
 
 @pytest.mark.django_db
 class TestGetTranslations:
-    def test_returns_is_active_for_db_override(self):
+    def test_returns_is_active_for_db_override(self, make_db_backend):
         models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="", is_active=False)
 
-        backend = db.DatabaseBackend(locale_dir=pathlib.Path("/tmp"), domain="django")
-        po_entry = base.TranslationEntry(language="en", msgid="hello", msgstr="Hello", context="")
-        with unittest.mock.patch.object(
-            backend,
-            "_get_po_backend",
-            return_value=unittest.mock.MagicMock(
-                get_translations=unittest.mock.MagicMock(return_value={"en": po_entry})
-            ),
-        ):
-            result = backend.get_translations(MsgKey("hello", ""), ["en"])
+        backend = make_db_backend(defaults={"en": {"hello": "Hello"}})
+        result = backend.get_translations(MsgKey("hello", ""), ["en"])
 
         assert result["en"].is_active is False
         assert result["en"].msgstr == "Hi"
 
-    def test_po_only_entry_has_is_active_true(self):
-        backend = db.DatabaseBackend(locale_dir=pathlib.Path("/tmp"), domain="django")
-        po_entry = base.TranslationEntry(language="en", msgid="hello", msgstr="Hello", context="")
-        with unittest.mock.patch.object(
-            backend,
-            "_get_po_backend",
-            return_value=unittest.mock.MagicMock(
-                get_translations=unittest.mock.MagicMock(return_value={"en": po_entry})
-            ),
-        ):
-            result = backend.get_translations(MsgKey("hello", ""), ["en"])
+    def test_po_only_entry_has_is_active_true(self, make_db_backend):
+        backend = make_db_backend(defaults={"en": {"hello": "Hello"}})
+        result = backend.get_translations(MsgKey("hello", ""), ["en"])
 
         assert result["en"].is_active is True
         assert result["en"].msgstr == "Hello"
@@ -136,41 +129,34 @@ class TestGetTranslations:
 @pytest.mark.django_db
 class TestSaveTranslations:
     @pytest.fixture(autouse=True)
-    def _backend(self, make_db_backend):
+    def _backend(self, make_db_backend, settings: "SettingsWrapper"):
         self._make_backend = make_db_backend
+        settings.CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
 
     @pytest.mark.parametrize("active_default", [True, False])
-    def test_new_entry_without_flags_uses_setting(self, active_default, settings):
+    def test_new_entry_without_flags_uses_setting(self, active_default, settings: "SettingsWrapper"):
         """When no active_flags provided, new entries use TRANSLATION_ACTIVE_BY_DEFAULT."""
         settings.LIVE_TRANSLATIONS = {"TRANSLATION_ACTIVE_BY_DEFAULT": active_default}
         conf.get_settings.cache_clear()
 
         backend = self._make_backend()
-        with (
-            unittest.mock.patch.object(backend, "get_defaults", return_value={}),
-            unittest.mock.patch.object(backend, "bump_catalog_version"),
-        ):
-            backend.save_translations(MsgKey("hello", ""), {"en": "Hi"})
+        backend.save_translations(MsgKey("hello", ""), {"en": "Hi"})
 
         entry = models.TranslationEntry.objects.get(language="en", msgid="hello")
         assert entry.is_active is active_default
 
-    def test_explicit_active_flag_overrides_setting(self, settings):
+    def test_explicit_active_flag_overrides_setting(self, settings: "SettingsWrapper"):
         """When active_flags is provided, it takes priority over the setting."""
         settings.LIVE_TRANSLATIONS = {"TRANSLATION_ACTIVE_BY_DEFAULT": False}
         conf.get_settings.cache_clear()
 
         backend = self._make_backend()
-        with (
-            unittest.mock.patch.object(backend, "get_defaults", return_value={}),
-            unittest.mock.patch.object(backend, "bump_catalog_version"),
-        ):
-            backend.save_translations(MsgKey("hello", ""), {"en": "Hi"}, active_flags={"en": True})
+        backend.save_translations(MsgKey("hello", ""), {"en": "Hi"}, active_flags={"en": True})
 
         entry = models.TranslationEntry.objects.get(language="en", msgid="hello")
         assert entry.is_active is True
 
-    def test_explicit_active_flag_updates_existing(self, settings):
+    def test_explicit_active_flag_updates_existing(self, settings: "SettingsWrapper"):
         """When active_flags is provided on update, it overwrites the existing is_active."""
         settings.LIVE_TRANSLATIONS = {"TRANSLATION_ACTIVE_BY_DEFAULT": True}
         conf.get_settings.cache_clear()
@@ -179,17 +165,13 @@ class TestSaveTranslations:
         models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Old", context="", is_active=True)
 
         backend = self._make_backend()
-        with (
-            unittest.mock.patch.object(backend, "get_defaults", return_value={}),
-            unittest.mock.patch.object(backend, "bump_catalog_version"),
-        ):
-            backend.save_translations(MsgKey("hello", ""), {"en": "New"}, active_flags={"en": False})
+        backend.save_translations(MsgKey("hello", ""), {"en": "New"}, active_flags={"en": False})
 
         entry = models.TranslationEntry.objects.get(language="en", msgid="hello")
         assert entry.msgstr == "New"
         assert entry.is_active is False
 
-    def test_no_flags_uses_fallback_on_update(self, settings):
+    def test_no_flags_uses_fallback_on_update(self, settings: "SettingsWrapper"):
         """Without active_flags, updating uses the setting fallback."""
         settings.LIVE_TRANSLATIONS = {"TRANSLATION_ACTIVE_BY_DEFAULT": False}
         conf.get_settings.cache_clear()
@@ -197,11 +179,7 @@ class TestSaveTranslations:
         models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Old", context="", is_active=True)
 
         backend = self._make_backend()
-        with (
-            unittest.mock.patch.object(backend, "get_defaults", return_value={}),
-            unittest.mock.patch.object(backend, "bump_catalog_version"),
-        ):
-            backend.save_translations(MsgKey("hello", ""), {"en": "New"})
+        backend.save_translations(MsgKey("hello", ""), {"en": "New"})
 
         entry = models.TranslationEntry.objects.get(language="en", msgid="hello")
         assert entry.msgstr == "New"
@@ -238,7 +216,7 @@ class TestSettingDefault:
         settings = conf.get_settings()
         assert settings.translation_active_by_default is False
 
-    def test_setting_can_be_overridden(self, settings):
+    def test_setting_can_be_overridden(self, settings: "SettingsWrapper"):
         settings.LIVE_TRANSLATIONS = {"TRANSLATION_ACTIVE_BY_DEFAULT": True}
         conf.get_settings.cache_clear()
         resolved = conf.get_settings()
@@ -292,11 +270,19 @@ class TestAdminActions:
 @pytest.mark.django_db
 class TestGetTranslationsView:
     @pytest.fixture(autouse=True)
-    def _setup(self, settings):
+    def _setup(self, settings: "SettingsWrapper", tmp_path: pathlib.Path):
+        locale_dir = tmp_path / "locale"
+        lc = locale_dir / "en" / "LC_MESSAGES"
+        lc.mkdir(parents=True)
+        po = polib.POFile()
+        po.metadata = {"Content-Type": "text/plain; charset=utf-8"}
+        po.append(polib.POEntry(msgid="hello", msgstr="Hello"))
+        po.save(str(lc / "django.po"))
+
         settings.LIVE_TRANSLATIONS = {
             "BACKEND": "live_translations.backends.db.DatabaseBackend",
             "LANGUAGES": ["en"],
-            "LOCALE_DIR": "/tmp",
+            "LOCALE_DIR": str(locale_dir),
         }
         conf.get_settings.cache_clear()
         conf.get_backend_instance.cache_clear()
@@ -312,15 +298,6 @@ class TestGetTranslationsView:
         )
 
         from live_translations import views
-
-        # Mock the PO backend to avoid filesystem access
-        backend = conf.get_backend_instance()
-        mock_po = unittest.mock.MagicMock()
-        mock_po.get_translations.return_value = {
-            "en": base.TranslationEntry(language="en", msgid="hello", msgstr="Hello", context="")
-        }
-        mock_po.get_hint.return_value = ""
-        backend._po_backend = mock_po  # type: ignore[missing-attribute]
 
         response = views.get_translations(request)
         data = json.loads(response.content)
@@ -344,40 +321,24 @@ class TestGetTranslationsView:
 
 @pytest.mark.django_db
 class TestHasOverride:
-    def test_db_entry_has_override_true(self):
+    def test_db_entry_has_override_true(self, make_db_backend):
         models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hello", context="", is_active=True)
-        backend = db.DatabaseBackend(locale_dir=pathlib.Path("/tmp"), domain="django")
-        po_entry = base.TranslationEntry(language="en", msgid="hello", msgstr="Hello", context="")
-        with unittest.mock.patch.object(
-            backend,
-            "_get_po_backend",
-            return_value=unittest.mock.MagicMock(
-                get_translations=unittest.mock.MagicMock(return_value={"en": po_entry})
-            ),
-        ):
-            result = backend.get_translations(MsgKey("hello", ""), ["en"])
+        backend = make_db_backend(defaults={"en": {"hello": "Hello"}})
+        result = backend.get_translations(MsgKey("hello", ""), ["en"])
         assert result["en"].has_override is True
 
-    def test_po_only_has_override_false(self):
-        backend = db.DatabaseBackend(locale_dir=pathlib.Path("/tmp"), domain="django")
-        po_entry = base.TranslationEntry(language="en", msgid="hello", msgstr="Hello", context="")
-        with unittest.mock.patch.object(
-            backend,
-            "_get_po_backend",
-            return_value=unittest.mock.MagicMock(
-                get_translations=unittest.mock.MagicMock(return_value={"en": po_entry})
-            ),
-        ):
-            result = backend.get_translations(MsgKey("hello", ""), ["en"])
+    def test_po_only_has_override_false(self, make_db_backend):
+        backend = make_db_backend(defaults={"en": {"hello": "Hello"}})
+        result = backend.get_translations(MsgKey("hello", ""), ["en"])
         assert result["en"].has_override is False
 
 
 @pytest.mark.django_db
 class TestDeleteTranslationView:
     @pytest.fixture(autouse=True)
-    def _setup(self, settings):
+    def _setup(self, settings: "SettingsWrapper"):
         settings.LIVE_TRANSLATIONS = {
-            "BACKEND": "live_translations.backends.db.DatabaseBackend",
+            "BACKEND": "tests.backends.InMemoryBackend",
             "LANGUAGES": ["en", "cs"],
             "LOCALE_DIR": "/tmp",
         }
@@ -385,11 +346,10 @@ class TestDeleteTranslationView:
         conf.get_backend_instance.cache_clear()
         conf.get_permission_checker.cache_clear()
 
+    def _get_backend(self) -> "InMemoryBackend":
         backend = conf.get_backend_instance()
-        mock_po = unittest.mock.MagicMock()
-        mock_po.get_translations.return_value = {}
-        mock_po.get_hint.return_value = ""
-        backend._po_backend = mock_po  # type: ignore[missing-attribute]
+        assert type(backend).__name__ == "InMemoryBackend"
+        return backend  # type: ignore[return-value]
 
     _URL = "/__live-translations__/translations/delete/"
 
@@ -399,21 +359,22 @@ class TestDeleteTranslationView:
 
         from live_translations import views
 
-        with unittest.mock.patch.object(conf.get_backend_instance(), "bump_catalog_version"):
-            response = views.delete_translation(make_request("post", self._URL, data={"msgid": "hello", "context": ""}))
+        backend = self._get_backend()
+        version_before = backend._version
+        response = views.delete_translation(make_request("post", self._URL, data={"msgid": "hello", "context": ""}))
 
         data = json.loads(response.content)
         assert data["ok"] is True
         assert data["deleted"] == 2
         assert models.TranslationEntry.objects.count() == 0
+        assert backend._version > version_before
 
     def test_records_history(self, make_request):
         models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="")
 
         from live_translations import views
 
-        with unittest.mock.patch.object(conf.get_backend_instance(), "bump_catalog_version"):
-            views.delete_translation(make_request("post", self._URL, data={"msgid": "hello", "context": ""}))
+        views.delete_translation(make_request("post", self._URL, data={"msgid": "hello", "context": ""}))
 
         h = models.TranslationHistory.objects.get()
         assert h.action == "delete"
@@ -426,14 +387,13 @@ class TestDeleteTranslationView:
 
         from live_translations import views
 
-        with unittest.mock.patch.object(conf.get_backend_instance(), "bump_catalog_version"):
-            response = views.delete_translation(
-                make_request(
-                    "post",
-                    self._URL,
-                    data={"msgid": "hello", "context": "", "language": "cs"},
-                )
+        response = views.delete_translation(
+            make_request(
+                "post",
+                self._URL,
+                data={"msgid": "hello", "context": "", "language": "cs"},
             )
+        )
 
         data = json.loads(response.content)
         assert data["ok"] is True
@@ -454,14 +414,13 @@ class TestDeleteTranslationView:
 
         from live_translations import views
 
-        with unittest.mock.patch.object(conf.get_backend_instance(), "bump_catalog_version"):
-            response = views.delete_translation(
-                make_request(
-                    "post",
-                    self._URL,
-                    data={"msgid": "hello", "context": "", "languages": ["cs", "de"]},
-                )
+        response = views.delete_translation(
+            make_request(
+                "post",
+                self._URL,
+                data={"msgid": "hello", "context": "", "languages": ["cs", "de"]},
             )
+        )
 
         data = json.loads(response.content)
         assert data["ok"] is True
@@ -491,9 +450,9 @@ class TestDeleteTranslationView:
 @pytest.mark.django_db
 class TestBulkActivateView:
     @pytest.fixture(autouse=True)
-    def _setup(self, settings):
+    def _setup(self, settings: "SettingsWrapper"):
         settings.LIVE_TRANSLATIONS = {
-            "BACKEND": "live_translations.backends.db.DatabaseBackend",
+            "BACKEND": "tests.backends.InMemoryBackend",
             "LANGUAGES": ["en", "cs"],
             "LOCALE_DIR": "/tmp",
         }
@@ -565,7 +524,7 @@ class TestBulkActivateView:
 
 
 # ---------------------------------------------------------------------------
-# No phantom entries — save_translations must not create DB rows for
+# No phantom entries -- save_translations must not create DB rows for
 # languages whose value matches the .po default when no override exists yet.
 # ---------------------------------------------------------------------------
 
@@ -576,10 +535,11 @@ class TestSaveNoPhantomEntries:
     languages that match the .po default and have no existing DB override."""
 
     @pytest.fixture(autouse=True)
-    def _backend(self, make_db_backend):
+    def _backend(self, make_db_backend, settings: "SettingsWrapper"):
         self._make_backend = make_db_backend
+        settings.CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
 
-    def test_unchanged_language_not_saved(self, settings):
+    def test_unchanged_language_not_saved(self, settings: "SettingsWrapper"):
         """Sending en+cs where only en differs from PO default: only en gets a row.
 
         The active flag for cs matches TRANSLATION_ACTIVE_BY_DEFAULT (False),
@@ -588,89 +548,69 @@ class TestSaveNoPhantomEntries:
         settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en", "cs"], "TRANSLATION_ACTIVE_BY_DEFAULT": False}
         conf.get_settings.cache_clear()
 
-        backend = self._make_backend()
-        with (
-            unittest.mock.patch.object(backend, "get_defaults", return_value={"en": "Hello", "cs": "Ahoj"}),
-            unittest.mock.patch.object(backend, "bump_catalog_version"),
-        ):
-            backend.save_translations(
-                MsgKey("hello", ""),
-                {"en": "Hi there", "cs": "Ahoj"},  # cs unchanged
-                active_flags={"en": True, "cs": False},  # cs flag matches default
-            )
+        backend = self._make_backend(defaults={"en": {"hello": "Hello"}, "cs": {"hello": "Ahoj"}})
+        backend.save_translations(
+            MsgKey("hello", ""),
+            {"en": "Hi there", "cs": "Ahoj"},  # cs unchanged
+            active_flags={"en": True, "cs": False},  # cs flag matches default
+        )
 
         assert models.TranslationEntry.objects.count() == 1
         entry = models.TranslationEntry.objects.get()
         assert entry.language == "en"
         assert entry.msgstr == "Hi there"
 
-    def test_all_unchanged_creates_no_entries(self, settings):
+    def test_all_unchanged_creates_no_entries(self, settings: "SettingsWrapper"):
         """If every language matches its PO default and active flags match the setting, no rows are created."""
         settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en", "cs"], "TRANSLATION_ACTIVE_BY_DEFAULT": True}
         conf.get_settings.cache_clear()
 
-        backend = self._make_backend()
-        with (
-            unittest.mock.patch.object(backend, "get_defaults", return_value={"en": "Hello", "cs": "Ahoj"}),
-            unittest.mock.patch.object(backend, "bump_catalog_version"),
-        ):
-            backend.save_translations(
-                MsgKey("hello", ""),
-                {"en": "Hello", "cs": "Ahoj"},
-                active_flags={"en": True, "cs": True},
-            )
+        backend = self._make_backend(defaults={"en": {"hello": "Hello"}, "cs": {"hello": "Ahoj"}})
+        backend.save_translations(
+            MsgKey("hello", ""),
+            {"en": "Hello", "cs": "Ahoj"},
+            active_flags={"en": True, "cs": True},
+        )
 
         assert models.TranslationEntry.objects.count() == 0
 
-    def test_existing_entry_still_updated_even_if_matches_default(self, settings):
+    def test_existing_entry_still_updated_even_if_matches_default(self, settings: "SettingsWrapper"):
         """An existing DB row is always updated, even when the new value matches the PO default."""
         settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en"]}
         conf.get_settings.cache_clear()
 
         models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Old override", context="")
 
-        backend = self._make_backend()
-        with (
-            unittest.mock.patch.object(backend, "get_defaults", return_value={"en": "Hello"}),
-            unittest.mock.patch.object(backend, "bump_catalog_version"),
-        ):
-            backend.save_translations(MsgKey("hello", ""), {"en": "Hello"}, active_flags={"en": True})
+        backend = self._make_backend(defaults={"en": {"hello": "Hello"}})
+        backend.save_translations(MsgKey("hello", ""), {"en": "Hello"}, active_flags={"en": True})
 
         entry = models.TranslationEntry.objects.get()
         assert entry.msgstr == "Hello"
         assert entry.is_active is True
 
-    def test_non_default_active_flag_creates_entry(self, settings):
+    def test_non_default_active_flag_creates_entry(self, settings: "SettingsWrapper"):
         """If value matches PO default but active flag differs from the setting, an entry is created."""
         settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en"], "TRANSLATION_ACTIVE_BY_DEFAULT": False}
         conf.get_settings.cache_clear()
 
-        backend = self._make_backend()
-        with (
-            unittest.mock.patch.object(backend, "get_defaults", return_value={"en": "Hello"}),
-            unittest.mock.patch.object(backend, "bump_catalog_version"),
-        ):
-            # Value matches PO default, but active flag (True) differs from setting (False)
-            backend.save_translations(MsgKey("hello", ""), {"en": "Hello"}, active_flags={"en": True})
+        backend = self._make_backend(defaults={"en": {"hello": "Hello"}})
+        # Value matches PO default, but active flag (True) differs from setting (False)
+        backend.save_translations(MsgKey("hello", ""), {"en": "Hello"}, active_flags={"en": True})
 
         assert models.TranslationEntry.objects.count() == 1
         entry = models.TranslationEntry.objects.get()
         assert entry.is_active is True
 
-    def test_missing_po_default_treated_as_empty(self, settings):
+    def test_missing_po_default_treated_as_empty(self, settings: "SettingsWrapper"):
         """A language with no PO default is treated as empty string for comparison."""
         settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en", "de"]}
         conf.get_settings.cache_clear()
 
-        backend = self._make_backend()
-        with (
-            # Only en has a PO default; de has no entry
-            unittest.mock.patch.object(backend, "get_defaults", return_value={"en": "Hello"}),
-            unittest.mock.patch.object(backend, "bump_catalog_version"),
-        ):
-            backend.save_translations(
-                MsgKey("hello", ""),
-                {"en": "Hello", "de": ""},  # both match their defaults (en="Hello", de="")
-            )
+        # Only en has a PO default; de has no entry
+        backend = self._make_backend(defaults={"en": {"hello": "Hello"}})
+        backend.save_translations(
+            MsgKey("hello", ""),
+            {"en": "Hello", "de": ""},  # both match their defaults (en="Hello", de="")
+        )
 
         assert models.TranslationEntry.objects.count() == 0

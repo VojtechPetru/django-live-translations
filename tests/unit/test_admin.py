@@ -4,12 +4,24 @@ import unittest.mock
 
 import django.contrib.admin
 import django.contrib.auth
+import django.http
 import django.test
 import django.utils.html
 import pytest
 
 from live_translations import admin, models, services
 from live_translations.types import MsgKey
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_request(path: str = "/admin/") -> django.http.HttpRequest:
+    request = django.test.RequestFactory().get(path)
+    request.user = django.contrib.auth.get_user_model()(username="admin", is_superuser=True)
+    return request
+
 
 # ---------------------------------------------------------------------------
 # _truncate helper
@@ -162,10 +174,9 @@ class TestSaveModel:
     def test_save_existing_entry(self, mock_save: unittest.mock.MagicMock) -> None:
         ma = _get_admin_instance()
         obj = _make_entry(pk=42, msgid="hello", msgstr="Ahoj", language="cs", is_active=True)
-        request = unittest.mock.MagicMock()
-        form = unittest.mock.MagicMock()
+        request = _make_request()
 
-        ma.save_model(request, obj, form, change=True)
+        ma.save_model(request, obj, None, change=True)
 
         mock_save.assert_called_once_with(
             key=MsgKey("hello", ""),
@@ -177,12 +188,11 @@ class TestSaveModel:
     def test_save_new_entry_refreshes_pk(self, mock_save: unittest.mock.MagicMock) -> None:
         ma = _get_admin_instance()
         obj = _make_entry(pk=None, msgid="hello", msgstr="Ahoj", language="cs", context="ctx", is_active=False)
-        request = unittest.mock.MagicMock()
-        form = unittest.mock.MagicMock()
+        request = _make_request()
 
         fake_saved = unittest.mock.MagicMock(pk=99)
         with unittest.mock.patch.object(models.TranslationEntry.objects, "get", return_value=fake_saved) as mock_get:
-            ma.save_model(request, obj, form, change=False)
+            ma.save_model(request, obj, None, change=False)
 
         mock_save.assert_called_once_with(
             key=MsgKey("hello", "ctx"),
@@ -196,11 +206,10 @@ class TestSaveModel:
     def test_save_existing_entry_does_not_refresh_pk(self, mock_save: unittest.mock.MagicMock) -> None:
         ma = _get_admin_instance()
         obj = _make_entry(pk=42)
-        request = unittest.mock.MagicMock()
-        form = unittest.mock.MagicMock()
+        request = _make_request()
 
         with unittest.mock.patch.object(models.TranslationEntry.objects, "get") as mock_get:
-            ma.save_model(request, obj, form, change=True)
+            ma.save_model(request, obj, None, change=True)
 
         mock_get.assert_not_called()
         assert obj.pk == 42
@@ -211,7 +220,7 @@ class TestDeleteModel:
     def test_calls_service(self, mock_delete: unittest.mock.MagicMock) -> None:
         ma = _get_admin_instance()
         obj = _make_entry(pk=1, msgid="hello", language="cs", context="ctx")
-        request = unittest.mock.MagicMock()
+        request = _make_request()
 
         ma.delete_model(request, obj)
 
@@ -222,7 +231,7 @@ class TestDeleteQueryset:
     @unittest.mock.patch.object(services, "delete_entries")
     def test_calls_service(self, mock_delete: unittest.mock.MagicMock) -> None:
         ma = _get_admin_instance()
-        request = unittest.mock.MagicMock()
+        request = _make_request()
         queryset = unittest.mock.MagicMock()
 
         ma.delete_queryset(request, queryset)
@@ -234,7 +243,7 @@ class TestActivateTranslations:
     @unittest.mock.patch.object(services, "activate_entries", return_value=3)
     def test_calls_service_and_messages_user(self, mock_activate: unittest.mock.MagicMock) -> None:
         ma = _get_admin_instance()
-        request = unittest.mock.MagicMock()
+        request = _make_request()
         queryset = unittest.mock.MagicMock()
 
         with unittest.mock.patch.object(ma, "message_user") as mock_msg:
@@ -246,7 +255,7 @@ class TestActivateTranslations:
     @unittest.mock.patch.object(services, "activate_entries", return_value=0)
     def test_zero_updated(self, mock_activate: unittest.mock.MagicMock) -> None:
         ma = _get_admin_instance()
-        request = unittest.mock.MagicMock()
+        request = _make_request()
         queryset = unittest.mock.MagicMock()
 
         with unittest.mock.patch.object(ma, "message_user") as mock_msg:
@@ -259,7 +268,7 @@ class TestDeactivateTranslations:
     @unittest.mock.patch.object(services, "deactivate_entries", return_value=5)
     def test_calls_service_and_messages_user(self, mock_deactivate: unittest.mock.MagicMock) -> None:
         ma = _get_admin_instance()
-        request = unittest.mock.MagicMock()
+        request = _make_request()
         queryset = unittest.mock.MagicMock()
 
         with unittest.mock.patch.object(ma, "message_user") as mock_msg:
@@ -271,7 +280,7 @@ class TestDeactivateTranslations:
     @unittest.mock.patch.object(services, "deactivate_entries", return_value=0)
     def test_zero_updated(self, mock_deactivate: unittest.mock.MagicMock) -> None:
         ma = _get_admin_instance()
-        request = unittest.mock.MagicMock()
+        request = _make_request()
         queryset = unittest.mock.MagicMock()
 
         with unittest.mock.patch.object(ma, "message_user") as mock_msg:
@@ -326,20 +335,20 @@ class TestTranslationHistoryAdminRegistration:
 class TestTranslationHistoryAdminPermissions:
     def test_no_add_permission(self) -> None:
         ma = _get_history_admin_instance()
-        request = unittest.mock.MagicMock()
+        request = _make_request()
         assert ma.has_add_permission(request) is False
 
     def test_no_change_permission(self) -> None:
         ma = _get_history_admin_instance()
-        request = unittest.mock.MagicMock()
+        request = _make_request()
         assert ma.has_change_permission(request) is False
-        assert ma.has_change_permission(request, obj=unittest.mock.MagicMock()) is False
+        assert ma.has_change_permission(request, obj=models.TranslationHistory()) is False
 
     def test_no_delete_permission(self) -> None:
         ma = _get_history_admin_instance()
-        request = unittest.mock.MagicMock()
+        request = _make_request()
         assert ma.has_delete_permission(request) is False
-        assert ma.has_delete_permission(request, obj=unittest.mock.MagicMock()) is False
+        assert ma.has_delete_permission(request, obj=models.TranslationHistory()) is False
 
 
 class TestTranslationHistoryMsgidShort:
@@ -366,7 +375,7 @@ class TestModifiedByFilter:
     def _make_filter(self, value: str | None = None) -> admin.ModifiedByFilter:
         params = {"modified_by": value} if value else {}
         return admin.ModifiedByFilter(
-            request=unittest.mock.MagicMock(),
+            request=_make_request(),
             params=params,
             model=models.TranslationEntry,
             model_admin=_get_admin_instance(),
@@ -374,7 +383,7 @@ class TestModifiedByFilter:
 
     def test_lookups_empty_when_no_history(self) -> None:
         f = self._make_filter()
-        request = unittest.mock.MagicMock()
+        request = _make_request()
         lookups = f.lookups(request, _get_admin_instance())
         assert lookups == []
 
@@ -390,14 +399,14 @@ class TestModifiedByFilter:
         )
 
         f = self._make_filter()
-        request = unittest.mock.MagicMock()
+        request = _make_request()
         lookups = f.lookups(request, _get_admin_instance())
         assert len(lookups) == 1
         assert lookups[0][0] == str(user.pk)
 
     def test_queryset_returns_none_when_no_value(self) -> None:
         f = self._make_filter(value=None)
-        request = unittest.mock.MagicMock()
+        request = _make_request()
         qs = models.TranslationEntry.objects.all()
         result = f.queryset(request, qs)
         assert result is None
@@ -441,7 +450,7 @@ class TestModifiedByFilter:
 
         # Filter by alice
         f = self._make_filter(value=str(alice.pk))
-        request = unittest.mock.MagicMock()
+        request = _make_request()
         result = f.queryset(request, models.TranslationEntry.objects.all())
         assert result is not None
         assert list(result) == [entry_alice]
