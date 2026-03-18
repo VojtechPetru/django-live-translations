@@ -1,6 +1,7 @@
 """Tests for translation edit history."""
 
 import json
+import typing as t
 import unittest.mock
 
 import django.contrib.auth.models
@@ -8,8 +9,11 @@ import django.db
 import django.http
 import pytest
 
-from live_translations import history, models, strings
-from live_translations.types import MsgKey
+if t.TYPE_CHECKING:
+    from pytest_django.fixtures import SettingsWrapper
+
+from live_translations import conf, history, models, strings
+from live_translations.types import LanguageCode, MsgKey
 
 
 @pytest.mark.django_db
@@ -149,8 +153,8 @@ class TestRecordChange:
         assert entry.user is None
 
     def test_anonymous_user_stored_as_null(self):
-        anon = unittest.mock.MagicMock(is_authenticated=False)
-        token = strings.lt_current_user.set(anon)
+        anon = django.contrib.auth.models.AnonymousUser()
+        token = strings.lt_current_user.set(anon)  # type: ignore[arg-type]
         try:
             entry = history.record_change(
                 language="en",
@@ -168,7 +172,7 @@ class TestRecordChange:
 @pytest.mark.django_db
 class TestRecordBulkAction:
     def test_bulk_creates_entries(self):
-        entries = [("en", MsgKey("hello", "")), ("cs", MsgKey("hello", ""))]
+        entries: list[tuple[LanguageCode, MsgKey]] = [("en", MsgKey("hello", "")), ("cs", MsgKey("hello", ""))]
         history.record_bulk_action(
             entries=entries,
             action=models.TranslationHistory.Action.ACTIVATE,
@@ -281,16 +285,13 @@ class TestHistoryIntegrationWidget:
     """Test history recording through DatabaseBackend.save_translations()."""
 
     @pytest.fixture(autouse=True)
-    def _backend(self, make_db_backend):
+    def _backend(self, make_db_backend, settings: "SettingsWrapper"):
+        settings.CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
         self._make_backend = make_db_backend
 
     def test_create_records_history(self):
         backend = self._make_backend()
-        with (
-            unittest.mock.patch.object(backend, "get_defaults", return_value={}),
-            unittest.mock.patch.object(backend, "bump_catalog_version"),
-        ):
-            backend.save_translations(MsgKey("hello", ""), {"en": "Hi"})
+        backend.save_translations(MsgKey("hello", ""), {"en": "Hi"})
 
         h = models.TranslationHistory.objects.get()
         assert h.action == "create"
@@ -299,12 +300,8 @@ class TestHistoryIntegrationWidget:
         assert h.old_value == ""
 
     def test_create_records_po_default_as_old_value(self):
-        backend = self._make_backend()
-        with (
-            unittest.mock.patch.object(backend, "get_defaults", return_value={"en": "Default hello"}),
-            unittest.mock.patch.object(backend, "bump_catalog_version"),
-        ):
-            backend.save_translations(MsgKey("hello", ""), {"en": "Override"})
+        backend = self._make_backend(defaults={"en": {"hello": "Default hello"}})
+        backend.save_translations(MsgKey("hello", ""), {"en": "Override"})
 
         h = models.TranslationHistory.objects.get()
         assert h.action == "create"
@@ -319,11 +316,7 @@ class TestHistoryIntegrationWidget:
             context="",
         )
         backend = self._make_backend()
-        with (
-            unittest.mock.patch.object(backend, "get_defaults", return_value={}),
-            unittest.mock.patch.object(backend, "bump_catalog_version"),
-        ):
-            backend.save_translations(MsgKey("hello", ""), {"en": "Hello"})
+        backend.save_translations(MsgKey("hello", ""), {"en": "Hello"})
 
         h = models.TranslationHistory.objects.get()
         assert h.action == "update"
@@ -340,12 +333,8 @@ class TestHistoryIntegrationWidget:
             context="",
             is_active=True,
         )
-        backend = self._make_backend()
-        with (
-            unittest.mock.patch.object(backend, "get_defaults", return_value={"en": "Default"}),
-            unittest.mock.patch.object(backend, "bump_catalog_version"),
-        ):
-            backend.save_translations(MsgKey("hello", ""), {"en": "Default"}, active_flags={"en": True})
+        backend = self._make_backend(defaults={"en": {"hello": "Default"}})
+        backend.save_translations(MsgKey("hello", ""), {"en": "Default"}, active_flags={"en": True})
 
         entry = models.TranslationEntry.objects.get(language="en", msgid="hello")
         assert entry.msgstr == "Default"
@@ -366,12 +355,8 @@ class TestHistoryIntegrationWidget:
             context="",
             is_active=False,
         )
-        backend = self._make_backend()
-        with (
-            unittest.mock.patch.object(backend, "get_defaults", return_value={"en": "Default"}),
-            unittest.mock.patch.object(backend, "bump_catalog_version"),
-        ):
-            backend.save_translations(MsgKey("hello", ""), {"en": "Default"}, active_flags={"en": False})
+        backend = self._make_backend(defaults={"en": {"hello": "Default"}})
+        backend.save_translations(MsgKey("hello", ""), {"en": "Default"}, active_flags={"en": False})
 
         entry = models.TranslationEntry.objects.get(language="en", msgid="hello")
         assert entry.msgstr == "Default"
@@ -385,11 +370,7 @@ class TestHistoryIntegrationWidget:
             context="",
         )
         backend = self._make_backend()
-        with (
-            unittest.mock.patch.object(backend, "get_defaults", return_value={}),
-            unittest.mock.patch.object(backend, "bump_catalog_version"),
-        ):
-            backend.save_translations(MsgKey("hello", ""), {"en": "Hi"})
+        backend.save_translations(MsgKey("hello", ""), {"en": "Hi"})
 
         assert models.TranslationHistory.objects.count() == 0
 
@@ -402,11 +383,7 @@ class TestHistoryIntegrationWidget:
             is_active=False,
         )
         backend = self._make_backend()
-        with (
-            unittest.mock.patch.object(backend, "get_defaults", return_value={}),
-            unittest.mock.patch.object(backend, "bump_catalog_version"),
-        ):
-            backend.save_translations(MsgKey("hello", ""), {"en": "Hi"}, active_flags={"en": True})
+        backend.save_translations(MsgKey("hello", ""), {"en": "Hi"}, active_flags={"en": True})
 
         h = models.TranslationHistory.objects.get()
         assert h.action == "activate"
@@ -422,11 +399,7 @@ class TestHistoryIntegrationWidget:
             is_active=True,
         )
         backend = self._make_backend()
-        with (
-            unittest.mock.patch.object(backend, "get_defaults", return_value={}),
-            unittest.mock.patch.object(backend, "bump_catalog_version"),
-        ):
-            backend.save_translations(MsgKey("hello", ""), {"en": "Hi"}, active_flags={"en": False})
+        backend.save_translations(MsgKey("hello", ""), {"en": "Hi"}, active_flags={"en": False})
 
         h = models.TranslationHistory.objects.get()
         assert h.action == "deactivate"
@@ -442,11 +415,7 @@ class TestHistoryIntegrationWidget:
             is_active=False,
         )
         backend = self._make_backend()
-        with (
-            unittest.mock.patch.object(backend, "get_defaults", return_value={}),
-            unittest.mock.patch.object(backend, "bump_catalog_version"),
-        ):
-            backend.save_translations(MsgKey("hello", ""), {"en": "Hello"}, active_flags={"en": True})
+        backend.save_translations(MsgKey("hello", ""), {"en": "Hello"}, active_flags={"en": True})
 
         entries = list(models.TranslationHistory.objects.order_by("created_at"))
         assert len(entries) == 2
@@ -463,11 +432,7 @@ class TestHistoryIntegrationWidget:
             is_active=True,
         )
         backend = self._make_backend()
-        with (
-            unittest.mock.patch.object(backend, "get_defaults", return_value={}),
-            unittest.mock.patch.object(backend, "bump_catalog_version"),
-        ):
-            backend.save_translations(MsgKey("hello", ""), {"en": "Hello"}, active_flags={"en": True})
+        backend.save_translations(MsgKey("hello", ""), {"en": "Hello"}, active_flags={"en": True})
 
         # Only text change, no state change
         assert models.TranslationHistory.objects.count() == 1
@@ -477,7 +442,7 @@ class TestHistoryIntegrationWidget:
 @pytest.mark.django_db
 class TestHistoryView:
     @pytest.fixture(autouse=True)
-    def _setup(self, settings):
+    def _setup(self, settings: "SettingsWrapper"):
         settings.LIVE_TRANSLATIONS = {
             "BACKEND": "live_translations.backends.db.DatabaseBackend",
             "LANGUAGES": ["en"],
@@ -612,7 +577,7 @@ class TestHistoryView:
 
 @pytest.mark.django_db
 class TestMiddlewareContextvar:
-    def test_sets_user_for_authenticated_request(self, make_request):
+    def test_sets_user_for_authenticated_request(self, make_request, settings: "SettingsWrapper"):
         user = django.contrib.auth.models.User.objects.create_user(
             username="admin",
             password="test",
@@ -625,23 +590,25 @@ class TestMiddlewareContextvar:
             captured_user = strings.lt_current_user.get(None)
             return django.http.HttpResponse("ok")
 
+        settings.LIVE_TRANSLATIONS = {
+            "BACKEND": "tests.backends.TestBackend",
+            "LANGUAGES": ["en"],
+            "LOCALE_DIR": "/tmp",
+            "PERMISSION_CHECK": "tests.permissions.deny_all",
+        }
+        conf.get_settings.cache_clear()
+        conf.get_backend_instance.cache_clear()
+        conf.get_permission_checker.cache_clear()
+
         from live_translations.middleware import LiveTranslationsMiddleware
 
         mw = LiveTranslationsMiddleware(capturing_view)
         request = make_request("get", "/some-page/", user=user)
-
-        with (
-            unittest.mock.patch("live_translations.conf.get_backend_instance"),
-            unittest.mock.patch(
-                "live_translations.conf.get_permission_checker",
-                return_value=lambda r: False,
-            ),
-        ):
-            mw(request)
+        mw(request)
 
         assert captured_user == user
 
-    def test_sets_none_for_anonymous(self, make_request):
+    def test_sets_none_for_anonymous(self, make_request, settings: "SettingsWrapper"):
         captured_user = "sentinel"
 
         def capturing_view(request):
@@ -649,38 +616,42 @@ class TestMiddlewareContextvar:
             captured_user = strings.lt_current_user.get(None)
             return django.http.HttpResponse("ok")
 
+        settings.LIVE_TRANSLATIONS = {
+            "BACKEND": "tests.backends.TestBackend",
+            "LANGUAGES": ["en"],
+            "LOCALE_DIR": "/tmp",
+            "PERMISSION_CHECK": "tests.permissions.deny_all",
+        }
+        conf.get_settings.cache_clear()
+        conf.get_backend_instance.cache_clear()
+        conf.get_permission_checker.cache_clear()
+
         from live_translations.middleware import LiveTranslationsMiddleware
 
         mw = LiveTranslationsMiddleware(capturing_view)
         request = make_request("get", "/some-page/", anonymous=True)
-
-        with (
-            unittest.mock.patch("live_translations.conf.get_backend_instance"),
-            unittest.mock.patch(
-                "live_translations.conf.get_permission_checker",
-                return_value=lambda r: False,
-            ),
-        ):
-            mw(request)
+        mw(request)
 
         assert captured_user is None  # type: ignore[unnecessary-comparison]
 
-    def test_resets_after_request(self, make_request):
+    def test_resets_after_request(self, make_request, settings: "SettingsWrapper"):
         def noop_view(request):
             return django.http.HttpResponse("ok")
+
+        settings.LIVE_TRANSLATIONS = {
+            "BACKEND": "tests.backends.TestBackend",
+            "LANGUAGES": ["en"],
+            "LOCALE_DIR": "/tmp",
+            "PERMISSION_CHECK": "tests.permissions.deny_all",
+        }
+        conf.get_settings.cache_clear()
+        conf.get_backend_instance.cache_clear()
+        conf.get_permission_checker.cache_clear()
 
         from live_translations.middleware import LiveTranslationsMiddleware
 
         mw = LiveTranslationsMiddleware(noop_view)
         request = make_request("get", "/some-page/", has_permission=True)
-
-        with (
-            unittest.mock.patch("live_translations.conf.get_backend_instance"),
-            unittest.mock.patch(
-                "live_translations.conf.get_permission_checker",
-                return_value=lambda r: False,
-            ),
-        ):
-            mw(request)
+        mw(request)
 
         assert strings.lt_current_user.get(None) is None

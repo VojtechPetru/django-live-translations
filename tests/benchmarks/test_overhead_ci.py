@@ -6,6 +6,9 @@ below a threshold.  Uses timeit with enough iterations to get a stable median.
 These tests do NOT use pytest-benchmark — they run as plain pytest tests so they
 can fail CI without any special flags.
 
+All configuration is injected via Django settings and ``conf.cache_clear()``
+— no mocks are used.
+
 Thresholds:
   - Normal user overhead: < 10% vs baseline  (should be ~1-5% in practice)
   - Translator overhead:  < 100% vs baseline (should be ~35% in practice)
@@ -16,7 +19,6 @@ import pathlib
 import statistics
 import timeit
 import typing as t
-import unittest.mock
 
 import django.conf
 import django.http
@@ -74,25 +76,6 @@ def _bench_view(
     return django.http.HttpResponse(html, content_type="text/html")
 
 
-def _noop_backend() -> unittest.mock.MagicMock:
-    backend = unittest.mock.MagicMock()
-    backend.ensure_current.return_value = None
-    return backend
-
-
-def _conf_patches(
-    *, backend: unittest.mock.MagicMock, permission: bool
-) -> contextlib.AbstractContextManager[dict[str, unittest.mock.MagicMock]]:
-    settings = conf.LiveTranslationsConf(languages=LANGUAGES)
-    return unittest.mock.patch.multiple(
-        "live_translations.middleware.conf",
-        get_backend_instance=unittest.mock.MagicMock(return_value=backend),
-        get_permission_checker=unittest.mock.MagicMock(return_value=lambda _: permission),
-        is_preview_request=unittest.mock.MagicMock(return_value=False),
-        get_settings=unittest.mock.MagicMock(return_value=settings),
-    )
-
-
 @contextlib.contextmanager
 def _restore_original_gettext() -> t.Iterator[None]:
     """Temporarily swap _trans.gettext back to the unpatched original."""
@@ -108,13 +91,33 @@ def _restore_original_gettext() -> t.Iterator[None]:
 
 
 def _make_request(*, is_superuser: bool = False) -> django.http.HttpRequest:
+    from django.contrib.auth.models import AnonymousUser, User
+
     factory = django.test.RequestFactory()
     request = factory.get("/bench/")
-    request.user = unittest.mock.MagicMock(  # type: ignore[assignment]
-        is_authenticated=is_superuser,
-        is_superuser=is_superuser,
-    )
+    if is_superuser:
+        request.user = User(username="bench", is_superuser=True, is_active=True)  # type: ignore[assignment]
+    else:
+        request.user = AnonymousUser()  # type: ignore[assignment]
     return request
+
+
+def _configure_settings(
+    settings: django.conf.LazySettings,
+    *,
+    backend: str,
+    permission: str,
+) -> None:
+    """Configure LIVE_TRANSLATIONS via Django settings and clear conf caches."""
+    settings.LIVE_TRANSLATIONS = {  # type: ignore[attr-defined]
+        "BACKEND": backend,
+        "LANGUAGES": LANGUAGES,
+        "LOCALE_DIR": "/tmp",
+        "PERMISSION_CHECK": permission,
+    }
+    conf.get_settings.cache_clear()
+    conf.get_backend_instance.cache_clear()
+    conf.get_permission_checker.cache_clear()
 
 
 # ---------------------------------------------------------------------------
@@ -126,21 +129,21 @@ class TestNormalUserOverhead:
     """Assert that normal users experience < 20% overhead vs no-package baseline."""
 
     @pytest.fixture(autouse=True)
-    def _setup_locale(self, tmp_path: pathlib.Path) -> t.Iterator[None]:
+    def _setup_locale(self, tmp_path: pathlib.Path, settings: django.conf.LazySettings) -> t.Iterator[None]:
         locale_dir = tmp_path / "locale"
         for n in SCALES:
             for lang in LANGUAGES:
                 generate_po_file(n, locale_dir, lang)
 
-        with unittest.mock.patch.object(django.conf.settings, "LOCALE_PATHS", [str(locale_dir)]):
-            from django.utils.translation import trans_real
+        settings.LOCALE_PATHS = [str(locale_dir)]  # type: ignore[misc]
+        from django.utils.translation import trans_real
 
-            trans_real._translations = {}  # type: ignore[attr-defined]
-            yield
-            trans_real._translations = {}  # type: ignore[attr-defined]
+        trans_real._translations = {}  # type: ignore[attr-defined]
+        yield
+        trans_real._translations = {}  # type: ignore[attr-defined]
 
     @pytest.mark.parametrize("n", SCALES, ids=[f"n={n}" for n in SCALES])
-    def test_normal_user_overhead(self, n: int) -> None:
+    def test_normal_user_overhead(self, n: int, settings: django.conf.LazySettings) -> None:
         tpl_source = generate_template_string(n)
         template = django.template.engines["django"].from_string(tpl_source)
         original_gettext = django.utils.translation.trans_real.gettext  # type: ignore[attr-defined]
@@ -156,6 +159,12 @@ class TestNormalUserOverhead:
             t_baseline = _measure(baseline_fn)
 
         # --- normal user: middleware + patched gettext, permission denied ---
+        _configure_settings(
+            settings,
+            backend="tests.backends.TestBackend",
+            permission="tests.permissions.deny_all",
+        )
+
         normal_req = _make_request(is_superuser=False)
 
         def inner(req: django.http.HttpRequest) -> django.http.HttpResponse:
@@ -164,12 +173,10 @@ class TestNormalUserOverhead:
 
         mw = LiveTranslationsMiddleware(inner)
 
-        with _conf_patches(backend=_noop_backend(), permission=False):
+        def normal_fn() -> None:
+            mw(normal_req)
 
-            def normal_fn() -> None:
-                mw(normal_req)
-
-            t_normal = _measure(normal_fn)
+        t_normal = _measure(normal_fn)
 
         ratio = t_normal / t_baseline
         overhead_pct = (ratio - 1) * 100
@@ -190,21 +197,21 @@ class TestTranslatorOverhead:
     """Assert that translators experience < 100% overhead vs no-package baseline."""
 
     @pytest.fixture(autouse=True)
-    def _setup_locale(self, tmp_path: pathlib.Path) -> t.Iterator[None]:
+    def _setup_locale(self, tmp_path: pathlib.Path, settings: django.conf.LazySettings) -> t.Iterator[None]:
         locale_dir = tmp_path / "locale"
         for n in SCALES:
             for lang in LANGUAGES:
                 generate_po_file(n, locale_dir, lang)
 
-        with unittest.mock.patch.object(django.conf.settings, "LOCALE_PATHS", [str(locale_dir)]):
-            from django.utils.translation import trans_real
+        settings.LOCALE_PATHS = [str(locale_dir)]  # type: ignore[misc]
+        from django.utils.translation import trans_real
 
-            trans_real._translations = {}  # type: ignore[attr-defined]
-            yield
-            trans_real._translations = {}  # type: ignore[attr-defined]
+        trans_real._translations = {}  # type: ignore[attr-defined]
+        yield
+        trans_real._translations = {}  # type: ignore[attr-defined]
 
     @pytest.mark.parametrize("n", SCALES, ids=[f"n={n}" for n in SCALES])
-    def test_translator_overhead(self, n: int) -> None:
+    def test_translator_overhead(self, n: int, settings: django.conf.LazySettings) -> None:
         tpl_source = generate_template_string(n)
         template = django.template.engines["django"].from_string(tpl_source)
         original_gettext = django.utils.translation.trans_real.gettext  # type: ignore[attr-defined]
@@ -220,6 +227,12 @@ class TestTranslatorOverhead:
             t_baseline = _measure(baseline_fn)
 
         # --- translator: middleware + patched gettext, permission granted ---
+        _configure_settings(
+            settings,
+            backend="tests.backends.TestBackend",
+            permission="tests.permissions.allow_all",
+        )
+
         translator_req = _make_request(is_superuser=True)
 
         def inner(req: django.http.HttpRequest) -> django.http.HttpResponse:
@@ -228,23 +241,11 @@ class TestTranslatorOverhead:
 
         mw = LiveTranslationsMiddleware(inner)
 
-        with (
-            _conf_patches(backend=_noop_backend(), permission=True),
-            unittest.mock.patch(
-                "live_translations.middleware.django.middleware.csrf.get_token",
-                return_value="bench-csrf-token",
-            ),
-            unittest.mock.patch(
-                "live_translations.middleware.django.templatetags.static.static",
-                side_effect=lambda p: f"/static/{p}",
-            ),
-        ):
+        def translator_fn() -> None:
+            strings.reset_string_registry()
+            mw(translator_req)
 
-            def translator_fn() -> None:
-                strings.reset_string_registry()
-                mw(translator_req)
-
-            t_translator = _measure(translator_fn)
+        t_translator = _measure(translator_fn)
 
         ratio = t_translator / t_baseline
         overhead_pct = (ratio - 1) * 100

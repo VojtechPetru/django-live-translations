@@ -61,6 +61,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+"tests/*.py" = ["INP001"]
 "tests/unit/**" = ["S101", "S105", "S106", "S108", "PLR2004", "PLR0913", "SIM117", "INP001"]
 "tests/e2e/**" = ["S101", "S105", "S106", "S108", "S603", "S607", "PLR2004", "PLR0913", "PLR1714", "C420", "INP001"]
 "tests/benchmarks/**" = ["S101", "S108", "PLR2004", "PLR0913", "FBT001", "FBT003", "B007", "PERF401", "INP001", "T201"]

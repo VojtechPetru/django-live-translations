@@ -1,9 +1,19 @@
-"""Tests for view error paths (live_translations.views)."""
+"""Tests for view error paths (live_translations.views).
+
+Most error paths are triggered by real conditions (empty msgid → ValueError,
+placeholder mismatch → PlaceholderValidationError).  Backend errors use
+specialised error backends injected via Django settings.
+"""
 
 import json
-import unittest.mock
+import typing as t
 
-from live_translations import services
+import pytest
+
+if t.TYPE_CHECKING:
+    from pytest_django.fixtures import SettingsWrapper
+
+from live_translations import conf
 from live_translations.views import (
     bulk_activate,
     delete_translation,
@@ -20,12 +30,12 @@ _DELETE_PATH = "/__live-translations__/translations/delete/"
 _GET_PATH = "/__live-translations__/translations/"
 _BULK_PATH = "/__live-translations__/translations/bulk-activate/"
 
-
-def _allow_permission():
-    return unittest.mock.patch(
-        "live_translations.conf.get_permission_checker",
-        return_value=lambda request: True,
-    )
+_BASE_SETTINGS = {
+    "BACKEND": "tests.backends.TestBackend",
+    "LANGUAGES": ["en"],
+    "LOCALE_DIR": "/tmp",
+    "PERMISSION_CHECK": "tests.permissions.allow_all",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -34,65 +44,67 @@ def _allow_permission():
 
 
 class TestSaveTranslationsView:
+    @pytest.fixture(autouse=True)
+    def _setup(self, settings: "SettingsWrapper"):
+        settings.LIVE_TRANSLATIONS = _BASE_SETTINGS
+        conf.get_settings.cache_clear()
+        conf.get_backend_instance.cache_clear()
+        conf.get_permission_checker.cache_clear()
+
     def test_invalid_json_400(self, make_request):
         request = make_request("post", _SAVE_PATH, raw_body=b"not json")
-        with _allow_permission():
-            response = save_translations(request)
+        response = save_translations(request)
         assert response.status_code == 400
         assert json.loads(response.content)["error"] == "Invalid JSON"
 
+    @pytest.mark.django_db
     def test_value_error_400(self, make_request):
-        request = make_request("post", _SAVE_PATH, data={"msgid": "", "translations": {}})
-        with (
-            _allow_permission(),
-            unittest.mock.patch(
-                "live_translations.services.save_translations",
-                side_effect=ValueError("msgid is required"),
-            ),
-        ):
-            response = save_translations(request)
+        """Empty msgid triggers ValueError in services.save_translations."""
+        request = make_request("post", _SAVE_PATH, data={"msgid": "", "translations": {"en": "Hi"}})
+        response = save_translations(request)
         assert response.status_code == 400
         assert json.loads(response.content)["error"] == "msgid is required"
 
+    @pytest.mark.django_db
     def test_placeholder_error_400(self, make_request):
-        details = {"en": ["missing %s"]}
+        """Placeholder mismatch triggers PlaceholderValidationError naturally."""
         request = make_request("post", _SAVE_PATH, data={"msgid": "Hello %s", "translations": {"en": "Hi"}})
-        with (
-            _allow_permission(),
-            unittest.mock.patch(
-                "live_translations.services.save_translations",
-                side_effect=services.PlaceholderValidationError(details),
-            ),
-        ):
-            response = save_translations(request)
+        response = save_translations(request)
         assert response.status_code == 400
         body = json.loads(response.content)
         assert body["error"] == "Placeholder mismatch"
-        assert body["details"] == details
+        assert "en" in body["details"]
 
-    def test_file_not_found_404(self, make_request):
+    @pytest.mark.django_db
+    def test_file_not_found_404(self, make_request, settings: "SettingsWrapper"):
+        """FileNotFoundBackend raises FileNotFoundError → view returns 404."""
+        settings.LIVE_TRANSLATIONS = {
+            "BACKEND": "tests.backends.FileNotFoundBackend",
+            "LANGUAGES": ["en"],
+            "LOCALE_DIR": "/tmp",
+            "PERMISSION_CHECK": "tests.permissions.allow_all",
+        }
+        conf.get_settings.cache_clear()
+        conf.get_backend_instance.cache_clear()
+
         request = make_request("post", _SAVE_PATH, data={"msgid": "hello", "translations": {"en": "Hi"}})
-        with (
-            _allow_permission(),
-            unittest.mock.patch(
-                "live_translations.services.save_translations",
-                side_effect=FileNotFoundError("PO file not found"),
-            ),
-        ):
-            response = save_translations(request)
+        response = save_translations(request)
         assert response.status_code == 404
         assert json.loads(response.content)["error"] == "PO file not found"
 
-    def test_backend_error_500(self, make_request):
+    def test_backend_error_500(self, make_request, settings: "SettingsWrapper"):
+        """SaveErrorBackend raises RuntimeError → view returns 500."""
+        settings.LIVE_TRANSLATIONS = {
+            "BACKEND": "tests.backends.SaveErrorBackend",
+            "LANGUAGES": ["en"],
+            "LOCALE_DIR": "/tmp",
+            "PERMISSION_CHECK": "tests.permissions.allow_all",
+        }
+        conf.get_settings.cache_clear()
+        conf.get_backend_instance.cache_clear()
+
         request = make_request("post", _SAVE_PATH, data={"msgid": "hello", "translations": {"en": "Hi"}})
-        with (
-            _allow_permission(),
-            unittest.mock.patch(
-                "live_translations.services.save_translations",
-                side_effect=RuntimeError("unexpected"),
-            ),
-        ):
-            response = save_translations(request)
+        response = save_translations(request)
         assert response.status_code == 500
         assert json.loads(response.content)["error"] == "Backend error"
 
@@ -103,29 +115,34 @@ class TestSaveTranslationsView:
 
 
 class TestGetTranslationsView:
+    @pytest.fixture(autouse=True)
+    def _setup(self, settings: "SettingsWrapper"):
+        settings.LIVE_TRANSLATIONS = _BASE_SETTINGS
+        conf.get_settings.cache_clear()
+        conf.get_backend_instance.cache_clear()
+        conf.get_permission_checker.cache_clear()
+
+    @pytest.mark.django_db
     def test_value_error_400(self, make_request):
+        """Empty msgid triggers ValueError in services.get_translations."""
         request = make_request("get", _GET_PATH, data={"msgid": ""})
-        with (
-            _allow_permission(),
-            unittest.mock.patch(
-                "live_translations.services.get_translations",
-                side_effect=ValueError("msgid is required"),
-            ),
-        ):
-            response = get_translations(request)
+        response = get_translations(request)
         assert response.status_code == 400
         assert json.loads(response.content)["error"] == "msgid is required"
 
-    def test_backend_error_500(self, make_request):
+    def test_backend_error_500(self, make_request, settings: "SettingsWrapper"):
+        """GetErrorBackend raises RuntimeError → view returns 500."""
+        settings.LIVE_TRANSLATIONS = {
+            "BACKEND": "tests.backends.GetErrorBackend",
+            "LANGUAGES": ["en"],
+            "LOCALE_DIR": "/tmp",
+            "PERMISSION_CHECK": "tests.permissions.allow_all",
+        }
+        conf.get_settings.cache_clear()
+        conf.get_backend_instance.cache_clear()
+
         request = make_request("get", _GET_PATH, data={"msgid": "hello"})
-        with (
-            _allow_permission(),
-            unittest.mock.patch(
-                "live_translations.services.get_translations",
-                side_effect=RuntimeError("boom"),
-            ),
-        ):
-            response = get_translations(request)
+        response = get_translations(request)
         assert response.status_code == 500
         assert json.loads(response.content)["error"] == "Backend error"
 
@@ -136,10 +153,16 @@ class TestGetTranslationsView:
 
 
 class TestDeleteTranslationView:
+    @pytest.fixture(autouse=True)
+    def _setup(self, settings: "SettingsWrapper"):
+        settings.LIVE_TRANSLATIONS = _BASE_SETTINGS
+        conf.get_settings.cache_clear()
+        conf.get_backend_instance.cache_clear()
+        conf.get_permission_checker.cache_clear()
+
     def test_invalid_json_400(self, make_request):
         request = make_request("post", _DELETE_PATH, raw_body=b"not json")
-        with _allow_permission():
-            response = delete_translation(request)
+        response = delete_translation(request)
         assert response.status_code == 400
         assert json.loads(response.content)["error"] == "Invalid JSON"
 
@@ -150,23 +173,27 @@ class TestDeleteTranslationView:
 
 
 class TestBulkActivateView:
+    @pytest.fixture(autouse=True)
+    def _setup(self, settings: "SettingsWrapper"):
+        settings.LIVE_TRANSLATIONS = _BASE_SETTINGS
+        conf.get_settings.cache_clear()
+        conf.get_backend_instance.cache_clear()
+        conf.get_permission_checker.cache_clear()
+
     def test_invalid_json_400(self, make_request):
         request = make_request("post", _BULK_PATH, raw_body=b"not json")
-        with _allow_permission():
-            response = bulk_activate(request)
+        response = bulk_activate(request)
         assert response.status_code == 400
         assert json.loads(response.content)["error"] == "Invalid JSON"
 
     def test_invalid_msgid_item_400(self, make_request):
         request = make_request("post", _BULK_PATH, data={"language": "en", "msgids": [{"no_msgid": "x"}]})
-        with _allow_permission():
-            response = bulk_activate(request)
+        response = bulk_activate(request)
         assert response.status_code == 400
         assert "msgid" in json.loads(response.content)["error"]
 
     def test_non_dict_item_400(self, make_request):
         request = make_request("post", _BULK_PATH, data={"language": "en", "msgids": ["just-a-string"]})
-        with _allow_permission():
-            response = bulk_activate(request)
+        response = bulk_activate(request)
         assert response.status_code == 400
         assert "msgid" in json.loads(response.content)["error"]

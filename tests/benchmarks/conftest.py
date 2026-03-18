@@ -2,8 +2,8 @@
 
 import contextlib
 import pathlib
+import sys
 import typing as t
-import unittest.mock
 
 import django
 import django.conf
@@ -11,6 +11,8 @@ import django.http
 import django.test
 import polib
 import pytest
+
+from live_translations.types import LanguageCode
 
 if t.TYPE_CHECKING:
     from live_translations.backends.db import DatabaseBackend
@@ -21,6 +23,12 @@ if t.TYPE_CHECKING:
 
 
 def pytest_configure() -> None:
+    # Ensure ``tests`` package is importable for dotted-path settings
+    # (e.g. ``tests.backends.TestBackend``, ``tests.permissions.allow_all``).
+    repo_root = str(pathlib.Path(__file__).resolve().parent.parent.parent)
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+
     django.conf.settings.configure(
         DATABASES={"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}},
         INSTALLED_APPS=[
@@ -71,7 +79,7 @@ from live_translations import conf, strings  # noqa: E402
 # ---------------------------------------------------------------------------
 
 SCALES: t.Final[list[int]] = [100, 500]
-LANGUAGES: t.Final[list[str]] = ["en", "cs"]
+LANGUAGES: t.Final[list[LanguageCode]] = ["en", "cs"]
 
 
 # ---------------------------------------------------------------------------
@@ -83,7 +91,7 @@ def generate_msgid(index: int) -> str:
     return f"bench.msg_{index:04d}"
 
 
-def generate_msgstr(index: int, language: str = "en") -> str:
+def generate_msgstr(index: int, language: LanguageCode = "en") -> str:
     return f"[{language}] Translated message number {index} with some realistic length"
 
 
@@ -168,7 +176,7 @@ def generate_template_context(n: int, gettext_fn: t.Callable[[str], str]) -> dic
     return context
 
 
-def generate_po_file(n: int, locale_dir: pathlib.Path, language: str) -> pathlib.Path:
+def generate_po_file(n: int, locale_dir: pathlib.Path, language: LanguageCode) -> pathlib.Path:
     """Generate a .po file with N entries and compile to .mo."""
     po_dir = locale_dir / language / "LC_MESSAGES"
     po_dir.mkdir(parents=True, exist_ok=True)
@@ -186,7 +194,7 @@ def generate_po_file(n: int, locale_dir: pathlib.Path, language: str) -> pathlib
     return po_path
 
 
-def populate_db_overrides(n: int, languages: list[str]) -> None:
+def populate_db_overrides(n: int, languages: list[LanguageCode]) -> None:
     """Bulk-create TranslationEntry rows: 80% active, 20% inactive."""
     from live_translations.models import TranslationEntry
 
@@ -272,6 +280,7 @@ RequestFactory = t.Callable[..., django.http.HttpRequest]
 @pytest.fixture
 def make_bench_request() -> RequestFactory:
     """Create a Django HttpRequest with configurable user permissions."""
+    from django.contrib.auth.models import AnonymousUser, User
 
     def _make(
         *,
@@ -280,10 +289,10 @@ def make_bench_request() -> RequestFactory:
     ) -> django.http.HttpRequest:
         factory = django.test.RequestFactory()
         request = factory.get(path)
-        request.user = unittest.mock.MagicMock(  # type: ignore[assignment]
-            is_authenticated=is_superuser,
-            is_superuser=is_superuser,
-        )
+        if is_superuser:
+            request.user = User(username="bench", is_superuser=True, is_active=True)  # type: ignore[assignment]
+        else:
+            request.user = AnonymousUser()  # type: ignore[assignment]
         return request
 
     return _make
@@ -295,7 +304,9 @@ def make_bench_request() -> RequestFactory:
 
 
 @pytest.fixture
-def db_backend_with_overrides(request: pytest.FixtureRequest, transactional_db: None) -> "tuple[int, DatabaseBackend]":
+def db_backend_with_overrides(
+    request: pytest.FixtureRequest, tmp_path: pathlib.Path, transactional_db: None
+) -> "tuple[int, DatabaseBackend]":
     """Populate DB with N overrides per language and return a DatabaseBackend.
 
     Usage: @pytest.mark.parametrize("db_backend_with_overrides", SCALES, indirect=True)
@@ -316,12 +327,13 @@ def db_backend_with_overrides(request: pytest.FixtureRequest, transactional_db: 
     # Populate with n entries per language (80% active / 20% inactive)
     populate_db_overrides(n, LANGUAGES)
 
-    # Create backend pointing at a dummy locale dir (PO fallback not needed)
-    backend = _DatabaseBackend(locale_dir=pathlib.Path("/tmp"), domain="django")
-    mock_po = unittest.mock.MagicMock()
-    mock_po.get_translations.return_value = {}
-    mock_po.get_hint.return_value = ""
-    backend._po_backend = mock_po
+    # Create real PO files so the PO sub-backend has something to read
+    locale_dir = tmp_path / "locale"
+    for lang in LANGUAGES:
+        generate_po_file(n, locale_dir, lang)
+
+    # Create backend with real PO files
+    backend = _DatabaseBackend(locale_dir=locale_dir, domain="django")
 
     # Prime the cache so ensure_current() can detect hit/miss
     cache = django.core.cache.caches["default"]

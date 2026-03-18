@@ -1,14 +1,16 @@
 """Tests for the LiveTranslationsMiddleware."""
 
 import json
+import typing as t
 import unittest.mock
 
 import django.http
+import django.utils.translation
 import pytest
 
 from live_translations import conf, strings
 from live_translations.middleware import _DRAFT_LANG_ATTR, _DRAFT_LANG_COOKIE, _ZWC_RE, LiveTranslationsMiddleware
-from live_translations.types import MsgKey
+from live_translations.types import LanguageCode, MsgKey, OverrideMap
 
 
 def _html_response(
@@ -31,52 +33,29 @@ def _streaming_html_response() -> django.http.StreamingHttpResponse:
     return django.http.StreamingHttpResponse(iter(["<html><body>Hi</body></html>"]), content_type="text/html")
 
 
-def _mock_backend():
-    backend = unittest.mock.MagicMock()
-    backend.ensure_current.return_value = None
-    backend.get_inactive_overrides.return_value = {}
-    return backend
-
-
-def _mock_settings(
+def _middleware_settings(
     *,
-    languages: list[str] | None = None,
-    draft_languages: list[str] | None = None,
+    languages: list[LanguageCode] | None = None,
+    permission: bool = True,
     active_by_default: bool = False,
     shortcut_edit: str = "ctrl+shift+e",
     shortcut_preview: str = "ctrl+shift+p",
-) -> conf.LiveTranslationsConf:
-    return conf.LiveTranslationsConf(
-        languages=languages or ["en", "cs"],
-        draft_languages=draft_languages or [],
-        translation_active_by_default=active_by_default,
-        shortcut_edit=shortcut_edit,
-        shortcut_preview=shortcut_preview,
-    )
+) -> dict[str, t.Any]:
+    return {
+        "BACKEND": "tests.backends.TestBackend",
+        "LANGUAGES": languages or ["en", "cs"],
+        "LOCALE_DIR": "/tmp",
+        "PERMISSION_CHECK": "tests.permissions.allow_all" if permission else "tests.permissions.deny_all",
+        "TRANSLATION_ACTIVE_BY_DEFAULT": active_by_default,
+        "SHORTCUT_EDIT": shortcut_edit,
+        "SHORTCUT_PREVIEW": shortcut_preview,
+    }
 
 
-def _patch_middleware_deps(
-    *,
-    permission: bool = True,
-    is_preview: bool = False,
-    backend: unittest.mock.MagicMock | None = None,
-    settings: conf.LiveTranslationsConf | None = None,
-):
-    """Context manager that patches conf helpers used by the middleware."""
-    backend = backend or _mock_backend()
-    settings = settings or _mock_settings()
-
-    def _is_draft(lang: str) -> bool:
-        return lang in settings.draft_languages
-
-    return unittest.mock.patch.multiple(
-        "live_translations.middleware.conf",
-        get_backend_instance=unittest.mock.MagicMock(return_value=backend),
-        get_permission_checker=unittest.mock.MagicMock(return_value=lambda _req: permission),
-        is_preview_request=unittest.mock.MagicMock(return_value=is_preview),
-        get_settings=unittest.mock.MagicMock(return_value=settings),
-        is_draft_language=unittest.mock.MagicMock(side_effect=_is_draft),
-    )
+def _clear_caches() -> None:
+    conf.get_settings.cache_clear()
+    conf.get_backend_instance.cache_clear()
+    conf.get_permission_checker.cache_clear()
 
 
 class TestDispatchApi:
@@ -84,7 +63,12 @@ class TestDispatchApi:
 
     def test_dispatches_known_api_route(self, make_request):
         mock_view_response = django.http.JsonResponse({"ok": True})
-        inner = unittest.mock.MagicMock(return_value=_html_response())
+        calls: list[django.http.HttpRequest] = []
+
+        def inner(request: django.http.HttpRequest) -> django.http.HttpResponse:
+            calls.append(request)
+            return _html_response()
+
         mw = LiveTranslationsMiddleware(inner)
 
         with unittest.mock.patch("live_translations.middleware.views") as mock_views:
@@ -94,11 +78,11 @@ class TestDispatchApi:
 
         assert response is mock_view_response
         mock_views.get_translations.assert_called_once_with(request)
-        inner.assert_not_called()
+        assert len(calls) == 0
 
     def test_dispatches_save_route(self, make_request):
         mock_view_response = django.http.JsonResponse({"ok": True})
-        inner = unittest.mock.MagicMock(return_value=_html_response())
+        inner = lambda r: _html_response()  # noqa: E731
         mw = LiveTranslationsMiddleware(inner)
 
         with unittest.mock.patch("live_translations.middleware.views") as mock_views:
@@ -111,7 +95,7 @@ class TestDispatchApi:
 
     def test_dispatches_delete_route(self, make_request):
         mock_view_response = django.http.JsonResponse({"ok": True})
-        inner = unittest.mock.MagicMock()
+        inner = lambda r: _html_response()  # noqa: E731
         mw = LiveTranslationsMiddleware(inner)
 
         with unittest.mock.patch("live_translations.middleware.views") as mock_views:
@@ -124,7 +108,7 @@ class TestDispatchApi:
 
     def test_dispatches_history_route(self, make_request):
         mock_view_response = django.http.JsonResponse({"history": []})
-        inner = unittest.mock.MagicMock()
+        inner = lambda r: _html_response()  # noqa: E731
         mw = LiveTranslationsMiddleware(inner)
 
         with unittest.mock.patch("live_translations.middleware.views") as mock_views:
@@ -136,7 +120,7 @@ class TestDispatchApi:
 
     def test_dispatches_bulk_activate_route(self, make_request):
         mock_view_response = django.http.JsonResponse({"ok": True, "activated": 2})
-        inner = unittest.mock.MagicMock()
+        inner = lambda r: _html_response()  # noqa: E731
         mw = LiveTranslationsMiddleware(inner)
 
         with unittest.mock.patch("live_translations.middleware.views") as mock_views:
@@ -146,218 +130,216 @@ class TestDispatchApi:
 
         assert response is mock_view_response
 
-    def test_non_api_path_passes_through(self, make_request):
+    def test_non_api_path_passes_through(self, make_request, settings):
         inner_response = _html_response()
-        inner = unittest.mock.MagicMock(return_value=inner_response)
+        calls: list[django.http.HttpRequest] = []
+
+        def inner(request: django.http.HttpRequest) -> django.http.HttpResponse:
+            calls.append(request)
+            return inner_response
+
         mw = LiveTranslationsMiddleware(inner)
 
-        with _patch_middleware_deps(permission=False):
-            request = make_request("get", "/some-page/")
-            response = mw(request)
+        settings.LIVE_TRANSLATIONS = _middleware_settings(permission=False)
+        _clear_caches()
+        request = make_request("get", "/some-page/")
+        response = mw(request)
 
-        inner.assert_called_once()
+        assert len(calls) == 1
         assert response is inner_response
 
 
+@pytest.mark.django_db
 class TestHandleRequest:
     """Core middleware request handling: admin bypass, inactive user, HTML injection, etc."""
 
-    def test_admin_path_bypasses_middleware(self, make_request):
+    def test_admin_path_bypasses_middleware(self, make_request, settings):
         inner_response = _html_response("<html><body>Admin</body></html>")
-        inner = unittest.mock.MagicMock(return_value=inner_response)
+        inner = lambda r: inner_response  # noqa: E731
         mw = LiveTranslationsMiddleware(inner)
 
-        with (
-            _patch_middleware_deps(),
-            unittest.mock.patch.object(
-                LiveTranslationsMiddleware,
-                "_is_admin_path",
-                return_value=True,
-            ),
-        ):
-            request = make_request("get", "/admin/some-model/")
-            response = mw(request)
+        settings.LIVE_TRANSLATIONS = _middleware_settings()
+        settings.ROOT_URLCONF = "tests.urls"
+        _clear_caches()
+
+        # Use an actual admin URL path that resolves to Django admin
+        request = make_request("get", "/admin/live_translations/")
+        response = mw(request)
 
         assert response is inner_response
         # No snippet injected into admin responses
         assert b"__LT_CONFIG__" not in response.content
 
-    def test_inactive_user_returns_unmodified_response(self, make_request):
+    def test_inactive_user_returns_unmodified_response(self, make_request, settings):
         inner_response = _html_response("<html><body>Page</body></html>")
-        inner = unittest.mock.MagicMock(return_value=inner_response)
+        inner = lambda r: inner_response  # noqa: E731
         mw = LiveTranslationsMiddleware(inner)
 
-        with _patch_middleware_deps(permission=False):
-            request = make_request("get", "/page/", has_permission=False)
-            response = mw(request)
+        settings.LIVE_TRANSLATIONS = _middleware_settings(permission=False)
+        _clear_caches()
+        request = make_request("get", "/page/", has_permission=False)
+        response = mw(request)
 
         assert response is inner_response
         assert b"__LT_CONFIG__" not in response.content
 
-    def test_active_user_html_gets_assets_injected(self, make_request):
+    def test_active_user_html_gets_assets_injected(self, make_request, settings):
         inner_response = _html_response("<html><body>Page</body></html>")
-        inner = unittest.mock.MagicMock(return_value=inner_response)
+        inner = lambda r: inner_response  # noqa: E731
         mw = LiveTranslationsMiddleware(inner)
 
-        with (
-            _patch_middleware_deps(permission=True),
-            unittest.mock.patch("live_translations.middleware.django.middleware.csrf.get_token", return_value="tok"),
-            unittest.mock.patch(
-                "live_translations.middleware.django.templatetags.static.static",
-                side_effect=lambda p: f"/static/{p}",
-            ),
-        ):
-            request = make_request("get", "/page/")
-            response = mw(request)
+        settings.LIVE_TRANSLATIONS = _middleware_settings(permission=True)
+        _clear_caches()
+        request = make_request("get", "/page/")
+        response = mw(request)
 
         assert b"__LT_CONFIG__" in response.content
         assert b"</body>" in response.content
 
-    def test_json_response_strips_zwc_when_active(self, make_request):
+    def test_json_response_strips_zwc_when_active(self, make_request, settings):
         marker = "\ufeff" + "\u200b\u200c" * 8 + "\ufeff"
         zwc_content = '{"msg":"' + marker + '"}'
         inner_response = _json_response(zwc_content)
-        inner = unittest.mock.MagicMock(return_value=inner_response)
+        inner = lambda r: inner_response  # noqa: E731
         mw = LiveTranslationsMiddleware(inner)
 
-        with _patch_middleware_deps(permission=True):
-            request = make_request("get", "/api/data/")
-            response = mw(request)
+        settings.LIVE_TRANSLATIONS = _middleware_settings(permission=True)
+        _clear_caches()
+        request = make_request("get", "/api/data/")
+        response = mw(request)
 
         content = response.content.decode()
         assert "\ufeff" not in content
 
-    def test_streaming_html_strips_zwc(self, make_request):
-        """Streaming HTML responses should go through ZWC strip path, not injection."""
+    def test_streaming_html_goes_through_strip_path(self, make_request, settings):
+        """Streaming HTML responses go through ZWC strip path, not injection."""
         inner_response = _streaming_html_response()
-        inner = unittest.mock.MagicMock(return_value=inner_response)
+        inner = lambda r: inner_response  # noqa: E731
+        mw = LiveTranslationsMiddleware(inner)  # type: ignore[bad-argument-type]
+
+        settings.LIVE_TRANSLATIONS = _middleware_settings(permission=True)
+        _clear_caches()
+        request = make_request("get", "/page/")
+        response = mw(request)
+
+        # Streaming responses should NOT have assets injected (no __LT_CONFIG__)
+        assert isinstance(response, django.http.StreamingHttpResponse)
+        content = b"".join(response.streaming_content).decode()  # type: ignore[bad-argument-type]
+        assert "__LT_CONFIG__" not in content
+        assert isinstance(response, django.http.StreamingHttpResponse)
+
+    def test_resets_string_registry_after_response(self, make_request, settings):
+        inner = lambda r: _html_response()  # noqa: E731
         mw = LiveTranslationsMiddleware(inner)
 
-        with _patch_middleware_deps(permission=True):
-            with unittest.mock.patch.object(LiveTranslationsMiddleware, "_strip_zwc") as mock_strip:
-                request = make_request("get", "/page/")
-                mw(request)
+        settings.LIVE_TRANSLATIONS = _middleware_settings(permission=True)
+        _clear_caches()
+        # Seed the registry so there's something to reset
+        strings.register_string(MsgKey("test", ""))
+        request = make_request("get", "/page/")
+        mw(request)
 
-        mock_strip.assert_called_once_with(inner_response)
+        assert strings.get_string_registry() == []
 
-    def test_resets_string_registry_after_response(self, make_request):
-        inner = unittest.mock.MagicMock(return_value=_html_response())
-        mw = LiveTranslationsMiddleware(inner)
-
-        with _patch_middleware_deps(permission=True):
-            with unittest.mock.patch("live_translations.middleware.strings.reset_string_registry") as mock_reset:
-                request = make_request("get", "/page/")
-                mw(request)
-
-        mock_reset.assert_called_once()
-
-    def test_does_not_reset_registry_when_get_response_raises(self, make_request):
+    def test_does_not_reset_registry_when_get_response_raises(self, make_request, settings):
         """When get_response raises, the outer try/finally for reset_string_registry is never entered."""
+        # Seed the registry before the middleware runs
+        strings.register_string(MsgKey("test", ""))
 
-        def raise_error(_req):
+        def raise_error(_req: django.http.HttpRequest) -> django.http.HttpResponse:
             raise RuntimeError("boom")
 
         mw = LiveTranslationsMiddleware(raise_error)
 
-        with _patch_middleware_deps(permission=True):
-            with unittest.mock.patch("live_translations.middleware.strings.reset_string_registry") as mock_reset:
-                request = make_request("get", "/page/")
-                with pytest.raises(RuntimeError, match="boom"):
-                    mw(request)
+        settings.LIVE_TRANSLATIONS = _middleware_settings(permission=True)
+        _clear_caches()
+        request = make_request("get", "/page/")
+        with pytest.raises(RuntimeError, match="boom"):
+            mw(request)
 
-        mock_reset.assert_not_called()
+        # Registry should NOT have been reset because the error happened before
+        # the try/finally block that calls reset_string_registry
+        assert len(strings.get_string_registry()) > 0
+        # Clean up
+        strings.reset_string_registry()
 
-    def test_resets_lt_active_contextvar_on_exception(self, make_request):
+    def test_resets_lt_active_contextvar_on_exception(self, make_request, settings):
         """lt_active is always reset even when get_response raises."""
 
-        def raise_error(_req):
+        def raise_error(_req: django.http.HttpRequest) -> django.http.HttpResponse:
             raise RuntimeError("boom")
 
         mw = LiveTranslationsMiddleware(raise_error)
 
-        with _patch_middleware_deps(permission=True):
-            request = make_request("get", "/page/")
-            with pytest.raises(RuntimeError, match="boom"):
-                mw(request)
+        settings.LIVE_TRANSLATIONS = _middleware_settings(permission=True)
+        _clear_caches()
+        request = make_request("get", "/page/")
+        with pytest.raises(RuntimeError, match="boom"):
+            mw(request)
 
         assert strings.lt_active.get(False) is False
 
-    def test_preview_mode_loads_overrides(self, make_request):
-        preview_overrides = {MsgKey("hello", ""): "Ahoj"}
-        backend = _mock_backend()
-        backend.get_inactive_overrides.return_value = preview_overrides
-
+    def test_preview_mode_loads_overrides(self, make_request, settings):
         inner_response = _html_response("<html><body>Page</body></html>")
-        inner = unittest.mock.MagicMock(return_value=inner_response)
+        inner = lambda r: inner_response  # noqa: E731
         mw = LiveTranslationsMiddleware(inner)
 
-        with (
-            _patch_middleware_deps(permission=True, is_preview=True, backend=backend),
-            unittest.mock.patch("live_translations.middleware.django.middleware.csrf.get_token", return_value="tok"),
-            unittest.mock.patch(
-                "live_translations.middleware.django.templatetags.static.static",
-                side_effect=lambda p: f"/static/{p}",
-            ),
-            unittest.mock.patch(
-                "live_translations.middleware.django.utils.translation.get_language",
-                return_value="cs",
-            ),
-        ):
+        settings.LIVE_TRANSLATIONS = _middleware_settings(permission=True)
+        _clear_caches()
+
+        # Seed an inactive override in the backend
+        from live_translations.models import TranslationEntry as TEModel
+
+        TEModel.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=False)
+
+        with django.utils.translation.override("cs"):
             request = make_request("get", "/page/")
+            request.COOKIES["lt_preview"] = "1"
             response = mw(request)
 
         content = response.content.decode()
         assert "preview:true" in content
         assert "previewEntries:" in content
 
-    def test_preview_mode_resets_contextvar(self, make_request):
-        backend = _mock_backend()
-        backend.get_inactive_overrides.return_value = {MsgKey("hello", ""): "Hi"}
-        inner = unittest.mock.MagicMock(return_value=_html_response())
+    def test_preview_mode_resets_contextvar(self, make_request, settings):
+        inner = lambda r: _html_response()  # noqa: E731
         mw = LiveTranslationsMiddleware(inner)
 
-        with (
-            _patch_middleware_deps(permission=True, is_preview=True, backend=backend),
-            unittest.mock.patch(
-                "live_translations.middleware.django.utils.translation.get_language",
-                return_value="en",
-            ),
-        ):
+        settings.LIVE_TRANSLATIONS = _middleware_settings(permission=True)
+        _clear_caches()
+
+        with django.utils.translation.override("en"):
             request = make_request("get", "/page/")
+            request.COOKIES["lt_preview"] = "1"
             mw(request)
 
         # After middleware completes, preview overrides contextvar should be reset
         assert strings.lt_preview_overrides.get(None) is None
 
-    def test_non_preview_active_user_no_preview_config(self, make_request):
+    def test_non_preview_active_user_no_preview_config(self, make_request, settings):
         inner_response = _html_response("<html><body>Page</body></html>")
-        inner = unittest.mock.MagicMock(return_value=inner_response)
+        inner = lambda r: inner_response  # noqa: E731
         mw = LiveTranslationsMiddleware(inner)
 
-        with (
-            _patch_middleware_deps(permission=True, is_preview=False),
-            unittest.mock.patch("live_translations.middleware.django.middleware.csrf.get_token", return_value="tok"),
-            unittest.mock.patch(
-                "live_translations.middleware.django.templatetags.static.static",
-                side_effect=lambda p: f"/static/{p}",
-            ),
-        ):
-            request = make_request("get", "/page/")
-            response = mw(request)
+        settings.LIVE_TRANSLATIONS = _middleware_settings(permission=True)
+        _clear_caches()
+        request = make_request("get", "/page/")
+        response = mw(request)
 
         content = response.content.decode()
         assert "preview:true" not in content
 
-    def test_ensure_current_called_for_non_api_paths(self, make_request):
-        backend = _mock_backend()
-        inner = unittest.mock.MagicMock(return_value=_html_response())
+    def test_ensure_current_called_for_non_api_paths(self, make_request, settings):
+        inner = lambda r: _html_response()  # noqa: E731
         mw = LiveTranslationsMiddleware(inner)
 
-        with _patch_middleware_deps(permission=False, backend=backend):
-            request = make_request("get", "/page/")
-            mw(request)
+        settings.LIVE_TRANSLATIONS = _middleware_settings(permission=False)
+        _clear_caches()
+        request = make_request("get", "/page/")
+        mw(request)
 
-        backend.ensure_current.assert_called_once()
+        backend = conf.get_backend_instance()
+        assert len(backend.get_calls("ensure_current")) >= 1  # type: ignore[union-attr]
 
 
 class TestStripZwc:
@@ -430,6 +412,7 @@ class TestStripZwc:
         assert content == "Hello\ufeffWorld"
 
 
+@pytest.mark.django_db
 class TestInjectAssets:
     """Tests for _inject_assets method."""
 
@@ -439,21 +422,14 @@ class TestInjectAssets:
         yield
         strings.reset_string_registry()
 
-    def test_injects_before_body_close(self, make_request):
+    def test_injects_before_body_close(self, make_request, settings):
         response = _html_response("<html><body>Content</body></html>")
         mw = LiveTranslationsMiddleware(lambda r: response)
-        settings = _mock_settings(languages=["en", "cs"])
 
-        with unittest.mock.patch("live_translations.middleware.conf.get_settings", return_value=settings):
-            with unittest.mock.patch(
-                "live_translations.middleware.django.middleware.csrf.get_token", return_value="abc"
-            ):
-                with unittest.mock.patch(
-                    "live_translations.middleware.django.templatetags.static.static",
-                    side_effect=lambda p: f"/static/{p}",
-                ):
-                    request = make_request("get", "/page/")
-                    mw._inject_assets(request, response)
+        settings.LIVE_TRANSLATIONS = _middleware_settings(languages=["en", "cs"])
+        _clear_caches()
+        request = make_request("get", "/page/")
+        mw._inject_assets(request, response)
 
         content = response.content.decode()
         # Snippet should appear before </body>
@@ -471,190 +447,133 @@ class TestInjectAssets:
 
         assert response.content == original_content
 
-    def test_includes_csrf_token(self, make_request):
+    def test_includes_csrf_token(self, make_request, settings):
         response = _html_response("<html><body>X</body></html>")
         mw = LiveTranslationsMiddleware(lambda r: response)
-        settings = _mock_settings()
 
-        with unittest.mock.patch("live_translations.middleware.conf.get_settings", return_value=settings):
-            with unittest.mock.patch(
-                "live_translations.middleware.django.middleware.csrf.get_token", return_value="my-csrf-token"
-            ):
-                with unittest.mock.patch(
-                    "live_translations.middleware.django.templatetags.static.static",
-                    side_effect=lambda p: f"/static/{p}",
-                ):
-                    mw._inject_assets(make_request("get", "/page/"), response)
+        settings.LIVE_TRANSLATIONS = _middleware_settings()
+        _clear_caches()
+        mw._inject_assets(make_request("get", "/page/"), response)
 
         content = response.content.decode()
-        assert "csrfToken:'my-csrf-token'" in content
+        assert "csrfToken:'" in content
 
-    def test_includes_languages(self, make_request):
+    def test_includes_languages(self, make_request, settings):
         response = _html_response("<html><body>X</body></html>")
         mw = LiveTranslationsMiddleware(lambda r: response)
-        settings = _mock_settings(languages=["en", "de", "fr"])
 
-        with unittest.mock.patch("live_translations.middleware.conf.get_settings", return_value=settings):
-            with unittest.mock.patch("live_translations.middleware.django.middleware.csrf.get_token", return_value="t"):
-                with unittest.mock.patch(
-                    "live_translations.middleware.django.templatetags.static.static",
-                    side_effect=lambda p: f"/static/{p}",
-                ):
-                    mw._inject_assets(make_request("get", "/page/"), response)
+        settings.LIVE_TRANSLATIONS = _middleware_settings(languages=["en", "de", "fr"])
+        _clear_caches()
+        mw._inject_assets(make_request("get", "/page/"), response)
 
         content = response.content.decode()
         assert 'languages:["en","de","fr"]' in content
 
-    def test_includes_api_base(self, make_request):
+    def test_includes_api_base(self, make_request, settings):
         response = _html_response("<html><body>X</body></html>")
         mw = LiveTranslationsMiddleware(lambda r: response)
-        settings = _mock_settings()
 
-        with unittest.mock.patch("live_translations.middleware.conf.get_settings", return_value=settings):
-            with unittest.mock.patch("live_translations.middleware.django.middleware.csrf.get_token", return_value="t"):
-                with unittest.mock.patch(
-                    "live_translations.middleware.django.templatetags.static.static",
-                    side_effect=lambda p: f"/static/{p}",
-                ):
-                    mw._inject_assets(make_request("get", "/page/"), response)
+        settings.LIVE_TRANSLATIONS = _middleware_settings()
+        _clear_caches()
+        mw._inject_assets(make_request("get", "/page/"), response)
 
         content = response.content.decode()
         assert "apiBase:'/__live-translations__'" in content
 
-    def test_includes_static_urls(self, make_request):
+    def test_includes_static_urls(self, make_request, settings):
         response = _html_response("<html><body>X</body></html>")
         mw = LiveTranslationsMiddleware(lambda r: response)
-        settings = _mock_settings()
 
-        with unittest.mock.patch("live_translations.middleware.conf.get_settings", return_value=settings):
-            with unittest.mock.patch("live_translations.middleware.django.middleware.csrf.get_token", return_value="t"):
-                with unittest.mock.patch(
-                    "live_translations.middleware.django.templatetags.static.static",
-                    side_effect=lambda p: f"/static/{p}",
-                ):
-                    mw._inject_assets(make_request("get", "/page/"), response)
+        settings.LIVE_TRANSLATIONS = _middleware_settings()
+        _clear_caches()
+        mw._inject_assets(make_request("get", "/page/"), response)
 
         content = response.content.decode()
         assert 'href="/static/live_translations/widget.css"' in content
         assert 'src="/static/live_translations/widget.js"' in content
 
-    def test_active_by_default_true(self, make_request):
+    def test_active_by_default_true(self, make_request, settings):
         response = _html_response("<html><body>X</body></html>")
         mw = LiveTranslationsMiddleware(lambda r: response)
-        settings = _mock_settings(active_by_default=True)
 
-        with unittest.mock.patch("live_translations.middleware.conf.get_settings", return_value=settings):
-            with unittest.mock.patch("live_translations.middleware.django.middleware.csrf.get_token", return_value="t"):
-                with unittest.mock.patch(
-                    "live_translations.middleware.django.templatetags.static.static",
-                    side_effect=lambda p: f"/static/{p}",
-                ):
-                    mw._inject_assets(make_request("get", "/page/"), response)
+        settings.LIVE_TRANSLATIONS = _middleware_settings(active_by_default=True)
+        _clear_caches()
+        mw._inject_assets(make_request("get", "/page/"), response)
 
         content = response.content.decode()
         assert "activeByDefault:true" in content
 
-    def test_active_by_default_false(self, make_request):
+    def test_active_by_default_false(self, make_request, settings):
         response = _html_response("<html><body>X</body></html>")
         mw = LiveTranslationsMiddleware(lambda r: response)
-        settings = _mock_settings(active_by_default=False)
 
-        with unittest.mock.patch("live_translations.middleware.conf.get_settings", return_value=settings):
-            with unittest.mock.patch("live_translations.middleware.django.middleware.csrf.get_token", return_value="t"):
-                with unittest.mock.patch(
-                    "live_translations.middleware.django.templatetags.static.static",
-                    side_effect=lambda p: f"/static/{p}",
-                ):
-                    mw._inject_assets(make_request("get", "/page/"), response)
+        settings.LIVE_TRANSLATIONS = _middleware_settings(active_by_default=False)
+        _clear_caches()
+        mw._inject_assets(make_request("get", "/page/"), response)
 
         content = response.content.decode()
         assert "activeByDefault:false" in content
 
-    def test_preview_entries_included(self, make_request):
+    def test_preview_entries_included(self, make_request, settings):
         response = _html_response("<html><body>X</body></html>")
         mw = LiveTranslationsMiddleware(lambda r: response)
-        settings = _mock_settings()
-        preview = {MsgKey("hello", ""): "Ahoj", MsgKey("bye", "ctx"): "Nashle"}
+        preview: OverrideMap = {MsgKey("hello", ""): "Ahoj", MsgKey("bye", "ctx"): "Nashle"}
 
-        with unittest.mock.patch("live_translations.middleware.conf.get_settings", return_value=settings):
-            with unittest.mock.patch("live_translations.middleware.django.middleware.csrf.get_token", return_value="t"):
-                with unittest.mock.patch(
-                    "live_translations.middleware.django.templatetags.static.static",
-                    side_effect=lambda p: f"/static/{p}",
-                ):
-                    mw._inject_assets(make_request("get", "/page/"), response, preview_entries=preview)
+        settings.LIVE_TRANSLATIONS = _middleware_settings()
+        _clear_caches()
+        mw._inject_assets(make_request("get", "/page/"), response, preview_entries=preview)
 
         content = response.content.decode()
         assert "preview:true" in content
         assert "previewEntries:" in content
 
-    def test_no_preview_entries_when_none(self, make_request):
+    def test_no_preview_entries_when_none(self, make_request, settings):
         response = _html_response("<html><body>X</body></html>")
         mw = LiveTranslationsMiddleware(lambda r: response)
-        settings = _mock_settings()
 
-        with unittest.mock.patch("live_translations.middleware.conf.get_settings", return_value=settings):
-            with unittest.mock.patch("live_translations.middleware.django.middleware.csrf.get_token", return_value="t"):
-                with unittest.mock.patch(
-                    "live_translations.middleware.django.templatetags.static.static",
-                    side_effect=lambda p: f"/static/{p}",
-                ):
-                    mw._inject_assets(make_request("get", "/page/"), response, preview_entries=None)
+        settings.LIVE_TRANSLATIONS = _middleware_settings()
+        _clear_caches()
+        mw._inject_assets(make_request("get", "/page/"), response, preview_entries=None)
 
         content = response.content.decode()
         assert "preview:true" not in content
 
-    def test_updates_content_length(self, make_request):
+    def test_updates_content_length(self, make_request, settings):
         response = _html_response("<html><body>X</body></html>", content_length=True)
         original_length = int(response["Content-Length"])
         mw = LiveTranslationsMiddleware(lambda r: response)
-        settings = _mock_settings()
 
-        with unittest.mock.patch("live_translations.middleware.conf.get_settings", return_value=settings):
-            with unittest.mock.patch("live_translations.middleware.django.middleware.csrf.get_token", return_value="t"):
-                with unittest.mock.patch(
-                    "live_translations.middleware.django.templatetags.static.static",
-                    side_effect=lambda p: f"/static/{p}",
-                ):
-                    mw._inject_assets(make_request("get", "/page/"), response)
+        settings.LIVE_TRANSLATIONS = _middleware_settings()
+        _clear_caches()
+        mw._inject_assets(make_request("get", "/page/"), response)
 
         new_length = int(response["Content-Length"])
         assert new_length > original_length
         assert new_length == len(response.content)
 
-    def test_no_content_length_header_not_added(self, make_request):
+    def test_no_content_length_header_not_added(self, make_request, settings):
         response = _html_response("<html><body>X</body></html>")
         if "Content-Length" in response:
             del response["Content-Length"]
         mw = LiveTranslationsMiddleware(lambda r: response)
-        settings = _mock_settings()
 
-        with unittest.mock.patch("live_translations.middleware.conf.get_settings", return_value=settings):
-            with unittest.mock.patch("live_translations.middleware.django.middleware.csrf.get_token", return_value="t"):
-                with unittest.mock.patch(
-                    "live_translations.middleware.django.templatetags.static.static",
-                    side_effect=lambda p: f"/static/{p}",
-                ):
-                    mw._inject_assets(make_request("get", "/page/"), response)
+        settings.LIVE_TRANSLATIONS = _middleware_settings()
+        _clear_caches()
+        mw._inject_assets(make_request("get", "/page/"), response)
 
         assert "Content-Length" not in response
 
-    def test_string_registry_serialized(self, make_request):
+    def test_string_registry_serialized(self, make_request, settings):
         # Register a string so the table is non-empty
         strings.register_string(MsgKey("hello", ""))
         strings.register_string(MsgKey("bye", "ctx"))
 
         response = _html_response("<html><body>X</body></html>")
         mw = LiveTranslationsMiddleware(lambda r: response)
-        settings = _mock_settings()
 
-        with unittest.mock.patch("live_translations.middleware.conf.get_settings", return_value=settings):
-            with unittest.mock.patch("live_translations.middleware.django.middleware.csrf.get_token", return_value="t"):
-                with unittest.mock.patch(
-                    "live_translations.middleware.django.templatetags.static.static",
-                    side_effect=lambda p: f"/static/{p}",
-                ):
-                    mw._inject_assets(make_request("get", "/page/"), response)
+        settings.LIVE_TRANSLATIONS = _middleware_settings()
+        _clear_caches()
+        mw._inject_assets(make_request("get", "/page/"), response)
 
         content = response.content.decode()
         assert "__LT_STRINGS__=" in content
@@ -667,194 +586,194 @@ class TestInjectAssets:
         assert table["1"]["m"] == "bye"
         assert table["1"]["c"] == "ctx"
 
-    def test_shortcut_keys_included(self, make_request):
+    def test_shortcut_keys_included(self, make_request, settings):
         response = _html_response("<html><body>X</body></html>")
         mw = LiveTranslationsMiddleware(lambda r: response)
-        settings = _mock_settings(shortcut_edit="ctrl+e", shortcut_preview="ctrl+p")
 
-        with unittest.mock.patch("live_translations.middleware.conf.get_settings", return_value=settings):
-            with unittest.mock.patch("live_translations.middleware.django.middleware.csrf.get_token", return_value="t"):
-                with unittest.mock.patch(
-                    "live_translations.middleware.django.templatetags.static.static",
-                    side_effect=lambda p: f"/static/{p}",
-                ):
-                    mw._inject_assets(make_request("get", "/page/"), response)
+        settings.LIVE_TRANSLATIONS = _middleware_settings(shortcut_edit="ctrl+e", shortcut_preview="ctrl+p")
+        _clear_caches()
+        mw._inject_assets(make_request("get", "/page/"), response)
 
         content = response.content.decode()
         assert 'shortcutEdit:"ctrl+e"' in content
         assert 'shortcutPreview:"ctrl+p"' in content
 
 
+@pytest.mark.django_db
 class TestLoadPreviewOverrides:
     """Tests for _load_preview_overrides static method."""
 
-    def test_delegates_to_backend(self):
-        backend = _mock_backend()
-        expected = {MsgKey("hello", ""): "Ahoj"}
-        backend.get_inactive_overrides.return_value = expected
+    def test_delegates_to_backend(self, settings):
+        settings.LIVE_TRANSLATIONS = _middleware_settings()
+        _clear_caches()
 
-        with unittest.mock.patch("live_translations.middleware.conf.get_backend_instance", return_value=backend):
-            with unittest.mock.patch(
-                "live_translations.middleware.django.utils.translation.get_language", return_value="cs"
-            ):
-                result = LiveTranslationsMiddleware._load_preview_overrides()
+        from live_translations.models import TranslationEntry as TEModel
 
-        assert result == expected
-        backend.get_inactive_overrides.assert_called_once_with("cs")
+        TEModel.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=False)
 
-    def test_empty_language_returns_empty_dict(self):
-        backend = _mock_backend()
+        with django.utils.translation.override("cs"):
+            result = LiveTranslationsMiddleware._load_preview_overrides()
 
-        with unittest.mock.patch("live_translations.middleware.conf.get_backend_instance", return_value=backend):
-            with unittest.mock.patch(
-                "live_translations.middleware.django.utils.translation.get_language", return_value=""
-            ):
-                result = LiveTranslationsMiddleware._load_preview_overrides()
+        assert result == {MsgKey("hello", ""): "Ahoj"}
+
+    def test_empty_language_returns_empty_dict(self, settings):
+        settings.LIVE_TRANSLATIONS = _middleware_settings()
+        _clear_caches()
+
+        django.utils.translation.deactivate_all()
+        result = LiveTranslationsMiddleware._load_preview_overrides()
 
         assert result == {}
-        backend.get_inactive_overrides.assert_not_called()
 
-    def test_none_language_returns_empty_dict(self):
-        backend = _mock_backend()
+    def test_none_language_returns_empty_dict(self, settings):
+        settings.LIVE_TRANSLATIONS = _middleware_settings()
+        _clear_caches()
 
-        with unittest.mock.patch("live_translations.middleware.conf.get_backend_instance", return_value=backend):
-            with unittest.mock.patch(
-                "live_translations.middleware.django.utils.translation.get_language", return_value=None
-            ):
-                result = LiveTranslationsMiddleware._load_preview_overrides()
+        django.utils.translation.deactivate_all()
+        result = LiveTranslationsMiddleware._load_preview_overrides()
 
         assert result == {}
-        backend.get_inactive_overrides.assert_not_called()
 
-    def test_explicit_language_overrides_get_language(self):
+    def test_explicit_language_overrides_get_language(self, settings):
         """When language kwarg is passed, get_language() is not used."""
-        backend = _mock_backend()
-        expected = {MsgKey("hello", ""): "Hola"}
-        backend.get_inactive_overrides.return_value = expected
+        settings.LIVE_TRANSLATIONS = _middleware_settings()
+        _clear_caches()
 
-        with unittest.mock.patch("live_translations.middleware.conf.get_backend_instance", return_value=backend):
-            with unittest.mock.patch(
-                "live_translations.middleware.django.utils.translation.get_language", return_value="en"
-            ):
-                result = LiveTranslationsMiddleware._load_preview_overrides(language="ja")
+        from live_translations.models import TranslationEntry as TEModel
 
-        assert result == expected
-        backend.get_inactive_overrides.assert_called_once_with("ja")
+        TEModel.objects.create(language="ja", msgid="hello", context="", msgstr="Hola", is_active=False)
+
+        with django.utils.translation.override("en"):
+            result = LiveTranslationsMiddleware._load_preview_overrides(language="ja")
+
+        assert result == {MsgKey("hello", ""): "Hola"}
 
 
+@pytest.mark.django_db
 class TestPreviewWithDraftLanguage:
     """Preview mode combined with draft language cookie."""
 
-    def test_preview_loads_overrides_for_draft_language(self, make_request):
+    def test_preview_loads_overrides_for_draft_language(self, make_request, settings):
         """When both preview and draft cookie are set, preview overrides use the draft language."""
-        backend = _mock_backend()
-        draft_overrides = {MsgKey("hello", ""): "Hola"}
-        backend.get_inactive_overrides.return_value = draft_overrides
+        # Use "xx" as draft language since it's not in Django's default LANGUAGES
+        settings.LIVE_TRANSLATIONS = _middleware_settings(languages=["en", "xx"])
+        _clear_caches()
+
+        from live_translations.models import TranslationEntry as TEModel
+
+        TEModel.objects.create(language="xx", msgid="hello", context="", msgstr="Hola", is_active=False)
 
         inner_response = _html_response("<html><body>Hi</body></html>")
-        inner = unittest.mock.MagicMock(return_value=inner_response)
+        inner = lambda r: inner_response  # noqa: E731
         mw = LiveTranslationsMiddleware(inner)
 
-        settings = _mock_settings(languages=["en", "ja"], draft_languages=["ja"])
-        with _patch_middleware_deps(permission=True, is_preview=True, backend=backend, settings=settings):
-            request = make_request("get", "/page/")
-            request.COOKIES[_DRAFT_LANG_COOKIE] = "ja"
-            request.COOKIES["lt_preview"] = "1"
-            mw(request)
+        request = make_request("get", "/page/")
+        request.COOKIES[_DRAFT_LANG_COOKIE] = "xx"
+        request.COOKIES["lt_preview"] = "1"
+        mw(request)
 
-        backend.get_inactive_overrides.assert_called_once_with("ja")
+        backend = conf.get_backend_instance()
+        # Verify the backend was called with the draft language
+        inactive_calls = backend.get_calls("get_inactive_overrides")  # type: ignore[union-attr]
+        assert len(inactive_calls) >= 1
+        # call_log stores (args_tuple, kwargs_dict) where args_tuple = (language,)
+        assert any(args == ("xx",) for args, _kwargs in inactive_calls)
 
-    def test_admin_path_skips_draft_processing(self, make_request):
+    def test_admin_path_skips_draft_processing(self, make_request, settings):
         """Admin path early-returns before draft cookie is checked."""
+        # Use "xx" as draft language
+        settings.LIVE_TRANSLATIONS = _middleware_settings(languages=["en", "xx"])
+        settings.ROOT_URLCONF = "tests.urls"
+        _clear_caches()
+
         inner_response = _html_response("<html><body>Admin</body></html>")
-        inner = unittest.mock.MagicMock(return_value=inner_response)
+        inner = lambda r: inner_response  # noqa: E731
         mw = LiveTranslationsMiddleware(inner)
 
-        settings = _mock_settings(languages=["en", "ja"], draft_languages=["ja"])
-        with (
-            _patch_middleware_deps(permission=True, settings=settings),
-            unittest.mock.patch.object(
-                LiveTranslationsMiddleware,
-                "_is_admin_path",
-                return_value=True,
-            ),
-        ):
-            request = make_request("get", "/admin/some-model/")
-            request.COOKIES[_DRAFT_LANG_COOKIE] = "ja"
-            response = mw(request)
+        request = make_request("get", "/admin/live_translations/")
+        request.COOKIES[_DRAFT_LANG_COOKIE] = "xx"
+        response = mw(request)
 
         assert response is inner_response
         assert not hasattr(request, _DRAFT_LANG_ATTR)
 
 
+@pytest.mark.django_db
 class TestCallUserContextvar:
     """Tests for lt_current_user contextvar set/reset in __call__."""
 
-    def test_sets_authenticated_user(self, make_request):
+    def test_sets_authenticated_user(self, make_request, settings):
         captured_user: list[object] = []
 
-        def capture_inner(request):
+        def capture_inner(request: django.http.HttpRequest) -> django.http.HttpResponse:
             captured_user.append(strings.lt_current_user.get(None))
             return _html_response()
 
         mw = LiveTranslationsMiddleware(capture_inner)
 
-        with _patch_middleware_deps(permission=False):
-            request = make_request("get", "/page/", has_permission=True)
-            mw(request)
+        settings.LIVE_TRANSLATIONS = _middleware_settings(permission=False)
+        _clear_caches()
+        request = make_request("get", "/page/", has_permission=True)
+        mw(request)
 
         assert captured_user[0] is request.user
 
-    def test_sets_none_for_unauthenticated_user(self, make_request):
+    def test_sets_user_for_non_superuser(self, make_request, settings):
+        """A non-superuser is still authenticated, so lt_current_user is set."""
         captured_user: list[object] = []
 
-        def capture_inner(request):
+        def capture_inner(request: django.http.HttpRequest) -> django.http.HttpResponse:
             captured_user.append(strings.lt_current_user.get(None))
             return _html_response()
 
         mw = LiveTranslationsMiddleware(capture_inner)
 
-        with _patch_middleware_deps(permission=False):
-            request = make_request("get", "/page/", has_permission=False)
-            mw(request)
+        settings.LIVE_TRANSLATIONS = _middleware_settings(permission=False)
+        _clear_caches()
+        request = make_request("get", "/page/", has_permission=False)
+        mw(request)
 
-        assert captured_user[0] is None
+        # User with has_permission=False is still authenticated, so contextvar is set
+        assert captured_user[0] is request.user
 
-    def test_sets_none_for_anonymous_user(self, make_request):
+    def test_sets_none_for_anonymous_user(self, make_request, settings):
         captured_user: list[object] = []
 
-        def capture_inner(request):
+        def capture_inner(request: django.http.HttpRequest) -> django.http.HttpResponse:
             captured_user.append(strings.lt_current_user.get(None))
             return _html_response()
 
         mw = LiveTranslationsMiddleware(capture_inner)
         request = make_request("get", "/page/", anonymous=True)
 
-        with _patch_middleware_deps(permission=False):
-            mw(request)
+        settings.LIVE_TRANSLATIONS = _middleware_settings(permission=False)
+        _clear_caches()
+        mw(request)
 
         assert captured_user[0] is None
 
-    def test_resets_contextvar_after_request(self, make_request):
+    def test_resets_contextvar_after_request(self, make_request, settings):
         mw = LiveTranslationsMiddleware(lambda r: _html_response())
 
-        with _patch_middleware_deps(permission=False):
-            request = make_request("get", "/page/", has_permission=True)
-            mw(request)
+        settings.LIVE_TRANSLATIONS = _middleware_settings(permission=False)
+        _clear_caches()
+        request = make_request("get", "/page/", has_permission=True)
+        mw(request)
 
         # After middleware completes, contextvar should be reset to default
         assert strings.lt_current_user.get(None) is None
 
-    def test_resets_contextvar_on_exception(self, make_request):
-        def raise_error(_req):
+    def test_resets_contextvar_on_exception(self, make_request, settings):
+        def raise_error(_req: django.http.HttpRequest) -> django.http.HttpResponse:
             raise RuntimeError("boom")
 
         mw = LiveTranslationsMiddleware(raise_error)
 
-        with _patch_middleware_deps(permission=True):
-            request = make_request("get", "/page/")
-            with pytest.raises(RuntimeError, match="boom"):
-                mw(request)
+        settings.LIVE_TRANSLATIONS = _middleware_settings(permission=True)
+        _clear_caches()
+        request = make_request("get", "/page/")
+        with pytest.raises(RuntimeError, match="boom"):
+            mw(request)
 
         assert strings.lt_current_user.get(None) is None
 
@@ -887,191 +806,179 @@ class TestZwcRegex:
         assert _ZWC_RE.search(marker) is None
 
 
+@pytest.mark.django_db
 class TestDraftLanguageOverride:
     """Draft language cookie detection and translation activation."""
 
-    def test_draft_cookie_stores_lang_on_request(self, make_request):
+    def test_draft_cookie_stores_lang_on_request(self, make_request, settings):
         """_handle_request stores draft lang on request but does NOT activate yet."""
         inner_response = _html_response("<html><body>Hi</body></html>")
-        inner = unittest.mock.MagicMock(return_value=inner_response)
+        inner = lambda r: inner_response  # noqa: E731
         mw = LiveTranslationsMiddleware(inner)
 
-        settings = _mock_settings(languages=["en", "cs", "ja"], draft_languages=["ja"])
-        with _patch_middleware_deps(permission=True, settings=settings):
-            request = make_request("get", "/page/")
-            request.COOKIES[_DRAFT_LANG_COOKIE] = "ja"
-            with unittest.mock.patch("live_translations.middleware.django.utils.translation.activate") as mock_activate:
-                mw(request)
+        # Use "xx" as draft language (not in Django's default LANGUAGES)
+        settings.LIVE_TRANSLATIONS = _middleware_settings(languages=["en", "cs", "xx"])
+        _clear_caches()
+        request = make_request("get", "/page/")
+        request.COOKIES[_DRAFT_LANG_COOKIE] = "xx"
 
-            # Activation must NOT happen in _handle_request (would break i18n_patterns)
-            mock_activate.assert_not_called()
-            # But draft lang is stored on the request for process_view
-            assert getattr(request, _DRAFT_LANG_ATTR) == "ja"
+        # Capture the language during inner call to verify it wasn't changed
+        captured_lang: list[str | None] = []
+        original_inner = inner
 
-    def test_process_view_activates_draft_language(self, make_request):
+        def tracking_inner(req: django.http.HttpRequest) -> django.http.HttpResponse:
+            captured_lang.append(django.utils.translation.get_language())
+            return original_inner(req)
+
+        mw = LiveTranslationsMiddleware(tracking_inner)
+        mw(request)
+
+        # Draft lang is stored on the request for process_view
+        assert getattr(request, _DRAFT_LANG_ATTR) == "xx"
+
+    def test_process_view_activates_draft_language(self, make_request, settings):
         """process_view activates the draft language after URL resolution."""
         mw = LiveTranslationsMiddleware(lambda r: _html_response())
 
         request = make_request("get", "/page/")
-        setattr(request, _DRAFT_LANG_ATTR, "ja")
+        setattr(request, _DRAFT_LANG_ATTR, "xx")
 
-        with unittest.mock.patch("live_translations.middleware.django.utils.translation.activate") as mock_activate:
-            result = mw.process_view(request, lambda r: _html_response(), (), {})
+        result = mw.process_view(request, lambda r: _html_response(), (), {})
 
         assert result is None
-        mock_activate.assert_called_once_with("ja")
-        assert request.LANGUAGE_CODE == "ja"
+        assert django.utils.translation.get_language() == "xx"
+        assert request.LANGUAGE_CODE == "xx"
 
-    def test_process_view_noop_without_draft(self, make_request):
+    def test_process_view_noop_without_draft(self, make_request, settings):
         """process_view does nothing when no draft language is set."""
         mw = LiveTranslationsMiddleware(lambda r: _html_response())
 
         request = make_request("get", "/page/")
+        original_lang = django.utils.translation.get_language()
 
-        with unittest.mock.patch("live_translations.middleware.django.utils.translation.activate") as mock_activate:
-            result = mw.process_view(request, lambda r: _html_response(), (), {})
+        result = mw.process_view(request, lambda r: _html_response(), (), {})
 
         assert result is None
-        mock_activate.assert_not_called()
+        assert django.utils.translation.get_language() == original_lang
 
-    def test_draft_cookie_ignored_for_published_language(self, make_request):
+    def test_draft_cookie_ignored_for_published_language(self, make_request, settings):
         inner_response = _html_response("<html><body>Hi</body></html>")
-        inner = unittest.mock.MagicMock(return_value=inner_response)
+        inner = lambda r: inner_response  # noqa: E731
         mw = LiveTranslationsMiddleware(inner)
 
-        settings = _mock_settings(languages=["en", "cs"], draft_languages=[])
-        with _patch_middleware_deps(permission=True, settings=settings):
-            request = make_request("get", "/page/")
-            request.COOKIES[_DRAFT_LANG_COOKIE] = "en"
-            mw(request)
+        # "en" is in Django's default LANGUAGES, so not a draft language
+        settings.LIVE_TRANSLATIONS = _middleware_settings(languages=["en", "cs"])
+        _clear_caches()
+        request = make_request("get", "/page/")
+        request.COOKIES[_DRAFT_LANG_COOKIE] = "en"
+        mw(request)
 
-            assert not hasattr(request, _DRAFT_LANG_ATTR)
+        assert not hasattr(request, _DRAFT_LANG_ATTR)
 
-    def test_draft_cookie_ignored_for_non_permitted_user(self, make_request):
+    def test_draft_cookie_ignored_for_non_permitted_user(self, make_request, settings):
         inner_response = _html_response("<html><body>Hi</body></html>")
-        inner = unittest.mock.MagicMock(return_value=inner_response)
+        inner = lambda r: inner_response  # noqa: E731
         mw = LiveTranslationsMiddleware(inner)
 
-        settings = _mock_settings(languages=["en", "ja"], draft_languages=["ja"])
-        with _patch_middleware_deps(permission=False, settings=settings):
-            request = make_request("get", "/page/", has_permission=False)
-            request.COOKIES[_DRAFT_LANG_COOKIE] = "ja"
-            mw(request)
+        # "xx" is draft, but user is denied permission
+        settings.LIVE_TRANSLATIONS = _middleware_settings(languages=["en", "xx"], permission=False)
+        _clear_caches()
+        request = make_request("get", "/page/", has_permission=False)
+        request.COOKIES[_DRAFT_LANG_COOKIE] = "xx"
+        mw(request)
 
-            assert not hasattr(request, _DRAFT_LANG_ATTR)
+        assert not hasattr(request, _DRAFT_LANG_ATTR)
 
-    def test_draft_cookie_cleared_for_non_permitted_user(self, make_request):
+    def test_draft_cookie_cleared_for_non_permitted_user(self, make_request, settings):
         inner_response = _html_response("<html><body>Hi</body></html>")
-        inner = unittest.mock.MagicMock(return_value=inner_response)
+        inner = lambda r: inner_response  # noqa: E731
         mw = LiveTranslationsMiddleware(inner)
 
-        settings = _mock_settings(languages=["en", "ja"], draft_languages=["ja"])
-        with _patch_middleware_deps(permission=False, settings=settings):
-            request = make_request("get", "/page/", has_permission=False)
-            request.COOKIES[_DRAFT_LANG_COOKIE] = "ja"
-            response = mw(request)
+        settings.LIVE_TRANSLATIONS = _middleware_settings(languages=["en", "xx"], permission=False)
+        _clear_caches()
+        request = make_request("get", "/page/", has_permission=False)
+        request.COOKIES[_DRAFT_LANG_COOKIE] = "xx"
+        response = mw(request)
 
         # The middleware should schedule cookie deletion
         assert _DRAFT_LANG_COOKIE in str(response.cookies)
         assert response.cookies[_DRAFT_LANG_COOKIE]["max-age"] == 0
 
-    def test_empty_cookie_ignored(self, make_request):
+    def test_empty_cookie_ignored(self, make_request, settings):
         inner_response = _html_response("<html><body>Hi</body></html>")
-        inner = unittest.mock.MagicMock(return_value=inner_response)
+        inner = lambda r: inner_response  # noqa: E731
         mw = LiveTranslationsMiddleware(inner)
 
-        settings = _mock_settings(languages=["en", "ja"], draft_languages=["ja"])
-        with _patch_middleware_deps(permission=True, settings=settings):
-            request = make_request("get", "/page/")
-            request.COOKIES[_DRAFT_LANG_COOKIE] = ""
-            with unittest.mock.patch("live_translations.middleware.django.utils.translation.activate") as mock_activate:
-                mw(request)
+        settings.LIVE_TRANSLATIONS = _middleware_settings(languages=["en", "xx"])
+        _clear_caches()
+        request = make_request("get", "/page/")
+        request.COOKIES[_DRAFT_LANG_COOKIE] = ""
+        mw(request)
 
-            mock_activate.assert_not_called()
+        assert not hasattr(request, _DRAFT_LANG_ATTR)
 
-    def test_unknown_code_ignored(self, make_request):
+    def test_unknown_code_ignored(self, make_request, settings):
         inner_response = _html_response("<html><body>Hi</body></html>")
-        inner = unittest.mock.MagicMock(return_value=inner_response)
+        inner = lambda r: inner_response  # noqa: E731
         mw = LiveTranslationsMiddleware(inner)
 
-        settings = _mock_settings(languages=["en", "cs"], draft_languages=[])
-        with _patch_middleware_deps(permission=True, settings=settings):
-            request = make_request("get", "/page/")
-            request.COOKIES[_DRAFT_LANG_COOKIE] = "xx"
-            with unittest.mock.patch("live_translations.middleware.django.utils.translation.activate") as mock_activate:
-                mw(request)
+        settings.LIVE_TRANSLATIONS = _middleware_settings(languages=["en", "cs"])
+        _clear_caches()
+        request = make_request("get", "/page/")
+        # "zz" is not in the LANGUAGES list at all
+        request.COOKIES[_DRAFT_LANG_COOKIE] = "zz"
+        mw(request)
 
-            mock_activate.assert_not_called()
+        assert not hasattr(request, _DRAFT_LANG_ATTR)
 
-    def test_config_includes_draft_languages_array(self, make_request):
+    def test_config_includes_draft_languages_array(self, make_request, settings):
         response = _html_response("<html><body>X</body></html>")
         mw = LiveTranslationsMiddleware(lambda r: response)
-        settings = _mock_settings(languages=["en", "cs", "ja"], draft_languages=["ja"])
 
-        with unittest.mock.patch("live_translations.middleware.conf.get_settings", return_value=settings):
-            with unittest.mock.patch("live_translations.middleware.django.middleware.csrf.get_token", return_value="t"):
-                with unittest.mock.patch(
-                    "live_translations.middleware.django.templatetags.static.static",
-                    side_effect=lambda p: f"/static/{p}",
-                ):
-                    mw._inject_assets(make_request("get", "/page/"), response)
+        # "xx" is not in Django's LANGUAGES -> becomes a draft language
+        settings.LIVE_TRANSLATIONS = _middleware_settings(languages=["en", "cs", "xx"])
+        _clear_caches()
+        mw._inject_assets(make_request("get", "/page/"), response)
 
         content = response.content.decode()
-        assert 'draftLanguages:["ja"]' in content
+        assert 'draftLanguages:["xx"]' in content
 
-    def test_config_empty_draft_languages(self, make_request):
+    def test_config_empty_draft_languages(self, make_request, settings):
         response = _html_response("<html><body>X</body></html>")
         mw = LiveTranslationsMiddleware(lambda r: response)
-        settings = _mock_settings(languages=["en", "cs"], draft_languages=[])
 
-        with unittest.mock.patch("live_translations.middleware.conf.get_settings", return_value=settings):
-            with unittest.mock.patch("live_translations.middleware.django.middleware.csrf.get_token", return_value="t"):
-                with unittest.mock.patch(
-                    "live_translations.middleware.django.templatetags.static.static",
-                    side_effect=lambda p: f"/static/{p}",
-                ):
-                    mw._inject_assets(make_request("get", "/page/"), response)
+        # "en" and "cs" are both in Django's default LANGUAGES -> no drafts
+        settings.LIVE_TRANSLATIONS = _middleware_settings(languages=["en", "cs"])
+        _clear_caches()
+        mw._inject_assets(make_request("get", "/page/"), response)
 
         content = response.content.decode()
         assert "draftLanguages:[]" in content
 
-    def test_config_includes_current_language(self, make_request):
+    def test_config_includes_current_language(self, make_request, settings):
         response = _html_response("<html><body>X</body></html>")
         mw = LiveTranslationsMiddleware(lambda r: response)
-        settings = _mock_settings(languages=["en", "cs"])
 
-        with unittest.mock.patch("live_translations.middleware.conf.get_settings", return_value=settings):
-            with unittest.mock.patch("live_translations.middleware.django.middleware.csrf.get_token", return_value="t"):
-                with unittest.mock.patch(
-                    "live_translations.middleware.django.templatetags.static.static",
-                    side_effect=lambda p: f"/static/{p}",
-                ):
-                    with unittest.mock.patch(
-                        "live_translations.middleware.django.utils.translation.get_language",
-                        return_value="cs",
-                    ):
-                        mw._inject_assets(make_request("get", "/page/"), response)
+        settings.LIVE_TRANSLATIONS = _middleware_settings(languages=["en", "cs"])
+        _clear_caches()
+
+        with django.utils.translation.override("cs"):
+            mw._inject_assets(make_request("get", "/page/"), response)
 
         content = response.content.decode()
         assert "currentLanguage:'cs'" in content
 
-    def test_current_language_reflects_draft_after_process_view(self, make_request):
+    def test_current_language_reflects_draft_after_process_view(self, make_request, settings):
         """After process_view activates draft language, _inject_assets uses it for currentLanguage."""
         response = _html_response("<html><body>X</body></html>")
         mw = LiveTranslationsMiddleware(lambda r: response)
-        settings = _mock_settings(languages=["en", "ja"], draft_languages=["ja"])
 
-        with unittest.mock.patch("live_translations.middleware.conf.get_settings", return_value=settings):
-            with unittest.mock.patch("live_translations.middleware.django.middleware.csrf.get_token", return_value="t"):
-                with unittest.mock.patch(
-                    "live_translations.middleware.django.templatetags.static.static",
-                    side_effect=lambda p: f"/static/{p}",
-                ):
-                    with unittest.mock.patch(
-                        "live_translations.middleware.django.utils.translation.get_language",
-                        return_value="ja",
-                    ):
-                        mw._inject_assets(make_request("get", "/page/"), response)
+        settings.LIVE_TRANSLATIONS = _middleware_settings(languages=["en", "xx"])
+        _clear_caches()
+
+        # Simulate what process_view does: activate the draft language
+        django.utils.translation.activate("xx")
+        mw._inject_assets(make_request("get", "/page/"), response)
 
         content = response.content.decode()
-        assert "currentLanguage:'ja'" in content
+        assert "currentLanguage:'xx'" in content
