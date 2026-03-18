@@ -1,0 +1,162 @@
+# English translations for django-live-translations example app.
+# Copyright (C) 2024
+# This file is distributed under the MIT license.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: django-live-translations-example 0.1.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2024-01-01 00:00+0000\n"
+"PO-Revision-Date: 2024-01-01 00:00+0000\n"
+"Last-Translator: \n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "demo.title"
+msgstr "Live Translations Demo"
+
+#. Greeting shown on the homepage
+msgid "demo.welcome"
+msgstr "Welcome to the demo application!"
+
+msgid "demo.description"
+msgstr "A minimal example app for testing django-live-translations."
+
+msgid "about.heading"
+msgstr "About this page"
+
+msgid "about.description"
+msgstr ""
+"This page demonstrates the live translations widget. Log in as a superuser "
+"and press Ctrl+Shift+E to activate edit mode."
+
+msgid "how_it_works.heading"
+msgstr "How it works"
+
+msgid "edit_mode.toggle_hint %(key)s"
+msgstr ""
+"Press %(key)s to toggle edit mode. Translated strings will be highlighted — "
+"click any one to open the editor."
+
+msgid "features.heading"
+msgstr "Features"
+
+msgid "features.inline_editing"
+msgstr "Edit translations directly in the browser"
+
+msgid "features.instant_save"
+msgstr "Changes are saved instantly without restarting the server"
+
+msgid "common.language"
+msgstr "Language"
+
+msgid "attrs.heading"
+msgstr "HTML attributes"
+
+msgid "attrs.tooltip_trans"
+msgstr "This tooltip was translated with the trans tag"
+
+msgid "attrs.tooltip_hint"
+msgstr "Hover over this paragraph to see a translated tooltip."
+
+msgid "attrs.tooltip_context_hint"
+msgstr "This paragraph has a tooltip from a context variable."
+
+msgid "attrs.tooltip_gettext"
+msgstr "This tooltip was translated with gettext()"
+
+msgid "attrs.alt_text"
+msgstr "A placeholder image demonstrating translated alt text"
+
+msgid "attrs.alt_hint"
+msgstr ""
+"This image has a translated alt attribute — inspect it in your browser."
+
+msgid "asvar.heading"
+msgstr "Variable assignment"
+
+msgid "asvar.reused_label"
+msgstr "Reusable translation"
+
+#. Form section
+msgid "form.heading"
+msgstr "Django form"
+
+msgid "form.description"
+msgstr ""
+"Labels and help texts below come from verbose_name / help_text — both model-"
+"level and form-level."
+
+msgid "form.feedback.verbose_name"
+msgstr "Feedback"
+
+msgid "form.feedback.verbose_name_plural"
+msgstr "Feedback entries"
+
+#. Model field labels & help texts (via gettext_lazy on the model)
+msgid "form.name.label"
+msgstr "Full name"
+
+msgid "form.name.help"
+msgstr "Your first and last name."
+
+msgid "form.name.placeholder"
+msgstr "Jane Doe"
+
+msgid "form.email.label"
+msgstr "Email address"
+
+msgid "form.email.help"
+msgstr "We will never share your email."
+
+msgid "form.message.label"
+msgstr "Message"
+
+msgid "form.message.help"
+msgstr "Tell us what you think."
+
+#. Form-only field labels & help texts (set directly on the form class)
+msgid "form.subject.label"
+msgstr "Subject"
+
+msgid "form.subject.help"
+msgstr "A short summary of your message."
+
+msgid "form.subject.placeholder"
+msgstr "e.g. Bug report, Feature request…"
+
+msgid "form.newsletter.label"
+msgstr "Subscribe to newsletter"
+
+msgid "form.newsletter.help"
+msgstr "Receive occasional updates by email."
+
+#. Form tabs
+msgid "form.tab.manual"
+msgstr "Manual rendering"
+
+msgid "form.tab.auto"
+msgstr "Auto rendering"
+
+msgid "form.auto_description"
+msgstr ""
+"This tab uses {{ form.as_div }} to render the entire form automatically. "
+"Django generates the labels and help texts from verbose_name / help_text — "
+"live translations can edit these just like manually rendered fields."
+
+#. Auth bar
+msgid "auth.logged_in %(username)s"
+msgstr "Logged in as %(username)s (translator)"
+
+msgid "auth.logout"
+msgstr "Log out"
+
+msgid "auth.anonymous"
+msgstr "Browsing as anonymous user"
+
+msgid "auth.login"
+msgstr "Log in as translator"
