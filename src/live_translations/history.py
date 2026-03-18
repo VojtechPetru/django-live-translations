@@ -1,11 +1,18 @@
 """Utilities for recording translation edit history and computing diffs."""
 
+import contextlib
 import difflib
 import re
 import typing as t
 
+import django.db
+
 from live_translations import models, strings
 from live_translations.types import DiffSegment, LanguageCode, MsgKey
+
+# Raised when the history table doesn't exist (migrations not applied).
+# OperationalError on SQLite, ProgrammingError on PostgreSQL.
+_MISSING_TABLE_ERRORS = (django.db.OperationalError, django.db.ProgrammingError)
 
 if t.TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
@@ -35,17 +42,22 @@ def record_change(
     action: models.TranslationHistory.Action,
     old_value: str = "",
     new_value: str = "",
-) -> models.TranslationHistory:
-    """Create a single TranslationHistory entry, reading user from contextvar."""
-    return models.TranslationHistory.objects.create(
-        language=language,
-        msgid=key.msgid,
-        context=key.context,
-        action=action,
-        old_value=old_value,
-        new_value=new_value,
-        user=get_user(),
-    )
+) -> models.TranslationHistory | None:
+    """Create a single TranslationHistory entry, reading user from contextvar.
+
+    Returns None if the history table doesn't exist (migrations not applied).
+    """
+    with contextlib.suppress(*_MISSING_TABLE_ERRORS):
+        return models.TranslationHistory.objects.create(
+            language=language,
+            msgid=key.msgid,
+            context=key.context,
+            action=action,
+            old_value=old_value,
+            new_value=new_value,
+            user=get_user(),
+        )
+    return None
 
 
 def record_text_changes(
@@ -123,20 +135,21 @@ def record_bulk_action(
     if not entries:
         return
     user = get_user()
-    models.TranslationHistory.objects.bulk_create(
-        [
-            models.TranslationHistory(
-                language=lang,
-                msgid=key.msgid,
-                context=key.context,
-                action=action,
-                old_value=old_value,
-                new_value=new_value,
-                user=user,
-            )
-            for lang, key in entries
-        ]
-    )
+    with contextlib.suppress(*_MISSING_TABLE_ERRORS):
+        models.TranslationHistory.objects.bulk_create(
+            [
+                models.TranslationHistory(
+                    language=lang,
+                    msgid=key.msgid,
+                    context=key.context,
+                    action=action,
+                    old_value=old_value,
+                    new_value=new_value,
+                    user=user,
+                )
+                for lang, key in entries
+            ]
+        )
 
 
 _WORD_RE = re.compile(r"\S+|\s+")

@@ -63,7 +63,7 @@ If you plan to use the database backend, run migrations to create the required t
 python manage.py migrate
 ```
 
-This creates the `TranslationEntry` and `TranslationHistory` tables. If you're using the default PO file backend, this step is optional (the history table is only used by the database backend).
+This creates the `TranslationEntry` and `TranslationHistory` tables. If you're using the default PO file backend, this step is optional -- audit history will be silently skipped when the tables don't exist.
 
 ### 4. Configure (optional)
 

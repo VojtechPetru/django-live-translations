@@ -4,6 +4,7 @@ import json
 import unittest.mock
 
 import django.contrib.auth.models
+import django.db
 import django.http
 import pytest
 
@@ -114,6 +115,7 @@ class TestRecordChange:
             old_value="Hi",
             new_value="Hello",
         )
+        assert entry is not None
         assert entry.pk is not None
         assert entry.action == "update"
 
@@ -133,6 +135,7 @@ class TestRecordChange:
         finally:
             strings.lt_current_user.reset(token)
 
+        assert entry is not None
         assert entry.user == user
 
     def test_null_user_when_contextvar_unset(self):
@@ -142,6 +145,7 @@ class TestRecordChange:
             action=models.TranslationHistory.Action.CREATE,
             new_value="Hello",
         )
+        assert entry is not None
         assert entry.user is None
 
     def test_anonymous_user_stored_as_null(self):
@@ -157,6 +161,7 @@ class TestRecordChange:
         finally:
             strings.lt_current_user.reset(token)
 
+        assert entry is not None
         assert entry.user is None
 
 
@@ -184,6 +189,47 @@ class TestRecordBulkAction:
             new_value="active",
         )
         assert models.TranslationHistory.objects.count() == 0
+
+
+class TestMissingHistoryTable:
+    """Verify history recording is silently skipped when the table doesn't exist."""
+
+    _NO_TABLE = django.db.OperationalError("no such table: live_translations_translationhistory")
+
+    def test_record_change_returns_none(self):
+        with unittest.mock.patch.object(models.TranslationHistory.objects, "create", side_effect=self._NO_TABLE):
+            result = history.record_change(
+                language="en",
+                key=MsgKey("hello", ""),
+                action=models.TranslationHistory.Action.CREATE,
+                new_value="Hello",
+            )
+        assert result is None
+
+    def test_record_bulk_action_is_noop(self):
+        with unittest.mock.patch.object(models.TranslationHistory.objects, "bulk_create", side_effect=self._NO_TABLE):
+            history.record_bulk_action(
+                entries=[("en", MsgKey("hello", ""))],
+                action=models.TranslationHistory.Action.ACTIVATE,
+                old_value="inactive",
+                new_value="active",
+            )
+
+    def test_record_text_changes_is_noop(self):
+        with unittest.mock.patch.object(models.TranslationHistory.objects, "create", side_effect=self._NO_TABLE):
+            history.record_text_changes(
+                key=MsgKey("hello", ""),
+                old_entries={},
+                new_entries={"en": "Hello"},
+            )
+
+    def test_record_active_changes_is_noop(self):
+        with unittest.mock.patch.object(models.TranslationHistory.objects, "create", side_effect=self._NO_TABLE):
+            history.record_active_changes(
+                key=MsgKey("hello", ""),
+                old_states={"en": False},
+                new_states={"en": True},
+            )
 
 
 class TestComputeDiff:

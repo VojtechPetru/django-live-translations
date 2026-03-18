@@ -3,10 +3,12 @@
 Views and admin are thin adapters that call these functions.
 """
 
+import contextlib
 import logging
 import re
 import typing as t
 
+import django.db
 import django.db.models
 import django.db.transaction
 import django.utils.translation
@@ -232,21 +234,23 @@ def delete_entries(*, queryset: django.db.models.QuerySet[models.TranslationEntr
     deleted_count, _ = queryset.delete()
 
     if deleted_count:
-        user = history.get_user()
-        models.TranslationHistory.objects.bulk_create(
-            [
-                models.TranslationHistory(
-                    language=lang,
-                    msgid=mid,
-                    context=ctx,
-                    action=models.TranslationHistory.Action.DELETE,
-                    old_value=msgstr,
-                    new_value="",
-                    user=user,
-                )
-                for lang, mid, ctx, msgstr in affected
-            ]
-        )
+        # History table may not exist if migrations haven't been applied.
+        with contextlib.suppress(django.db.OperationalError, django.db.ProgrammingError):
+            user = history.get_user()
+            models.TranslationHistory.objects.bulk_create(
+                [
+                    models.TranslationHistory(
+                        language=lang,
+                        msgid=mid,
+                        context=ctx,
+                        action=models.TranslationHistory.Action.DELETE,
+                        old_value=msgstr,
+                        new_value="",
+                        user=user,
+                    )
+                    for lang, mid, ctx, msgstr in affected
+                ]
+            )
         conf.get_backend_instance().bump_catalog_version()
 
     return deleted_count
@@ -254,11 +258,14 @@ def delete_entries(*, queryset: django.db.models.QuerySet[models.TranslationEntr
 
 def get_history(*, key: MsgKey, limit: int = 50) -> HistoryResult:
     """Fetch edit history for a msgid, return JSON-ready dict."""
-    entries = (
-        models.TranslationHistory.objects.filter(msgid=key.msgid, context=key.context)
-        .select_related("user")
-        .order_by("-created_at")[:limit]
-    )
+    # History table may not exist if migrations haven't been applied.
+    entries: list[models.TranslationHistory] = []
+    with contextlib.suppress(django.db.OperationalError, django.db.ProgrammingError):
+        entries = list(
+            models.TranslationHistory.objects.filter(msgid=key.msgid, context=key.context)
+            .select_related("user")
+            .order_by("-created_at")[:limit]
+        )
 
     results: list[HistoryItem] = []
     for entry in entries:

@@ -103,10 +103,10 @@ The `DatabaseBackend` stores translation overrides in the database and falls bac
 |---------|-----------|-----------------|
 | Storage | `.po`/`.mo` files | Database table |
 | Cross-process sync | Via filesystem | Via cache (Redis, Memcached) |
-| Read-only filesystem | No | Yes |
+| Works on read-only filesystem | No | Yes |
 | Version control | Yes (files in repo) | No |
-| Requires migrations | No | Yes |
-| Edit history | Yes | Yes |
+| Requires database (migrations) | No | Yes |
+| Edit history | Yes (requires DB) | Yes |
 | `.po` file fallback | N/A | Yes |
 | Inactive translations | Comment-based (`ltpending:`) | `is_active` field |
 

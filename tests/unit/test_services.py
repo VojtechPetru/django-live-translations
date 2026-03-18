@@ -3,6 +3,7 @@
 import unittest.mock
 
 import django.contrib.auth.models
+import django.db
 import pytest
 
 from live_translations import models, services
@@ -534,6 +535,12 @@ class TestDeleteEntries:
 class TestGetHistory:
     def test_empty_history(self):
         result = services.get_history(key=MsgKey("hello", ""))
+        assert result["history"] == []
+
+    def test_returns_empty_when_table_missing(self):
+        error = django.db.OperationalError("no such table: live_translations_translationhistory")
+        with unittest.mock.patch.object(models.TranslationHistory.objects, "filter", side_effect=error):
+            result = services.get_history(key=MsgKey("hello", ""))
         assert result["history"] == []
 
     def test_returns_entries(self):

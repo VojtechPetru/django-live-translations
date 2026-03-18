@@ -4,6 +4,13 @@
 
 django-live-translations lets authorized users edit translations directly on any page of your Django application. Toggle edit mode, click any translatable string, and save changes that take effect immediately - no deployment, no restarts, no context switching to `.po` file editors.
 
+It works with all standard Django translation APIs:
+
+- **Template tags** - `{% translate %}` (`{% trans %}`), `{% blocktranslate %}` (`{% blocktrans %}`) (non-plural)
+- **Python calls** - `gettext()`, `pgettext()`, `gettext_lazy()`, `pgettext_lazy()`
+
+Plural forms (`ngettext`, `{% blocktranslate count %}`) are not yet supported.
+
 <!-- TODO: replace with actual screenshot -->
 ![Edit mode overview](assets/screenshots/edit-mode.png){ loading=lazy }
 /// caption

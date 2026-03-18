@@ -62,13 +62,21 @@ The middleware skips Django admin URLs (`/admin/`) entirely to avoid interfering
 graph TD
     A[Request arrives] --> B{API or admin path?}
     B -->|Yes| C[Return early<br>API dispatch or pass through]
-    B -->|No| H{User is translator?}
-    H -->|No| I[Return response unmodified<br>no markers were added]
-    H -->|Yes| K{HTML response?}
-    K -->|No| N[Strip ZWC markers]
-    N --> O[Return clean response]
-    K -->|Yes| L["Inject CSS + config script<br>+ widget JS before &lt;/body&gt;"]
-    L --> M[Return enriched HTML]
+    B -->|No| D{User is translator?}
+    D -->|No| E[Return response unmodified]
+
+    D -->|Yes| F["Gettext monkey-patch appends<br>ZWC marker to each translation"]
+    F --> G[Django renders response]
+    G --> H{HTML response?}
+    H -->|No| I[Strip ZWC markers<br>return clean response]
+    H -->|Yes| J[Middleware injects<br>string table + widget assets]
+    J --> K[Browser renders page]
+    K --> L["Widget decodes ZWC markers,<br>resolves msgids from string table"]
+    L --> M{Text node or attribute?}
+    M -->|Text node| N["Wrap in &lt;lt-t&gt; element"]
+    M -->|Attribute| O["Store msgid in data-lt-attrs"]
+    N --> P[Widget ready for editing]
+    O --> P
 ```
 
 ## Catalog injection (database backend)
@@ -132,7 +140,7 @@ The `<lt-t>` element was chosen because it's an unknown HTML element that browse
 
 The package is tested at multiple levels to catch regressions across the full stack:
 
-- **382 unit tests** covering all core modules, backends, views, admin, and error handling
+- **408 unit tests** covering all core modules, backends, views, admin, and error handling
 - **272 end-to-end tests** using Playwright against a real Django dev server
 - E2E tests run against **both backends** (PO and database), each with their own Django server instance
 - CI matrix tests across **Python 3.12--3.14** and **Django 4.2--6.0**
