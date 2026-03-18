@@ -79,6 +79,6 @@ STATIC_URL = "/static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 LIVE_TRANSLATIONS: "LiveTranslationsSettings" = {
-    "BACKEND": "live_translations.backends.po.POFileBackend",
+    "BACKEND": "live_translations.backends.db.DatabaseBackend",
     "LANGUAGES": ["en", "cs", "es"],
 }

@@ -11,11 +11,9 @@ It works with all standard Django translation APIs:
 
 Plural forms (`ngettext`, `{% blocktranslate count %}`) are not yet supported.
 
-<!-- TODO: replace with actual screenshot -->
-![Edit mode overview](assets/screenshots/edit-mode.png){ loading=lazy }
-/// caption
-Edit mode overview
-///
+<video controls autoplay loop muted playsinline width="100%">
+  <source src="assets/screenshots/demo.mp4" type="video/mp4">
+</video>
 
 ## Features
 
