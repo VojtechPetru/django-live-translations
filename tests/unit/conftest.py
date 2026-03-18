@@ -14,7 +14,7 @@ if t.TYPE_CHECKING:
     from pytest_django.fixtures import SettingsWrapper
 
     from live_translations.backends import db
-    from tests.backends import InMemoryBackend  # type: ignore[import-not-found]
+    from tests.backends import TestBackend  # type: ignore[import-not-found]
 
 from live_translations import conf
 from live_translations.types import LanguageCode
@@ -129,10 +129,10 @@ def make_request():
 
 
 @pytest.fixture
-def in_memory_backend(settings: "SettingsWrapper") -> "InMemoryBackend":
-    """Configure InMemoryBackend via Django settings and return the instance."""
+def test_backend(settings: "SettingsWrapper") -> "TestBackend":
+    """Configure TestBackend via Django settings and return the instance."""
     settings.LIVE_TRANSLATIONS = {
-        "BACKEND": "tests.backends.InMemoryBackend",
+        "BACKEND": "tests.backends.TestBackend",
         "LANGUAGES": ["en", "cs"],
         "LOCALE_DIR": "/tmp",
         "PERMISSION_CHECK": "tests.permissions.allow_all",
@@ -141,5 +141,5 @@ def in_memory_backend(settings: "SettingsWrapper") -> "InMemoryBackend":
     conf.get_backend_instance.cache_clear()
     conf.get_permission_checker.cache_clear()
     backend = conf.get_backend_instance()
-    assert type(backend).__name__ == "InMemoryBackend"
+    assert type(backend).__name__ == "TestBackend"
     return backend  # type: ignore[return-value]

@@ -70,7 +70,7 @@ class TestCheckSettings:
 
     def test_valid_config_no_errors(self, settings: "SettingsWrapper"):
         settings.LIVE_TRANSLATIONS = {
-            "BACKEND": "tests.backends.InMemoryBackend",
+            "BACKEND": "tests.backends.TestBackend",
             "LANGUAGES": ["en", "cs"],
             "LOCALE_DIR": "/tmp",
         }

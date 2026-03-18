@@ -20,18 +20,23 @@ __all__ = [
     "CheckWarningBackend",
     "FileNotFoundBackend",
     "GetErrorBackend",
-    "InMemoryBackend",
     "SaveErrorBackend",
+    "TestBackend",
 ]
 
 
-class InMemoryBackend(TranslationBackend):
-    """ORM-backed backend for testing, without PO file or cache dependencies.
+class TestBackend(TranslationBackend):
+    """Simplified ``DatabaseBackend`` for testing -- no PO files, no shared cache.
 
-    Stores translations in the ``TranslationEntry`` model (like
-    ``DatabaseBackend``) but reads defaults and hints from in-memory dicts
-    seeded by test code.  ``bump_catalog_version`` increments an internal
-    counter instead of touching the cache.
+    Like ``DatabaseBackend``, overrides are stored in the ``TranslationEntry``
+    ORM table.  The differences:
+
+    * **Defaults/hints** come from in-memory dicts (seeded via
+      :meth:`seed_default` / :meth:`seed_hint`) instead of ``.po`` files.
+    * **Version sync** is a plain ``self._version`` counter instead of a
+      shared cache key.
+    * **Catalog injection** (``ensure_current`` / ``inject_overrides``) is
+      a no-op -- Django's gettext catalogs are not patched.
     """
 
     def __init__(
@@ -262,7 +267,7 @@ class InMemoryBackend(TranslationBackend):
 # ---------------------------------------------------------------------------
 
 
-class SaveErrorBackend(InMemoryBackend):
+class SaveErrorBackend(TestBackend):
     """Backend whose ``save_translations`` always raises ``RuntimeError``."""
 
     @t.override
@@ -275,7 +280,7 @@ class SaveErrorBackend(InMemoryBackend):
         raise RuntimeError("unexpected backend error")
 
 
-class FileNotFoundBackend(InMemoryBackend):
+class FileNotFoundBackend(TestBackend):
     """Backend whose ``save_translations`` always raises ``FileNotFoundError``."""
 
     @t.override
@@ -288,7 +293,7 @@ class FileNotFoundBackend(InMemoryBackend):
         raise FileNotFoundError("PO file not found")
 
 
-class GetErrorBackend(InMemoryBackend):
+class GetErrorBackend(TestBackend):
     """Backend whose ``get_translations`` always raises ``RuntimeError``."""
 
     @t.override
@@ -305,7 +310,7 @@ class GetErrorBackend(InMemoryBackend):
 # ---------------------------------------------------------------------------
 
 
-class CheckWarningBackend(InMemoryBackend):
+class CheckWarningBackend(TestBackend):
     """Backend whose ``check()`` returns a Warning."""
 
     @t.override
@@ -318,7 +323,7 @@ class CheckWarningBackend(InMemoryBackend):
         ]
 
 
-class CheckCrashBackend(InMemoryBackend):
+class CheckCrashBackend(TestBackend):
     """Backend whose ``check()`` raises ``RuntimeError``."""
 
     @t.override

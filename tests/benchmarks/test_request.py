@@ -82,7 +82,7 @@ def _configure_settings(
 
 
 class TestFullRequestPo:
-    """Full request cycle with InMemoryBackend (lightweight, no PO/cache deps)."""
+    """Full request cycle with TestBackend (lightweight, no PO/cache deps)."""
 
     @pytest.fixture(autouse=True)
     def _setup_locale(self, tmp_path: pathlib.Path, settings: django.conf.LazySettings) -> t.Iterator[None]:
@@ -137,7 +137,7 @@ class TestFullRequestPo:
 
         _configure_settings(
             settings,
-            backend="tests.backends.InMemoryBackend",
+            backend="tests.backends.TestBackend",
             permission="tests.permissions.deny_all",
         )
 
@@ -167,7 +167,7 @@ class TestFullRequestPo:
 
         _configure_settings(
             settings,
-            backend="tests.backends.InMemoryBackend",
+            backend="tests.backends.TestBackend",
             permission="tests.permissions.allow_all",
         )
 

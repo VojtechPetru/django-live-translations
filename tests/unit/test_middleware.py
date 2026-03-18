@@ -42,7 +42,7 @@ def _middleware_settings(
     shortcut_preview: str = "ctrl+shift+p",
 ) -> dict[str, t.Any]:
     return {
-        "BACKEND": "tests.backends.InMemoryBackend",
+        "BACKEND": "tests.backends.TestBackend",
         "LANGUAGES": languages or ["en", "cs"],
         "LOCALE_DIR": "/tmp",
         "PERMISSION_CHECK": "tests.permissions.allow_all" if permission else "tests.permissions.deny_all",

@@ -161,7 +161,7 @@ class TestNormalUserOverhead:
         # --- normal user: middleware + patched gettext, permission denied ---
         _configure_settings(
             settings,
-            backend="tests.backends.InMemoryBackend",
+            backend="tests.backends.TestBackend",
             permission="tests.permissions.deny_all",
         )
 
@@ -229,7 +229,7 @@ class TestTranslatorOverhead:
         # --- translator: middleware + patched gettext, permission granted ---
         _configure_settings(
             settings,
-            backend="tests.backends.InMemoryBackend",
+            backend="tests.backends.TestBackend",
             permission="tests.permissions.allow_all",
         )
 

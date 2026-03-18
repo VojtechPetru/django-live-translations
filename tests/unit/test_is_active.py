@@ -16,7 +16,7 @@ from live_translations.types import MsgKey
 if t.TYPE_CHECKING:
     from pytest_django.fixtures import SettingsWrapper
 
-    from tests.backends import InMemoryBackend  # type: ignore[import-not-found]
+    from tests.backends import TestBackend  # type: ignore[import-not-found]
 
 
 @pytest.mark.django_db
@@ -338,7 +338,7 @@ class TestDeleteTranslationView:
     @pytest.fixture(autouse=True)
     def _setup(self, settings: "SettingsWrapper"):
         settings.LIVE_TRANSLATIONS = {
-            "BACKEND": "tests.backends.InMemoryBackend",
+            "BACKEND": "tests.backends.TestBackend",
             "LANGUAGES": ["en", "cs"],
             "LOCALE_DIR": "/tmp",
         }
@@ -346,9 +346,9 @@ class TestDeleteTranslationView:
         conf.get_backend_instance.cache_clear()
         conf.get_permission_checker.cache_clear()
 
-    def _get_backend(self) -> "InMemoryBackend":
+    def _get_backend(self) -> "TestBackend":
         backend = conf.get_backend_instance()
-        assert type(backend).__name__ == "InMemoryBackend"
+        assert type(backend).__name__ == "TestBackend"
         return backend  # type: ignore[return-value]
 
     _URL = "/__live-translations__/translations/delete/"
@@ -452,7 +452,7 @@ class TestBulkActivateView:
     @pytest.fixture(autouse=True)
     def _setup(self, settings: "SettingsWrapper"):
         settings.LIVE_TRANSLATIONS = {
-            "BACKEND": "tests.backends.InMemoryBackend",
+            "BACKEND": "tests.backends.TestBackend",
             "LANGUAGES": ["en", "cs"],
             "LOCALE_DIR": "/tmp",
         }

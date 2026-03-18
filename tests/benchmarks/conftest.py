@@ -24,7 +24,7 @@ if t.TYPE_CHECKING:
 
 def pytest_configure() -> None:
     # Ensure ``tests`` package is importable for dotted-path settings
-    # (e.g. ``tests.backends.InMemoryBackend``, ``tests.permissions.allow_all``).
+    # (e.g. ``tests.backends.TestBackend``, ``tests.permissions.allow_all``).
     repo_root = str(pathlib.Path(__file__).resolve().parent.parent.parent)
     if repo_root not in sys.path:
         sys.path.insert(0, repo_root)

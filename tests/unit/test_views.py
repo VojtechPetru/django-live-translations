@@ -31,7 +31,7 @@ _GET_PATH = "/__live-translations__/translations/"
 _BULK_PATH = "/__live-translations__/translations/bulk-activate/"
 
 _BASE_SETTINGS = {
-    "BACKEND": "tests.backends.InMemoryBackend",
+    "BACKEND": "tests.backends.TestBackend",
     "LANGUAGES": ["en"],
     "LOCALE_DIR": "/tmp",
     "PERMISSION_CHECK": "tests.permissions.allow_all",

@@ -591,7 +591,7 @@ class TestMiddlewareContextvar:
             return django.http.HttpResponse("ok")
 
         settings.LIVE_TRANSLATIONS = {
-            "BACKEND": "tests.backends.InMemoryBackend",
+            "BACKEND": "tests.backends.TestBackend",
             "LANGUAGES": ["en"],
             "LOCALE_DIR": "/tmp",
             "PERMISSION_CHECK": "tests.permissions.deny_all",
@@ -617,7 +617,7 @@ class TestMiddlewareContextvar:
             return django.http.HttpResponse("ok")
 
         settings.LIVE_TRANSLATIONS = {
-            "BACKEND": "tests.backends.InMemoryBackend",
+            "BACKEND": "tests.backends.TestBackend",
             "LANGUAGES": ["en"],
             "LOCALE_DIR": "/tmp",
             "PERMISSION_CHECK": "tests.permissions.deny_all",
@@ -639,7 +639,7 @@ class TestMiddlewareContextvar:
             return django.http.HttpResponse("ok")
 
         settings.LIVE_TRANSLATIONS = {
-            "BACKEND": "tests.backends.InMemoryBackend",
+            "BACKEND": "tests.backends.TestBackend",
             "LANGUAGES": ["en"],
             "LOCALE_DIR": "/tmp",
             "PERMISSION_CHECK": "tests.permissions.deny_all",
