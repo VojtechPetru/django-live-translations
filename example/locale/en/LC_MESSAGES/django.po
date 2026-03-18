@@ -104,6 +104,9 @@ msgstr "Full name"
 msgid "form.name.help"
 msgstr "Your first and last name."
 
+msgid "form.name.placeholder"
+msgstr "Jane Doe"
+
 msgid "form.email.label"
 msgstr "Email address"
 
@@ -122,6 +125,9 @@ msgstr "Subject"
 
 msgid "form.subject.help"
 msgstr "A short summary of your message."
+
+msgid "form.subject.placeholder"
+msgstr "e.g. Bug report, Feature request…"
 
 msgid "form.newsletter.label"
 msgstr "Subscribe to newsletter"

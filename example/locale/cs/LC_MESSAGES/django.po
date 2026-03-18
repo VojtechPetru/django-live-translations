@@ -104,6 +104,9 @@ msgstr "Celé jméno"
 msgid "form.name.help"
 msgstr "Vaše jméno a příjmení."
 
+msgid "form.name.placeholder"
+msgstr "Jan Novák"
+
 msgid "form.email.label"
 msgstr "E-mailová adresa"
 
@@ -122,6 +125,9 @@ msgstr "Předmět"
 
 msgid "form.subject.help"
 msgstr "Krátké shrnutí vaší zprávy."
+
+msgid "form.subject.placeholder"
+msgstr "např. Hlášení chyby, Návrh funkce…"
 
 msgid "form.newsletter.label"
 msgstr "Přihlásit se k odběru novinek"

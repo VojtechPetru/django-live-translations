@@ -17,6 +17,7 @@ class FeedbackForm(django.forms.ModelForm):
         max_length=200,
         label=_("form.subject.label"),
         help_text=_("form.subject.help"),
+        widget=django.forms.TextInput(attrs={"placeholder": _("form.subject.placeholder")}),
     )
     newsletter = django.forms.BooleanField(
         required=False,
@@ -27,3 +28,6 @@ class FeedbackForm(django.forms.ModelForm):
     class Meta:
         model = Feedback
         fields = ["name", "email", "message"]
+        widgets = {
+            "name": django.forms.TextInput(attrs={"placeholder": _("form.name.placeholder")}),
+        }
