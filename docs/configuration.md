@@ -91,6 +91,34 @@ LIVE_TRANSLATIONS = {
 }
 ```
 
+#### Draft languages
+
+Any language listed in `LANGUAGES` that is **not** present in Django's `settings.LANGUAGES` is automatically treated as a **draft language**. Draft languages are fully editable by translators but are not served to regular users.
+
+This lets you prepare translations for a new locale before publishing it:
+
+```python
+# settings.py
+LANGUAGES = [
+    ("en", "English"),
+    ("cs", "Czech"),
+]
+
+LIVE_TRANSLATIONS = {
+    "LANGUAGES": ["en", "cs", "de"],  # "de" is a draft language
+}
+```
+
+Draft languages:
+
+- Appear in the [language switcher](widget.md#language-switcher) in the hint bar with a "Draft" badge
+- Are fully editable from the translation modal (also marked with a "Draft" badge)
+- **Are always saved as active** - the active/inactive toggle is hidden. Since the entire language is unpublished, there is no need for a separate "inactive" state. This also ensures translations survive `makemessages` (which preserves `msgstr` values but may strip internal comments used for inactive overrides)
+- Are switched via a middleware cookie override (`lt_lang`) - the page renders in the draft language without URL changes
+- Are invisible to users who don't pass the `PERMISSION_CHECK`
+
+Once ready, add the language to Django's `LANGUAGES` setting and it becomes a published language automatically.
+
 ### `LOCALE_DIR`
 
 The directory containing your `{lang}/LC_MESSAGES/` subdirectories. Resolution order:

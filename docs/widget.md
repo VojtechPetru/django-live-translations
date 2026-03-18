@@ -89,6 +89,22 @@ A draggable hint bar is displayed at the bottom of the page showing the availabl
 Draggable hint bar showing available keyboard shortcuts
 ///
 
+## Language switcher
+
+When multiple languages are configured, the hint bar includes a language switcher dropdown. Click the current language indicator to open the menu.
+
+![Language switcher with draft badge](assets/screenshots/language-switcher.png){ loading=lazy }
+/// caption
+Language switcher dropdown with a draft language marked
+///
+
+The switcher shows all configured languages. [Draft languages](configuration.md#draft-languages) are marked with an amber "Draft" badge.
+
+**Switching behavior:**
+
+- **Draft languages** - sets a cookie and reloads the page. The middleware overrides Django's active language so the page renders in the draft locale.
+- **Published languages** - navigates to the language-prefixed URL (e.g. `/de/about/`) if `i18n_patterns` is detected, or sets the `django_language` cookie and reloads.
+
 ## Keyboard shortcuts
 
 | Shortcut | Action | Configurable |

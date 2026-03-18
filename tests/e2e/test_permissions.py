@@ -16,7 +16,7 @@ class TestPermissionSystem:
     def test_superuser_sees_lt_config_with_correct_languages(self, page_as_superuser: Page) -> None:
         config = page_as_superuser.evaluate("() => window.__LT_CONFIG__")
         assert isinstance(config, dict)
-        assert sorted(config["languages"]) == ["cs", "en"]
+        assert sorted(config["languages"]) == ["cs", "en", "es"]
         assert config["csrfToken"]
 
     def test_superuser_page_has_translatable_spans(self, page_as_superuser: Page) -> None:

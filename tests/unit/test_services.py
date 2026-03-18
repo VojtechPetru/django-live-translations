@@ -340,6 +340,89 @@ class TestSaveTranslations:
         call_kwargs = mock_backend.save_translations.call_args
         assert call_kwargs[1]["active_flags"] == {}
 
+    @pytest.mark.django_db
+    def test_draft_language_forced_active(self, settings):
+        """Draft languages are always saved as active, regardless of the flag sent."""
+        settings.LANGUAGES = [("en", "English")]
+        settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en", "ja"]}
+
+        mock_backend = unittest.mock.MagicMock()
+        mock_backend.get_translations.return_value = {}
+        mock_backend.get_defaults.return_value = {}
+
+        with unittest.mock.patch("live_translations.conf.get_backend_instance", return_value=mock_backend):
+            services.save_translations(
+                key=MsgKey("hello", ""),
+                translations={"ja": "Konnichiwa"},
+                active_flags={"ja": False},
+            )
+
+        call_kwargs = mock_backend.save_translations.call_args
+        assert call_kwargs[1]["active_flags"]["ja"] is True
+
+    @pytest.mark.django_db
+    def test_draft_forced_active_preserves_published_flags(self, settings):
+        """Forcing active for draft languages doesn't affect published language flags."""
+        settings.LANGUAGES = [("en", "English")]
+        settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en", "ja"]}
+
+        mock_backend = unittest.mock.MagicMock()
+        mock_backend.get_translations.return_value = {}
+        mock_backend.get_defaults.return_value = {}
+
+        with unittest.mock.patch("live_translations.conf.get_backend_instance", return_value=mock_backend):
+            services.save_translations(
+                key=MsgKey("hello", ""),
+                translations={"en": "Hi", "ja": "Konnichiwa"},
+                active_flags={"en": False, "ja": False},
+            )
+
+        call_kwargs = mock_backend.save_translations.call_args
+        flags = call_kwargs[1]["active_flags"]
+        assert flags["en"] is False  # published: respects the flag
+        assert flags["ja"] is True  # draft: forced active
+
+    @pytest.mark.django_db
+    def test_draft_forced_active_with_none_flags(self, settings):
+        """When active_flags is None (default), draft languages still get forced to True."""
+        settings.LANGUAGES = [("en", "English")]
+        settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en", "ja"]}
+
+        mock_backend = unittest.mock.MagicMock()
+        mock_backend.get_translations.return_value = {}
+        mock_backend.get_defaults.return_value = {}
+
+        with unittest.mock.patch("live_translations.conf.get_backend_instance", return_value=mock_backend):
+            services.save_translations(
+                key=MsgKey("hello", ""),
+                translations={"ja": "Konnichiwa"},
+            )
+
+        call_kwargs = mock_backend.save_translations.call_args
+        assert call_kwargs[1]["active_flags"] == {"ja": True}
+
+    @pytest.mark.django_db
+    def test_multiple_draft_languages_forced_active(self, settings):
+        """All draft languages are forced active in a single save call."""
+        settings.LANGUAGES = [("en", "English")]
+        settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en", "ja", "ko"]}
+
+        mock_backend = unittest.mock.MagicMock()
+        mock_backend.get_translations.return_value = {}
+        mock_backend.get_defaults.return_value = {}
+
+        with unittest.mock.patch("live_translations.conf.get_backend_instance", return_value=mock_backend):
+            services.save_translations(
+                key=MsgKey("hello", ""),
+                translations={"ja": "Konnichiwa", "ko": "Annyeong"},
+                active_flags={"ja": False, "ko": False},
+            )
+
+        call_kwargs = mock_backend.save_translations.call_args
+        flags = call_kwargs[1]["active_flags"]
+        assert flags["ja"] is True
+        assert flags["ko"] is True
+
 
 # ---------------------------------------------------------------------------
 # delete_translations

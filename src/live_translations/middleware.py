@@ -24,6 +24,9 @@ __all__ = ["LiveTranslationsMiddleware"]
 
 _ZWC_RE: t.Final[re.Pattern[str]] = re.compile(r"\uFEFF[\u200B\u200C]{16}\uFEFF")
 
+_DRAFT_LANG_COOKIE: t.Final[str] = "lt_lang"
+_DRAFT_LANG_ATTR: t.Final[str] = "_lt_draft_lang"
+
 _API_ROUTES: dict[str, str] = {
     f"{conf.API_PREFIX}/translations/": "get_translations",
     f"{conf.API_PREFIX}/translations/save/": "save_translations",
@@ -76,12 +79,24 @@ class LiveTranslationsMiddleware:
         checker = conf.get_permission_checker()
         is_active = checker(request)
 
-        # Preview mode: load inactive overrides for the current language
+        # Draft language override via lt_lang cookie (draft languages only).
+        # We store it on the request but DON'T activate yet — activating before
+        # get_response() would break i18n_patterns URL resolution (Django's
+        # LocalePrefixPattern uses get_language() to match the URL prefix).
+        # Actual activation happens in process_view(), after URL resolution.
+        draft_lang: str | None = None
+        if is_active:
+            lt_lang = request.COOKIES.get(_DRAFT_LANG_COOKIE, "")
+            if lt_lang and conf.is_draft_language(lt_lang):
+                draft_lang = lt_lang
+                setattr(request, _DRAFT_LANG_ATTR, lt_lang)
+
+        # Preview mode: load inactive overrides for the target language
         is_preview = is_active and conf.is_preview_request(request)
         preview_overrides: OverrideMap | None = None
         preview_token = None
         if is_preview:
-            preview_overrides = self._load_preview_overrides()
+            preview_overrides = self._load_preview_overrides(language=draft_lang)
             preview_token = strings.lt_preview_overrides.set(preview_overrides)
 
         token = strings.lt_active.set(is_active)
@@ -94,6 +109,9 @@ class LiveTranslationsMiddleware:
 
         try:
             if not is_active:
+                # Clear stale draft language cookie for non-permitted users
+                if request.COOKIES.get(_DRAFT_LANG_COOKIE):
+                    response.delete_cookie(_DRAFT_LANG_COOKIE, path="/")
                 return response
 
             # Only inject into non-streaming HTML responses
@@ -106,6 +124,22 @@ class LiveTranslationsMiddleware:
             return response
         finally:
             strings.reset_string_registry()
+
+    def process_view(
+        self,
+        request: django.http.HttpRequest,
+        view_func: t.Callable[..., django.http.HttpResponse],
+        view_args: tuple[t.Any, ...],
+        view_kwargs: dict[str, t.Any],
+    ) -> None:
+        """
+        Activate the draft language after URL resolution (so i18n_patterns works).
+        https://docs.djangoproject.com/en/6.0/topics/http/middleware/#process-view
+        """
+        draft_lang: str | None = getattr(request, _DRAFT_LANG_ATTR, None)
+        if draft_lang:
+            django.utils.translation.activate(draft_lang)
+            request.LANGUAGE_CODE = draft_lang  # type: ignore[attr-defined]
 
     @staticmethod
     def _is_admin_path(path: str) -> bool:
@@ -125,12 +159,12 @@ class LiveTranslationsMiddleware:
         return view(request)
 
     @staticmethod
-    def _load_preview_overrides() -> OverrideMap:
-        """Load inactive translations for the current language into a preview dict."""
-        language = django.utils.translation.get_language() or ""
-        if not language:
+    def _load_preview_overrides(*, language: str | None = None) -> OverrideMap:
+        """Load inactive translations for the given (or current) language."""
+        lang = language or django.utils.translation.get_language() or ""
+        if not lang:
             return {}
-        return conf.get_backend_instance().get_inactive_overrides(language)
+        return conf.get_backend_instance().get_inactive_overrides(lang)
 
     @staticmethod
     def _strip_zwc(response: django.http.HttpResponse) -> None:
@@ -158,6 +192,8 @@ class LiveTranslationsMiddleware:
 
         settings = conf.get_settings()
         languages_json = ",".join(f'"{lang}"' for lang in settings.languages)
+        draft_languages_json = ",".join(f'"{lang}"' for lang in settings.draft_languages)
+        current_language = django.utils.translation.get_language() or ""
         csrf_token = django.middleware.csrf.get_token(request)
 
         css_url = django.templatetags.static.static("live_translations/widget.css")
@@ -186,6 +222,8 @@ class LiveTranslationsMiddleware:
             "<script>"
             f"window.__LT_CONFIG__={{apiBase:'{conf.API_PREFIX}',"
             f"languages:[{languages_json}],"
+            f"draftLanguages:[{draft_languages_json}],"
+            f"currentLanguage:'{current_language}',"
             f"csrfToken:'{csrf_token}',"
             f"activeByDefault:{active_by_default},"
             f"shortcutEdit:{shortcut_edit_js},"

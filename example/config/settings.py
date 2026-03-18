@@ -1,4 +1,8 @@
+import typing as t
 from pathlib import Path
+
+if t.TYPE_CHECKING:
+    from live_translations.conf import LiveTranslationsSettings
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -74,6 +78,7 @@ STATIC_URL = "/static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-LIVE_TRANSLATIONS = {
+LIVE_TRANSLATIONS: "LiveTranslationsSettings" = {
     "BACKEND": "live_translations.backends.po.POFileBackend",
+    "LANGUAGES": ["en", "cs", "es"],
 }

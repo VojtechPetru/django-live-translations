@@ -22,6 +22,7 @@ Edit mode overview
 - **Inline editing** - click any translatable string to open a multi-language editor modal
 - **Live preview** - changes appear on the page instantly after saving
 - **Preview mode** - review inactive translations before making them live
+- **Draft language support** - prepare translations for unpublished languages before going live
 - **Edit history** - word-level diffs with one-click restore
 - **Bulk activation** - select and activate multiple pending translations at once
 - **Two storage backends** - PO files (default) or database with cache-based sync

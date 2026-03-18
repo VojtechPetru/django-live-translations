@@ -5,9 +5,13 @@ are overridden at runtime by conftest fixtures so each test gets isolation.
 """
 
 import os
+import typing as t
 from pathlib import Path
 
 from config.settings import *  # noqa: F403
+
+if t.TYPE_CHECKING:
+    from live_translations.conf import LiveTranslationsSettings
 
 # Override locale dir from env (set by conftest fixture)
 _locale_override = os.environ.get("LT_E2E_LOCALE_DIR")
@@ -24,7 +28,8 @@ if _db_override:
         }
     }
 
-LIVE_TRANSLATIONS = {
+LIVE_TRANSLATIONS: "LiveTranslationsSettings" = {
     "BACKEND": "live_translations.backends.po.POFileBackend",
+    "LANGUAGES": ["en", "cs", "es"],
     **({"LOCALE_DIR": _locale_override} if _locale_override else {}),
 }
