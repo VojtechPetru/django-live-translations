@@ -1,6 +1,11 @@
 """Tests for system checks registered by LiveTranslationsConfig (live_translations.apps)."""
 
+import typing as t
+
 import django.core.checks
+
+if t.TYPE_CHECKING:
+    from pytest_django.fixtures import SettingsWrapper
 
 from live_translations import conf
 
@@ -19,27 +24,27 @@ def _ids(messages: list[django.core.checks.CheckMessage]) -> list[str | None]:
 
 
 class TestCheckSettings:
-    def test_unknown_keys_warning_w004(self, settings):
+    def test_unknown_keys_warning_w004(self, settings: "SettingsWrapper"):
         settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en"], "BOGUS_KEY": True}
         messages = _run_checks()
         assert "live_translations.W004" in _ids(messages)
         w004 = next(m for m in messages if m.id == "live_translations.W004")
         assert "BOGUS_KEY" in w004.msg
 
-    def test_empty_languages_error_e001(self, settings):
+    def test_empty_languages_error_e001(self, settings: "SettingsWrapper"):
         settings.LIVE_TRANSLATIONS = {"LANGUAGES": []}
         settings.LANGUAGES = []
         settings.LANGUAGE_CODE = ""
         messages = _run_checks()
         assert "live_translations.E001" in _ids(messages)
 
-    def test_missing_staticfiles_w001(self, settings):
+    def test_missing_staticfiles_w001(self, settings: "SettingsWrapper"):
         settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en"]}
         settings.INSTALLED_APPS = [app for app in settings.INSTALLED_APPS if app != "django.contrib.staticfiles"]
         messages = _run_checks()
         assert "live_translations.W001" in _ids(messages)
 
-    def test_backend_check_errors_included(self, settings):
+    def test_backend_check_errors_included(self, settings: "SettingsWrapper"):
         settings.LIVE_TRANSLATIONS = {
             "BACKEND": "tests.backends.CheckWarningBackend",
             "LANGUAGES": ["en"],
@@ -50,7 +55,7 @@ class TestCheckSettings:
         messages = _run_checks()
         assert "live_translations.W999" in _ids(messages)
 
-    def test_backend_check_exception_swallowed(self, settings):
+    def test_backend_check_exception_swallowed(self, settings: "SettingsWrapper"):
         settings.LIVE_TRANSLATIONS = {
             "BACKEND": "tests.backends.CheckCrashBackend",
             "LANGUAGES": ["en"],
@@ -63,7 +68,7 @@ class TestCheckSettings:
         ids = _ids(messages)
         assert "live_translations.E001" not in ids  # languages are set
 
-    def test_valid_config_no_errors(self, settings):
+    def test_valid_config_no_errors(self, settings: "SettingsWrapper"):
         settings.LIVE_TRANSLATIONS = {
             "BACKEND": "tests.backends.InMemoryBackend",
             "LANGUAGES": ["en", "cs"],

@@ -6,8 +6,12 @@ specialised error backends injected via Django settings.
 """
 
 import json
+import typing as t
 
 import pytest
+
+if t.TYPE_CHECKING:
+    from pytest_django.fixtures import SettingsWrapper
 
 from live_translations import conf
 from live_translations.views import (
@@ -41,7 +45,7 @@ _BASE_SETTINGS = {
 
 class TestSaveTranslationsView:
     @pytest.fixture(autouse=True)
-    def _setup(self, settings):
+    def _setup(self, settings: "SettingsWrapper"):
         settings.LIVE_TRANSLATIONS = _BASE_SETTINGS
         conf.get_settings.cache_clear()
         conf.get_backend_instance.cache_clear()
@@ -72,7 +76,7 @@ class TestSaveTranslationsView:
         assert "en" in body["details"]
 
     @pytest.mark.django_db
-    def test_file_not_found_404(self, make_request, settings):
+    def test_file_not_found_404(self, make_request, settings: "SettingsWrapper"):
         """FileNotFoundBackend raises FileNotFoundError → view returns 404."""
         settings.LIVE_TRANSLATIONS = {
             "BACKEND": "tests.backends.FileNotFoundBackend",
@@ -88,7 +92,7 @@ class TestSaveTranslationsView:
         assert response.status_code == 404
         assert json.loads(response.content)["error"] == "PO file not found"
 
-    def test_backend_error_500(self, make_request, settings):
+    def test_backend_error_500(self, make_request, settings: "SettingsWrapper"):
         """SaveErrorBackend raises RuntimeError → view returns 500."""
         settings.LIVE_TRANSLATIONS = {
             "BACKEND": "tests.backends.SaveErrorBackend",
@@ -112,7 +116,7 @@ class TestSaveTranslationsView:
 
 class TestGetTranslationsView:
     @pytest.fixture(autouse=True)
-    def _setup(self, settings):
+    def _setup(self, settings: "SettingsWrapper"):
         settings.LIVE_TRANSLATIONS = _BASE_SETTINGS
         conf.get_settings.cache_clear()
         conf.get_backend_instance.cache_clear()
@@ -126,7 +130,7 @@ class TestGetTranslationsView:
         assert response.status_code == 400
         assert json.loads(response.content)["error"] == "msgid is required"
 
-    def test_backend_error_500(self, make_request, settings):
+    def test_backend_error_500(self, make_request, settings: "SettingsWrapper"):
         """GetErrorBackend raises RuntimeError → view returns 500."""
         settings.LIVE_TRANSLATIONS = {
             "BACKEND": "tests.backends.GetErrorBackend",
@@ -150,7 +154,7 @@ class TestGetTranslationsView:
 
 class TestDeleteTranslationView:
     @pytest.fixture(autouse=True)
-    def _setup(self, settings):
+    def _setup(self, settings: "SettingsWrapper"):
         settings.LIVE_TRANSLATIONS = _BASE_SETTINGS
         conf.get_settings.cache_clear()
         conf.get_backend_instance.cache_clear()
@@ -170,7 +174,7 @@ class TestDeleteTranslationView:
 
 class TestBulkActivateView:
     @pytest.fixture(autouse=True)
-    def _setup(self, settings):
+    def _setup(self, settings: "SettingsWrapper"):
         settings.LIVE_TRANSLATIONS = _BASE_SETTINGS
         conf.get_settings.cache_clear()
         conf.get_backend_instance.cache_clear()

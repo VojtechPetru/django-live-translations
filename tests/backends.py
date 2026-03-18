@@ -57,7 +57,7 @@ class InMemoryBackend(TranslationBackend):
 
     def seed_default(
         self,
-        language: str,
+        language: LanguageCode,
         msgid: str,
         msgstr: str,
         *,

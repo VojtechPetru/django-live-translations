@@ -15,7 +15,7 @@ from live_translations.backends.po import (
     _get_pending,
     _set_pending,
 )
-from live_translations.types import MsgKey
+from live_translations.types import LanguageCode, MsgKey
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -67,7 +67,7 @@ def locale_dir(tmp_path: pathlib.Path) -> pathlib.Path:
 
 def _make_po_file(
     locale_dir: pathlib.Path,
-    language: str,
+    language: LanguageCode,
     entries: list[polib.POEntry],
     domain: str = "django",
 ) -> pathlib.Path:

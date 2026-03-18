@@ -12,6 +12,8 @@ import django.test
 import polib
 import pytest
 
+from live_translations.types import LanguageCode
+
 if t.TYPE_CHECKING:
     from live_translations.backends.db import DatabaseBackend
 
@@ -77,7 +79,7 @@ from live_translations import conf, strings  # noqa: E402
 # ---------------------------------------------------------------------------
 
 SCALES: t.Final[list[int]] = [100, 500]
-LANGUAGES: t.Final[list[str]] = ["en", "cs"]
+LANGUAGES: t.Final[list[LanguageCode]] = ["en", "cs"]
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +91,7 @@ def generate_msgid(index: int) -> str:
     return f"bench.msg_{index:04d}"
 
 
-def generate_msgstr(index: int, language: str = "en") -> str:
+def generate_msgstr(index: int, language: LanguageCode = "en") -> str:
     return f"[{language}] Translated message number {index} with some realistic length"
 
 
@@ -174,7 +176,7 @@ def generate_template_context(n: int, gettext_fn: t.Callable[[str], str]) -> dic
     return context
 
 
-def generate_po_file(n: int, locale_dir: pathlib.Path, language: str) -> pathlib.Path:
+def generate_po_file(n: int, locale_dir: pathlib.Path, language: LanguageCode) -> pathlib.Path:
     """Generate a .po file with N entries and compile to .mo."""
     po_dir = locale_dir / language / "LC_MESSAGES"
     po_dir.mkdir(parents=True, exist_ok=True)
@@ -192,7 +194,7 @@ def generate_po_file(n: int, locale_dir: pathlib.Path, language: str) -> pathlib
     return po_path
 
 
-def populate_db_overrides(n: int, languages: list[str]) -> None:
+def populate_db_overrides(n: int, languages: list[LanguageCode]) -> None:
     """Bulk-create TranslationEntry rows: 80% active, 20% inactive."""
     from live_translations.models import TranslationEntry
 

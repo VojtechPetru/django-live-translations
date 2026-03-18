@@ -10,7 +10,7 @@ import pytest
 
 from live_translations import conf, strings
 from live_translations.middleware import _DRAFT_LANG_ATTR, _DRAFT_LANG_COOKIE, _ZWC_RE, LiveTranslationsMiddleware
-from live_translations.types import MsgKey
+from live_translations.types import LanguageCode, MsgKey, OverrideMap
 
 
 def _html_response(
@@ -35,7 +35,7 @@ def _streaming_html_response() -> django.http.StreamingHttpResponse:
 
 def _middleware_settings(
     *,
-    languages: list[str] | None = None,
+    languages: list[LanguageCode] | None = None,
     permission: bool = True,
     active_by_default: bool = False,
     shortcut_edit: str = "ctrl+shift+e",
@@ -517,7 +517,7 @@ class TestInjectAssets:
     def test_preview_entries_included(self, make_request, settings):
         response = _html_response("<html><body>X</body></html>")
         mw = LiveTranslationsMiddleware(lambda r: response)
-        preview = {MsgKey("hello", ""): "Ahoj", MsgKey("bye", "ctx"): "Nashle"}
+        preview: OverrideMap = {MsgKey("hello", ""): "Ahoj", MsgKey("bye", "ctx"): "Nashle"}
 
         settings.LIVE_TRANSLATIONS = _middleware_settings()
         _clear_caches()

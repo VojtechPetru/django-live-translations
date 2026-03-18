@@ -1,6 +1,7 @@
 """Tests for translation edit history."""
 
 import json
+import typing as t
 import unittest.mock
 
 import django.contrib.auth.models
@@ -8,8 +9,11 @@ import django.db
 import django.http
 import pytest
 
+if t.TYPE_CHECKING:
+    from pytest_django.fixtures import SettingsWrapper
+
 from live_translations import conf, history, models, strings
-from live_translations.types import MsgKey
+from live_translations.types import LanguageCode, MsgKey
 
 
 @pytest.mark.django_db
@@ -168,7 +172,7 @@ class TestRecordChange:
 @pytest.mark.django_db
 class TestRecordBulkAction:
     def test_bulk_creates_entries(self):
-        entries = [("en", MsgKey("hello", "")), ("cs", MsgKey("hello", ""))]
+        entries: list[tuple[LanguageCode, MsgKey]] = [("en", MsgKey("hello", "")), ("cs", MsgKey("hello", ""))]
         history.record_bulk_action(
             entries=entries,
             action=models.TranslationHistory.Action.ACTIVATE,
@@ -281,7 +285,7 @@ class TestHistoryIntegrationWidget:
     """Test history recording through DatabaseBackend.save_translations()."""
 
     @pytest.fixture(autouse=True)
-    def _backend(self, make_db_backend, settings):
+    def _backend(self, make_db_backend, settings: "SettingsWrapper"):
         settings.CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
         self._make_backend = make_db_backend
 
@@ -438,7 +442,7 @@ class TestHistoryIntegrationWidget:
 @pytest.mark.django_db
 class TestHistoryView:
     @pytest.fixture(autouse=True)
-    def _setup(self, settings):
+    def _setup(self, settings: "SettingsWrapper"):
         settings.LIVE_TRANSLATIONS = {
             "BACKEND": "live_translations.backends.db.DatabaseBackend",
             "LANGUAGES": ["en"],
@@ -573,7 +577,7 @@ class TestHistoryView:
 
 @pytest.mark.django_db
 class TestMiddlewareContextvar:
-    def test_sets_user_for_authenticated_request(self, make_request, settings):
+    def test_sets_user_for_authenticated_request(self, make_request, settings: "SettingsWrapper"):
         user = django.contrib.auth.models.User.objects.create_user(
             username="admin",
             password="test",
@@ -604,7 +608,7 @@ class TestMiddlewareContextvar:
 
         assert captured_user == user
 
-    def test_sets_none_for_anonymous(self, make_request, settings):
+    def test_sets_none_for_anonymous(self, make_request, settings: "SettingsWrapper"):
         captured_user = "sentinel"
 
         def capturing_view(request):
@@ -630,7 +634,7 @@ class TestMiddlewareContextvar:
 
         assert captured_user is None  # type: ignore[unnecessary-comparison]
 
-    def test_resets_after_request(self, make_request, settings):
+    def test_resets_after_request(self, make_request, settings: "SettingsWrapper"):
         def noop_view(request):
             return django.http.HttpResponse("ok")
 

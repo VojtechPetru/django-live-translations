@@ -4,17 +4,20 @@ import typing as t
 
 import django
 import django.conf
+import django.http
 import django.test
 import polib
 import pytest
 
 if t.TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
+    from pytest_django.fixtures import SettingsWrapper
 
     from live_translations.backends import db
     from tests.backends import InMemoryBackend  # type: ignore[import-not-found]
 
 from live_translations import conf
+from live_translations.types import LanguageCode
 
 
 def pytest_configure() -> None:
@@ -63,7 +66,7 @@ def make_db_backend(tmp_path: pathlib.Path):
 
     def _factory(
         *,
-        defaults: dict[str, dict[str, str]] | None = None,
+        defaults: dict[LanguageCode, dict[str, str]] | None = None,
     ) -> "db.DatabaseBackend":
         locale_dir = tmp_path / "locale"
         # Always ensure at least an empty locale dir structure
@@ -94,7 +97,7 @@ def make_request():
         has_permission: bool = True,
         anonymous: bool = False,
         user: "AbstractBaseUser | None" = None,
-    ):
+    ) -> django.http.HttpRequest:
         factory = django.test.RequestFactory(enforce_csrf_checks=False)
         if method == "get":
             request = factory.get(path, data or {})
@@ -126,7 +129,7 @@ def make_request():
 
 
 @pytest.fixture
-def in_memory_backend(settings) -> "InMemoryBackend":
+def in_memory_backend(settings: "SettingsWrapper") -> "InMemoryBackend":
     """Configure InMemoryBackend via Django settings and return the instance."""
     settings.LIVE_TRANSLATIONS = {
         "BACKEND": "tests.backends.InMemoryBackend",
