@@ -140,8 +140,8 @@ The `<lt-t>` element was chosen because it's an unknown HTML element that browse
 
 The package is tested at multiple levels to catch regressions across the full stack:
 
-- **440+ unit tests** covering all core modules, backends, views, admin, and error handling
-- **270+ end-to-end tests** using Playwright against a real Django dev server
+- **470+ unit tests** covering all core modules, backends, views, admin, and error handling
+- **290+ end-to-end tests** using Playwright against a real Django dev server
 - E2E tests run against **both backends** (PO and database), each with their own Django server instance
 - CI matrix tests across **Python 3.12--3.14** and **Django 4.2--6.0**
 - CI enforces **90%+ unit test coverage**; e2e coverage is tracked separately
