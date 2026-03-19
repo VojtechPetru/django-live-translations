@@ -132,19 +132,24 @@ class TestStringRegistry:
 class TestCapfirstPreservesMarker:
     """Django's capfirst does ``x[0].upper() + x[1:]``.
 
-    Since the ZWC marker is appended (at the end), capfirst operates on the
-    first content character and the marker stays intact at the end.
+    The start flag is at position 1 (in the ``x[1:]`` slice), so capfirst
+    uppercases the first visible character and the start flag + end marker
+    both survive intact.
     """
 
     def test_capfirst_preserves_marker(self) -> None:
         token = lt_active.set(True)
         try:
-            from live_translations.strings import _append_marker
+            from live_translations.strings import _insert_markers
 
-            text = _append_marker("full name", MsgKey("form.name.label", ""))
+            text = _insert_markers("full name", MsgKey("form.name.label", ""))
             result = django.utils.text.capfirst(text)
-            assert result.startswith("Full name")
-            assert ZWC_BOUNDARY in result
+            # First char uppercased, start flag at position 1 survives
+            assert result[0] == "F"
+            assert result[1] == ZWC_BOUNDARY  # start flag
+            assert result[2:].startswith("ull name")
+            # End marker boundary present
+            assert result.count(ZWC_BOUNDARY) >= 3  # 1 start flag + 2 end marker boundaries
         finally:
             lt_active.reset(token)
 
@@ -161,8 +166,20 @@ class TestHtmlEscapePreservesMarker:
         escaped = django.utils.html.escape(text)
         assert ZWC_BOUNDARY in escaped
         assert "&lt;world&gt;" in escaped
-        # The marker itself should be unchanged
+        # The end marker itself should be unchanged
         assert marker in escaped
+
+    def test_escape_preserves_start_flag(self) -> None:
+        token = lt_active.set(True)
+        try:
+            from live_translations.strings import _insert_markers
+
+            text = _insert_markers("Hello <world>", MsgKey("test", ""))
+            escaped = django.utils.html.escape(text)
+            # Start flag (ZWC_BOUNDARY) should survive html.escape
+            assert ZWC_BOUNDARY in escaped
+        finally:
+            lt_active.reset(token)
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +200,20 @@ class TestFormattingPreservesMarker:
         result = template.format(name="World")
         assert result == "Hello World" + marker
 
+    def test_start_flag_survives_percent_formatting(self) -> None:
+        """Start flag at position 1 is not affected by %-formatting."""
+        token = lt_active.set(True)
+        try:
+            from live_translations.strings import _insert_markers
+
+            # _insert_markers inserts flag then appends end marker.
+            # We simulate post-formatting by checking the flag position.
+            text = _insert_markers("Value: %(x)s done", MsgKey("test", ""))
+            # Flag is at position 1
+            assert text[1] == ZWC_BOUNDARY
+        finally:
+            lt_active.reset(token)
+
 
 # ---------------------------------------------------------------------------
 # 6. encode_zwc overflow does not break the page
@@ -200,7 +231,7 @@ class TestEncodeZwcOverflowIsSafe:
     def test_patched_gettext_returns_original_on_overflow(self) -> None:
         import unittest.mock
 
-        from live_translations.strings import _append_marker
+        from live_translations.strings import _insert_markers
 
         token = lt_active.set(True)
         try:
@@ -209,12 +240,12 @@ class TestEncodeZwcOverflowIsSafe:
                 "live_translations.strings.encode_zwc",
                 side_effect=ValueError("StringId out of range"),
             ):
-                from live_translations.strings import _append_marker
+                from live_translations.strings import _insert_markers
 
-                # _append_marker is called inside the try/except in patched gettext.
+                # _insert_markers is called inside the try/except in patched gettext.
                 # Call it directly to verify it raises, which the patched gettext catches.
                 with pytest.raises(ValueError, match="out of range"):
-                    _append_marker("translated text", MsgKey("msgid", ""))
+                    _insert_markers("translated text", MsgKey("msgid", ""))
         finally:
             lt_active.reset(token)
 
@@ -235,3 +266,107 @@ class TestEncodeZwcOverflowIsSafe:
                 assert ZWC_BOUNDARY not in result
         finally:
             lt_active.reset(token)
+
+
+# ---------------------------------------------------------------------------
+# 7. Start flag insertion
+# ---------------------------------------------------------------------------
+
+
+class TestStartFlagInsertion:
+    """Verify that _insert_markers inserts a \\uFEFF start flag at the correct position."""
+
+    def test_start_flag_at_position_1(self) -> None:
+        """Normal text: start flag at position 1 (after first visible char)."""
+        from live_translations.strings import _insert_markers
+
+        result = _insert_markers("Hello world", MsgKey("test", ""))
+        assert result[0] == "H"
+        assert result[1] == ZWC_BOUNDARY  # start flag
+        assert result[2:].startswith("ello world")
+        # End marker at the end
+        assert result.endswith(ZWC_BOUNDARY)
+
+    def test_start_flag_at_position_0_for_html(self) -> None:
+        """Translation starting with '<' gets flag at position 0."""
+        from live_translations.strings import _insert_markers
+
+        result = _insert_markers("<strong>bold</strong> text", MsgKey("html", ""))
+        assert result[0] == ZWC_BOUNDARY  # start flag at position 0
+        assert result[1:].startswith("<strong>bold</strong> text")
+        # End marker at the end
+        assert result.endswith(ZWC_BOUNDARY)
+
+    def test_no_start_flag_for_empty(self) -> None:
+        """Empty translation string: no start flag, only end marker."""
+        from live_translations.strings import _insert_markers
+
+        result = _insert_markers("", MsgKey("empty", ""))
+        # Should be just the 18-char end marker
+        assert len(result) == 18
+        assert result[0] == ZWC_BOUNDARY
+        assert result[-1] == ZWC_BOUNDARY
+
+    def test_start_flag_for_single_char(self) -> None:
+        """Single-char translation: flag appended after the char."""
+        from live_translations.strings import _insert_markers
+
+        result = _insert_markers("X", MsgKey("single", ""))
+        assert result[0] == "X"
+        assert result[1] == ZWC_BOUNDARY  # start flag
+        # Followed by 18-char end marker
+        assert len(result) == 1 + 1 + 18  # char + flag + end marker
+
+    def test_start_flag_survives_capfirst(self) -> None:
+        """capfirst uppercases position 0, start flag at position 1 survives."""
+        from live_translations.strings import _insert_markers
+
+        text = _insert_markers("hello", MsgKey("test", ""))
+        result = django.utils.text.capfirst(text)
+        assert result[0] == "H"
+        assert result[1] == ZWC_BOUNDARY  # start flag
+
+    def test_html_start_flag_capfirst_noop(self) -> None:
+        """capfirst on '<...' is a no-op, flag at position 0 is safe."""
+        from live_translations.strings import _insert_markers
+
+        text = _insert_markers("<em>word</em>", MsgKey("html", ""))
+        result = django.utils.text.capfirst(text)
+        # capfirst('<') -> '<' (no uppercase for '<'), flag stays at position 0
+        assert result[0] == ZWC_BOUNDARY
+        assert result[1] == "<"
+
+    def test_preserves_safestring_html_start(self) -> None:
+        """SafeString starting with '<' — flag at position 0, type preserved."""
+        import django.utils.safestring
+
+        from live_translations.strings import _insert_markers
+
+        safe_input = django.utils.safestring.mark_safe("<strong>bold</strong>")
+        result = _insert_markers(safe_input, MsgKey("safe", ""))
+        assert isinstance(result, django.utils.safestring.SafeData)
+        # pyrefly doesn't know SafeData subclasses str
+        assert result[0] == ZWC_BOUNDARY  # type: ignore[bad-index]  # flag at position 0 for HTML
+        assert result[1] == "<"  # type: ignore[bad-index]
+
+    def test_preserves_safestring_normal_text(self) -> None:
+        """SafeString not starting with '<' — flag at position 1, type preserved."""
+        import django.utils.safestring
+
+        from live_translations.strings import _insert_markers
+
+        safe_input = django.utils.safestring.mark_safe("Hello world")
+        result = _insert_markers(safe_input, MsgKey("safe2", ""))
+        assert isinstance(result, django.utils.safestring.SafeData)
+        # pyrefly doesn't know SafeData subclasses str
+        assert result[0] == "H"  # type: ignore[bad-index]
+        assert result[1] == ZWC_BOUNDARY  # type: ignore[bad-index]  # flag at position 1
+
+    def test_plain_str_stays_plain(self) -> None:
+        """Plain str input does NOT get promoted to SafeString."""
+        import django.utils.safestring
+
+        from live_translations.strings import _insert_markers
+
+        result = _insert_markers("plain text", MsgKey("plain", ""))
+        assert not isinstance(result, django.utils.safestring.SafeData)

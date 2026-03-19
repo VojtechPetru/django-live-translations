@@ -76,6 +76,19 @@ msgid "attrs.alt_hint"
 msgstr ""
 "Tento obrázek má přeložený atribut alt — zkontrolujte ho v prohlížeči."
 
+#. Inline HTML in translations
+msgid "html.heading"
+msgstr "Inline HTML"
+
+msgid "html.bold_and_italic"
+msgstr "Překlady mohou obsahovat <strong>tučný</strong> a <em>kurzívní</em> text."
+
+msgid "html.link"
+msgstr "Navštivte <a href=\"https://docs.djangoproject.com\">dokumentaci Djanga</a> pro více informací."
+
+msgid "html.mixed"
+msgstr "Můžete <strong>míchat</strong> různé <em>tagy</em> &amp; <code>entity</code> libovolně."
+
 msgid "asvar.heading"
 msgstr "Přiřazení do proměnné"
 

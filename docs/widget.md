@@ -30,10 +30,47 @@ The modal includes:
 - **Message ID** - the original `msgid` displayed for reference, with a copy button
 - **Default value** - the `.po` file baseline (database backend), shown as read-only
 - **Translator hint** - extracted from `.po` file comments (`#.` lines), if available
-- **Placeholder validation** - warns if `%(name)s` or `{name}` placeholders don't match between the original and translation
+- **[Validation](#validation)** - checks for placeholder mismatches and malformed HTML before saving
 - **Active toggle** - per-language checkbox to control whether the translation is immediately active
 - **Save** - persists changes and updates the page in real-time
 - **Delete override** - reverts to the `.po` file default (removes the DB or pending override)
+
+## Validation
+
+The widget validates translations before saving and warns about potential issues. Validation warnings are **non-blocking** — you can always click **Save anyway** to proceed.
+
+### Placeholder validation
+
+If the original message contains format placeholders (`%(name)s`, `{name}`), the widget checks that each translation preserves them. Missing or unexpected placeholders trigger a per-language error:
+
+> :flag_gb: English: missing %(count)s
+
+This validation is enforced server-side — the save is rejected until the placeholders match.
+
+### HTML structure validation
+
+Translations can contain inline HTML (`<strong>`, `<em>`, `<a>`, etc.). When a translation contains HTML tags, the widget checks for well-formedness before saving:
+
+- **Unclosed tags** — `<strong>text` without a closing `</strong>`
+- **Mismatched tags** — `<strong>text</em>` where the closing tag doesn't match
+- **Stray closing tags** — `</strong>` without a matching opening tag
+
+Void elements (`<br>`, `<img>`, `<hr>`, etc.) and self-closing syntax (`<br/>`) are handled correctly and never flagged.
+
+![HTML validation warning](assets/screenshots/html-validation.png){ loading=lazy }
+/// caption
+HTML validation warning with a "Save anyway" override
+///
+
+When HTML issues are found:
+
+1. The error banner shows per-language details (same format as placeholder errors)
+2. The **Save** button changes to **Save anyway**
+3. Clicking **Save anyway** bypasses the check and saves the translation as-is
+4. Editing the textarea clears the warning and re-validates on the next save attempt
+
+!!! tip
+    HTML validation is purely client-side — it's a convenience to catch typos, not a security boundary. Translators are trusted users who may intentionally use unconventional markup.
 
 ## Preview mode
 

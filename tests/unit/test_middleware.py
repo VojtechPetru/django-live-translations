@@ -400,16 +400,42 @@ class TestStripZwc:
 
         assert "Content-Length" not in response
 
-    def test_zwc_boundary_present_but_no_full_marker(self):
-        """ZWC_BOUNDARY alone (without a full 18-char marker) should not alter content."""
+    def test_strips_lone_start_flags(self):
+        """Lone \\uFEFF start flags are stripped after end markers are removed."""
         body = "Hello\ufeffWorld"
         response = django.http.HttpResponse(body, content_type="text/plain")
 
         LiveTranslationsMiddleware._strip_zwc(response)
 
-        # The regex won't match an incomplete marker, so content stays the same
         content = response.content.decode()
-        assert content == "Hello\ufeffWorld"
+        assert content == "HelloWorld"
+        assert "\ufeff" not in content
+
+    def test_strips_both_start_flag_and_end_marker(self):
+        """Text with both a start flag and a full end marker is fully cleaned."""
+        end_marker = "\ufeff" + "\u200b" * 16 + "\ufeff"
+        # Simulates: "H" + start_flag + "ello" + end_marker
+        body = f"H\ufeffello{end_marker}"
+        response = django.http.HttpResponse(body, content_type="text/plain")
+
+        LiveTranslationsMiddleware._strip_zwc(response)
+
+        content = response.content.decode()
+        assert content == "Hello"
+        assert "\ufeff" not in content
+
+    def test_strips_html_starting_translation(self):
+        """Flag at position 0 (HTML-starting text) + end marker is fully cleaned."""
+        end_marker = "\ufeff" + "\u200b" * 16 + "\ufeff"
+        # Simulates: start_flag + "<strong>bold</strong>" + end_marker
+        body = f"\ufeff<strong>bold</strong>{end_marker}"
+        response = django.http.HttpResponse(body, content_type="text/plain")
+
+        LiveTranslationsMiddleware._strip_zwc(response)
+
+        content = response.content.decode()
+        assert content == "<strong>bold</strong>"
+        assert "\ufeff" not in content
 
 
 @pytest.mark.django_db

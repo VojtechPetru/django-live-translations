@@ -178,25 +178,6 @@ class TestEdgeCases:
         # Cleanup
         api_restore_po_default(page_as_superuser, base_url, "demo.title", ["en"])
 
-    def test_special_characters_in_translation(self, page_as_superuser: Page, base_url: str) -> None:
-        xss_text = "<script>alert(1)</script>"
-        open_modal(page_as_superuser, "demo.title")
-        wait_for_fields_loaded(page_as_superuser)
-        page_as_superuser.locator("#lt-input-en").fill(xss_text)
-        check_active_toggle(page_as_superuser)
-        page_as_superuser.locator(".lt-btn--save").click()
-        expect(page_as_superuser.locator("dialog.lt-dialog[open]")).to_be_hidden(timeout=5000)
-        span = page_as_superuser.locator('lt-t[data-lt-msgid="demo.title"]').first
-        # textContent should show the literal text, not execute it
-        text_content = span.text_content()
-        assert text_content is not None
-        assert "<script>" in text_content or "&lt;script&gt;" in text_content
-        # Ensure our text is properly escaped in the span (no raw script tags)
-        inner_html = span.inner_html()
-        assert "<script>" not in inner_html
-        # Cleanup
-        api_restore_po_default(page_as_superuser, base_url, "demo.title", ["en"])
-
     def test_long_translation_text_handled(self, page_as_superuser: Page, base_url: str) -> None:
         long_text = "A" * 1500
         open_modal(page_as_superuser, "demo.title")

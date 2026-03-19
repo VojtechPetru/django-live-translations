@@ -173,6 +173,15 @@
   /** @type {RegExp} */
   const ZWC_RE = /\uFEFF[\u200B\u200C]{16}\uFEFF/g;
 
+  /**
+   * Matches a lone \uFEFF start flag that is NOT the leading boundary of a
+   * full 18-char ZWC end marker.  End markers have the pattern:
+   *   FEFF + 16x(200B|200C) + FEFF
+   * The negative lookahead ensures we only match standalone start flags.
+   * @type {RegExp}
+   */
+  const START_FLAG_RE = /\uFEFF(?![\u200B\u200C]{16}\uFEFF)/g;
+
   /** @type {StringTable} */
   const STRING_TABLE = window.__LT_STRINGS__ || {};
 
@@ -269,23 +278,93 @@
           nodeToWrap = /** @type {Text} */ (tn);
         }
 
+        // Strip start flags from the content node (handles the plain-text case
+        // where both start flag and end marker are in the same text node).
+        if (nodeToWrap && nodeToWrap.nodeType === Node.TEXT_NODE) {
+          START_FLAG_RE.lastIndex = 0;
+          nodeToWrap.textContent = (nodeToWrap.textContent || "").replace(START_FLAG_RE, "");
+        }
+
+        var didMultiWrap = false;
+
         if (nodeToWrap) {
-          const wrapParent = nodeToWrap.parentNode;
-          // Wrap in <lt-t> unless parent cannot contain child elements
-          if (wrapParent && wrapParent.nodeName !== "OPTION" && wrapParent.nodeName !== "TITLE" && wrapParent.nodeName !== "SCRIPT" && wrapParent.nodeName !== "STYLE") {
-            const ltEl = document.createElement("lt-t");
-            ltEl.dataset.ltMsgid = meta.m;
-            ltEl.dataset.ltContext = meta.c;
-            wrapParent.insertBefore(ltEl, nodeToWrap);
-            ltEl.appendChild(nodeToWrap);
-            registeredNodes.push({ node: nodeToWrap, msgid: meta.m, context: meta.c, span: ltEl });
-          } else {
-            registeredNodes.push({ node: nodeToWrap, msgid: meta.m, context: meta.c, span: null });
+          var wrapParent = nodeToWrap.parentNode;
+          var canWrap = wrapParent && wrapParent.nodeName !== "OPTION" && wrapParent.nodeName !== "TITLE" && wrapParent.nodeName !== "SCRIPT" && wrapParent.nodeName !== "STYLE";
+
+          // ── Multi-node wrapping via start flag ──
+          // Walk backwards from contentNode through previousSiblings looking
+          // for the ZWC start flag.  When found, wrap all nodes from the
+          // flag position through contentNode in a single <lt-t>.
+          if (canWrap && contentNode) {
+            var cursor = contentNode;
+            while (cursor) {
+              if (cursor.nodeType === Node.TEXT_NODE) {
+                START_FLAG_RE.lastIndex = 0;
+                var flagMatch = START_FLAG_RE.exec(cursor.textContent || "");
+                if (flagMatch) {
+                  var flagIdx = flagMatch.index;
+                  // Strip the flag character
+                  cursor.textContent = (cursor.textContent || "").slice(0, flagIdx) + (cursor.textContent || "").slice(flagIdx + 1);
+                  // If there is text before the flag, split — prefix stays outside
+                  var wrapStart = cursor;
+                  if (flagIdx > 0) {
+                    wrapStart = /** @type {Text} */ (cursor.splitText(flagIdx));
+                  }
+                  // Collect all nodes from wrapStart through contentNode (inclusive)
+                  var nodesToWrap = [];
+                  var n = wrapStart;
+                  while (n) {
+                    nodesToWrap.push(n);
+                    if (n === contentNode) break;
+                    n = n.nextSibling;
+                  }
+                  // Also include tn if it has content and follows contentNode
+                  if (tn !== contentNode && tn.textContent && tn.textContent.length > 0 && tn.parentNode === wrapParent) {
+                    // Check if tn is immediately after contentNode
+                    if (contentNode.nextSibling === tn) {
+                      nodesToWrap.push(tn);
+                    }
+                  }
+                  if (nodesToWrap.length > 0) {
+                    var ltEl = document.createElement("lt-t");
+                    ltEl.dataset.ltMsgid = meta.m;
+                    ltEl.dataset.ltContext = meta.c;
+                    wrapParent.insertBefore(ltEl, nodesToWrap[0]);
+                    for (var ni = 0; ni < nodesToWrap.length; ni++) {
+                      ltEl.appendChild(nodesToWrap[ni]);
+                    }
+                    // Find the first text node inside for registration
+                    var firstText = _firstTextNode(ltEl);
+                    registeredNodes.push({ node: firstText || nodeToWrap, msgid: meta.m, context: meta.c, span: ltEl });
+                    didMultiWrap = true;
+                  }
+                  break;
+                }
+              }
+              // Stop walking at parent boundary or if we hit another <lt-t>
+              var prev = cursor.previousSibling;
+              if (!prev || (prev.nodeType === Node.ELEMENT_NODE && /** @type {Element} */ (prev).tagName === "LT-T")) break;
+              cursor = prev;
+            }
+          }
+
+          // ── Fallback: single-node wrapping ──
+          if (!didMultiWrap) {
+            if (canWrap) {
+              var ltEl2 = document.createElement("lt-t");
+              ltEl2.dataset.ltMsgid = meta.m;
+              ltEl2.dataset.ltContext = meta.c;
+              wrapParent.insertBefore(ltEl2, nodeToWrap);
+              ltEl2.appendChild(nodeToWrap);
+              registeredNodes.push({ node: nodeToWrap, msgid: meta.m, context: meta.c, span: ltEl2 });
+            } else {
+              registeredNodes.push({ node: nodeToWrap, msgid: meta.m, context: meta.c, span: null });
+            }
           }
         }
 
         // Clean up empty text node left after marker removal
-        if (tn !== nodeToWrap && tn.textContent === "" && tn.parentNode) {
+        if (!didMultiWrap && tn !== nodeToWrap && tn.textContent === "" && tn.parentNode) {
           tn.parentNode.removeChild(tn);
         }
 
@@ -314,8 +393,8 @@
         const attrId = decodeZWC(attrMatch[0]);
         const attrMeta = STRING_TABLE[attrId];
         if (!attrMeta) continue;
-        // Strip ALL ZWC markers from the attribute value
-        el.setAttribute(attr.name, attr.value.replace(ZWC_RE, ""));
+        // Strip ALL ZWC markers and start flags from the attribute value
+        el.setAttribute(attr.name, attr.value.replace(ZWC_RE, "").replace(START_FLAG_RE, ""));
         ltAttrs.push({ a: attr.name, m: attrMeta.m, c: attrMeta.c });
       }
       if (ltAttrs.length) {
@@ -324,7 +403,101 @@
     }
   }
 
+  /**
+   * Find the first text node inside a DOM subtree.
+   * @param {Node} root - Root node to search within.
+   * @returns {Text|null}
+   */
+  function _firstTextNode(root) {
+    var tw = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    var n = tw.nextNode();
+    return n ? /** @type {Text} */ (n) : null;
+  }
 
+  // ─── HTML Validation ─────────────────────────────────
+
+  /**
+   * Set of HTML void elements that do not require a closing tag.
+   * @type {Object<string, boolean>}
+   */
+  var VOID_ELEMENTS = {
+    area:1, base:1, br:1, col:1, embed:1, hr:1, img:1, input:1,
+    link:1, meta:1, param:1, source:1, track:1, wbr:1
+  };
+
+  /**
+   * Matches HTML opening tags (including self-closing) and closing tags.
+   * Groups: [1] = "/" for closing tags, [2] = tag name, [3] = "/" for self-closing.
+   * @type {RegExp}
+   */
+  var HTML_TAG_RE = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)\b[^>]*(\/?)>/g;
+
+  /**
+   * Validate the HTML structure of a translation string.
+   * Returns an array of human-readable error descriptions.
+   * Returns `[]` for plain text (no `<`) or well-formed HTML.
+   *
+   * Checks for:
+   * - Unclosed tags (e.g. `<strong>text` without `</strong>`)
+   * - Mismatched closing tags (e.g. `<strong>text</em>`)
+   * - Stray closing tags (e.g. `</strong>` without a matching open)
+   *
+   * Void elements (`<br>`, `<img>`, etc.) and self-closing syntax (`<br/>`)
+   * are handled correctly and never flagged.
+   *
+   * @param {string} text - The translation string to validate.
+   * @returns {string[]} Array of error descriptions (empty = valid).
+   */
+  function _validateHtmlStructure(text) {
+    if (text.indexOf("<") === -1) return [];
+
+    var errors = [];
+    var stack = [];
+    var match;
+
+    HTML_TAG_RE.lastIndex = 0;
+    while ((match = HTML_TAG_RE.exec(text)) !== null) {
+      var isClosing = match[1] === "/";
+      var tagName = match[2].toLowerCase();
+      var isSelfClosing = match[3] === "/";
+
+      if (isSelfClosing || VOID_ELEMENTS[tagName]) {
+        // Self-closing or void element — nothing to track
+        if (isClosing && VOID_ELEMENTS[tagName]) {
+          errors.push("Void element <" + tagName + "> should not have a closing tag");
+        }
+        continue;
+      }
+
+      if (isClosing) {
+        if (stack.length === 0) {
+          errors.push("Closing </" + tagName + "> without matching opening tag");
+        } else if (stack[stack.length - 1] === tagName) {
+          stack.pop();
+        } else {
+          // Check if the tag exists deeper in the stack (nesting error)
+          var found = false;
+          for (var si = stack.length - 1; si >= 0; si--) {
+            if (stack[si] === tagName) { found = true; break; }
+          }
+          if (found) {
+            errors.push("Expected </" + stack[stack.length - 1] + ">, found </" + tagName + ">");
+          } else {
+            errors.push("Closing </" + tagName + "> without matching opening tag");
+          }
+        }
+      } else {
+        stack.push(tagName);
+      }
+    }
+
+    // Any tags left on the stack are unclosed
+    for (var ui = stack.length - 1; ui >= 0; ui--) {
+      errors.push("Unclosed <" + stack[ui] + "> tag");
+    }
+
+    return errors;
+  }
 
   // ─── Shared Helpers ──────────────────────────────────
 
@@ -565,11 +738,25 @@
    * @returns {void}
    */
   function _updateDomInPlace(msgid, context, displayText, isPreviewEntry) {
+    // NOTE: We always use innerHTML so that HTML formatting tags in translations
+    // (e.g. <strong>, <em>) render correctly after save without a page reload.
+    // This code path only runs for the translator who just saved via the widget
+    // (a trusted, permissioned user previewing their own input).  Other visitors
+    // see the server-rendered version on next page load.  If _updateDomInPlace
+    // is ever used for untrusted content, HTML sanitization must be added here.
+
     // Update registered text nodes (and their wrapping spans if in edit mode)
     for (let ri = 0; ri < registeredNodes.length; ri++) {
       const entry = registeredNodes[ri];
       if (entry.msgid === msgid && entry.context === context) {
-        entry.node.textContent = displayText;
+        if (entry.span) {
+          entry.span.innerHTML = displayText;
+          // Update the registered text node ref to the first text node inside
+          var ft = _firstTextNode(entry.span);
+          if (ft) entry.node = ft;
+        } else {
+          entry.node.textContent = displayText;
+        }
         if (entry.span) {
           if (isPreviewEntry) {
             entry.span.classList.add("lt-preview");
@@ -588,7 +775,7 @@
     for (let i = 0; i < spans.length; i++) {
       const sp = spans[i];
       if (sp.dataset.ltMsgid === msgid && (sp.dataset.ltContext || "") === context) {
-        sp.textContent = displayText;
+        sp.innerHTML = displayText;
         if (isPreviewEntry) {
           sp.classList.add("lt-preview");
         } else {
@@ -599,7 +786,7 @@
       }
     }
 
-    // Update attribute translations
+    // Update attribute translations (always use textContent — attributes don't render HTML)
     const attrEls = document.querySelectorAll("[data-lt-attrs]");
     for (let j = 0; j < attrEls.length; j++) {
       const attrs = _parseLtAttrs(/** @type {HTMLElement} */ (attrEls[j]));
@@ -666,6 +853,8 @@
   let _originalActiveFlags = {};
   /** @type {Object<string, boolean>} - Languages marked for override deletion (submitted on Save). */
   let _deletionsMarked = {};
+  /** @type {boolean} - When true, the next Save click bypasses HTML validation (user acknowledged warnings). */
+  let _htmlWarningAcked = false;
 
   // ─── API Client ──────────────────────────────────────
 
@@ -957,7 +1146,9 @@
       function () { return msgidEl.dataset.msgid || ""; },
       "lt-dialog__msgid--copied"
     );
-    dialog.querySelector(".lt-btn--save").disabled = true;
+    var openSaveBtn = dialog.querySelector(".lt-btn--save");
+    openSaveBtn.disabled = true;
+    openSaveBtn.textContent = "Save";
     showDialogError(null);
 
     dialog.showModal();
@@ -1351,6 +1542,13 @@
         this.style.height = this.scrollHeight + "px";
         syncToggle();
         _updateTabDirtyDots();
+        // Reset HTML warning override so the next Save re-validates
+        if (_htmlWarningAcked) {
+          _htmlWarningAcked = false;
+          showDialogError(null);
+          var saveBtn = dialog.querySelector(".lt-btn--save");
+          if (saveBtn) saveBtn.textContent = "Save";
+        }
       });
     })(textarea, toggleWrap, poDefault, checkbox, ACTIVE_BY_DEFAULT, hasOverride, isDraftLang);
 
@@ -1481,6 +1679,22 @@
       saveBtn.textContent = "Save";
       closeModal();
       return;
+    }
+
+    // ── HTML structure validation (client-side warning) ──
+    if (!_htmlWarningAcked && hasSave) {
+      var htmlErrors = {};
+      for (var hlang in translations) {
+        var errs = _validateHtmlStructure(translations[hlang]);
+        if (errs.length) htmlErrors[hlang] = errs;
+      }
+      if (Object.keys(htmlErrors).length > 0) {
+        showDialogError("Invalid HTML structure", htmlErrors);
+        saveBtn.disabled = false;
+        saveBtn.textContent = "Save anyway";
+        _htmlWarningAcked = true;
+        return;
+      }
     }
 
     try {
@@ -2068,6 +2282,7 @@
     _originalValues = {};
     _originalActiveFlags = {};
     _deletionsMarked = {};
+    _htmlWarningAcked = false;
     if (dialog) {
       const delBtn = dialog.querySelector(".lt-btn--delete-override");
       if (delBtn) {

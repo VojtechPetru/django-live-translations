@@ -123,6 +123,13 @@
     </div>
 
     <div class="card">
+        <h2>{% trans "html.heading" %} {% verbatim %}<span class="via">{% trans %}</span>{% endverbatim %}</h2>
+        <p>{% verbatim %}<span class="via">{% trans %}</span>{% endverbatim %} {% trans "html.bold_and_italic" %}</p>
+        <p>{% verbatim %}<span class="via">{% trans %}</span>{% endverbatim %} {% trans "html.link" %}</p>
+        <p>{% verbatim %}<span class="via">{% trans %}</span>{% endverbatim %} {% trans "html.mixed" %}</p>
+    </div>
+
+    <div class="card">
         <h2>{% trans "asvar.heading" %} {% verbatim %}<span class="via">{% trans … as %}</span>{% endverbatim %}</h2>
         {% trans "asvar.reused_label" as reused %}
         <p title="{{ reused }}" class="has-tooltip">

@@ -958,3 +958,54 @@ class TestGetDefault:
         result = services.get_default(key=MsgKey("hello", ""), language="en")
 
         assert result == ""
+
+
+# ---------------------------------------------------------------------------
+# HTML content preservation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+class TestHtmlContentPreservation:
+    """Verify that HTML tags in translations survive the save/retrieve round-trip unchanged."""
+
+    HTML_STRINGS = [
+        "Click <strong>here</strong> to continue",
+        'Visit <a href="https://example.com">our site</a> for details',
+        "Use <em>italic</em> and <strong>bold</strong> together",
+        "Line one<br>line two<br/>line three",
+        '<span class="highlight">Important</span> notice',
+        "Nested <strong><em>bold italic</em></strong> text",
+        "Special chars &amp; entities &lt;not tags&gt; preserved",
+    ]
+
+    @pytest.mark.parametrize("html_value", HTML_STRINGS)
+    def test_save_and_retrieve_preserves_html(self, test_backend: "TestBackend", html_value: str):
+        key = MsgKey("html.test", "")
+        services.save_translations(key=key, translations={"en": html_value}, active_flags={"en": True})
+
+        result = services.get_translations(key=key)
+        assert result["translations"]["en"]["msgstr"] == html_value
+
+    @pytest.mark.parametrize("html_value", HTML_STRINGS)
+    def test_compute_display_preserves_html(self, test_backend: "TestBackend", html_value: str):
+        key = MsgKey("html.test", "")
+        services.save_translations(key=key, translations={"en": html_value}, active_flags={"en": True})
+
+        display = services.compute_display(key=key, page_language="en")
+        assert display["text"] == html_value
+
+    def test_html_default_preserved_through_get(self, test_backend: "TestBackend"):
+        key = MsgKey("html.default", "")
+        test_backend.seed_default("en", "html.default", "Default with <strong>bold</strong> text")
+
+        result = services.get_translations(key=key)
+        assert result["translations"]["en"]["msgstr"] == "Default with <strong>bold</strong> text"
+
+    def test_html_override_replaces_html_default(self, test_backend: "TestBackend"):
+        key = MsgKey("html.override", "")
+        test_backend.seed_default("en", "html.override", "Old <em>emphasis</em>")
+        services.save_translations(key=key, translations={"en": "New <strong>bold</strong>"}, active_flags={"en": True})
+
+        display = services.compute_display(key=key, page_language="en")
+        assert display["text"] == "New <strong>bold</strong>"

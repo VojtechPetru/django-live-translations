@@ -76,6 +76,19 @@ msgid "attrs.alt_hint"
 msgstr ""
 "This image has a translated alt attribute — inspect it in your browser."
 
+#. Inline HTML in translations
+msgid "html.heading"
+msgstr "Inline HTML"
+
+msgid "html.bold_and_italic"
+msgstr "Translations can contain <strong>bold</strong> and <em>italic</em> text."
+
+msgid "html.link"
+msgstr "Visit the <a href=\"https://docs.djangoproject.com\">Django docs</a> for more."
+
+msgid "html.mixed"
+msgstr "You can <strong>mix</strong> several <em>tags</em> &amp; <code>entities</code> freely."
+
 msgid "asvar.heading"
 msgstr "Variable assignment"
 
