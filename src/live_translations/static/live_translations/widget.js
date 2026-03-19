@@ -414,6 +414,91 @@
     return n ? /** @type {Text} */ (n) : null;
   }
 
+  // ─── HTML Validation ─────────────────────────────────
+
+  /**
+   * Set of HTML void elements that do not require a closing tag.
+   * @type {Object<string, boolean>}
+   */
+  var VOID_ELEMENTS = {
+    area:1, base:1, br:1, col:1, embed:1, hr:1, img:1, input:1,
+    link:1, meta:1, param:1, source:1, track:1, wbr:1
+  };
+
+  /**
+   * Matches HTML opening tags (including self-closing) and closing tags.
+   * Groups: [1] = "/" for closing tags, [2] = tag name, [3] = "/" for self-closing.
+   * @type {RegExp}
+   */
+  var HTML_TAG_RE = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)\b[^>]*(\/?)>/g;
+
+  /**
+   * Validate the HTML structure of a translation string.
+   * Returns an array of human-readable error descriptions.
+   * Returns `[]` for plain text (no `<`) or well-formed HTML.
+   *
+   * Checks for:
+   * - Unclosed tags (e.g. `<strong>text` without `</strong>`)
+   * - Mismatched closing tags (e.g. `<strong>text</em>`)
+   * - Stray closing tags (e.g. `</strong>` without a matching open)
+   *
+   * Void elements (`<br>`, `<img>`, etc.) and self-closing syntax (`<br/>`)
+   * are handled correctly and never flagged.
+   *
+   * @param {string} text - The translation string to validate.
+   * @returns {string[]} Array of error descriptions (empty = valid).
+   */
+  function _validateHtmlStructure(text) {
+    if (text.indexOf("<") === -1) return [];
+
+    var errors = [];
+    var stack = [];
+    var match;
+
+    HTML_TAG_RE.lastIndex = 0;
+    while ((match = HTML_TAG_RE.exec(text)) !== null) {
+      var isClosing = match[1] === "/";
+      var tagName = match[2].toLowerCase();
+      var isSelfClosing = match[3] === "/";
+
+      if (isSelfClosing || VOID_ELEMENTS[tagName]) {
+        // Self-closing or void element — nothing to track
+        if (isClosing && VOID_ELEMENTS[tagName]) {
+          errors.push("Void element <" + tagName + "> should not have a closing tag");
+        }
+        continue;
+      }
+
+      if (isClosing) {
+        if (stack.length === 0) {
+          errors.push("Closing </" + tagName + "> without matching opening tag");
+        } else if (stack[stack.length - 1] === tagName) {
+          stack.pop();
+        } else {
+          // Check if the tag exists deeper in the stack (nesting error)
+          var found = false;
+          for (var si = stack.length - 1; si >= 0; si--) {
+            if (stack[si] === tagName) { found = true; break; }
+          }
+          if (found) {
+            errors.push("Expected </" + stack[stack.length - 1] + ">, found </" + tagName + ">");
+          } else {
+            errors.push("Closing </" + tagName + "> without matching opening tag");
+          }
+        }
+      } else {
+        stack.push(tagName);
+      }
+    }
+
+    // Any tags left on the stack are unclosed
+    for (var ui = stack.length - 1; ui >= 0; ui--) {
+      errors.push("Unclosed <" + stack[ui] + "> tag");
+    }
+
+    return errors;
+  }
+
   // ─── Shared Helpers ──────────────────────────────────
 
   /**
@@ -768,6 +853,8 @@
   let _originalActiveFlags = {};
   /** @type {Object<string, boolean>} - Languages marked for override deletion (submitted on Save). */
   let _deletionsMarked = {};
+  /** @type {boolean} - When true, the next Save click bypasses HTML validation (user acknowledged warnings). */
+  let _htmlWarningAcked = false;
 
   // ─── API Client ──────────────────────────────────────
 
@@ -1059,7 +1146,9 @@
       function () { return msgidEl.dataset.msgid || ""; },
       "lt-dialog__msgid--copied"
     );
-    dialog.querySelector(".lt-btn--save").disabled = true;
+    var openSaveBtn = dialog.querySelector(".lt-btn--save");
+    openSaveBtn.disabled = true;
+    openSaveBtn.textContent = "Save";
     showDialogError(null);
 
     dialog.showModal();
@@ -1453,6 +1542,13 @@
         this.style.height = this.scrollHeight + "px";
         syncToggle();
         _updateTabDirtyDots();
+        // Reset HTML warning override so the next Save re-validates
+        if (_htmlWarningAcked) {
+          _htmlWarningAcked = false;
+          showDialogError(null);
+          var saveBtn = dialog.querySelector(".lt-btn--save");
+          if (saveBtn) saveBtn.textContent = "Save";
+        }
       });
     })(textarea, toggleWrap, poDefault, checkbox, ACTIVE_BY_DEFAULT, hasOverride, isDraftLang);
 
@@ -1583,6 +1679,22 @@
       saveBtn.textContent = "Save";
       closeModal();
       return;
+    }
+
+    // ── HTML structure validation (client-side warning) ──
+    if (!_htmlWarningAcked && hasSave) {
+      var htmlErrors = {};
+      for (var hlang in translations) {
+        var errs = _validateHtmlStructure(translations[hlang]);
+        if (errs.length) htmlErrors[hlang] = errs;
+      }
+      if (Object.keys(htmlErrors).length > 0) {
+        showDialogError("Invalid HTML structure", htmlErrors);
+        saveBtn.disabled = false;
+        saveBtn.textContent = "Save anyway";
+        _htmlWarningAcked = true;
+        return;
+      }
     }
 
     try {
@@ -2170,6 +2282,7 @@
     _originalValues = {};
     _originalActiveFlags = {};
     _deletionsMarked = {};
+    _htmlWarningAcked = false;
     if (dialog) {
       const delBtn = dialog.querySelector(".lt-btn--delete-override");
       if (delBtn) {
