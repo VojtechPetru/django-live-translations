@@ -37,23 +37,23 @@ The modal includes:
 
 ## Validation
 
-The widget validates translations before saving and warns about potential issues. Validation warnings are **non-blocking** — you can always click **Save anyway** to proceed.
+The widget validates translations before saving and warns about potential issues. Validation warnings are **non-blocking**: you can always click **Save anyway** to proceed.
 
 ### Placeholder validation
 
 If the original message contains format placeholders (`%(name)s`, `{name}`), the widget checks that each translation preserves them. Missing or unexpected placeholders trigger a per-language error:
 
-> :flag_gb: English: missing %(count)s
+> English: missing %(count)s
 
-This validation is enforced server-side — the save is rejected until the placeholders match.
+This validation is enforced server-side: the save is rejected until the placeholders match.
 
 ### HTML structure validation
 
 Translations can contain inline HTML (`<strong>`, `<em>`, `<a>`, etc.). When a translation contains HTML tags, the widget checks for well-formedness before saving:
 
-- **Unclosed tags** — `<strong>text` without a closing `</strong>`
-- **Mismatched tags** — `<strong>text</em>` where the closing tag doesn't match
-- **Stray closing tags** — `</strong>` without a matching opening tag
+- **Unclosed tags**: `<strong>text` without a closing `</strong>`
+- **Mismatched tags**: `<strong>text</em>` where the closing tag doesn't match
+- **Stray closing tags**: `</strong>` without a matching opening tag
 
 Void elements (`<br>`, `<img>`, `<hr>`, etc.) and self-closing syntax (`<br/>`) are handled correctly and never flagged.
 
@@ -70,7 +70,7 @@ When HTML issues are found:
 4. Editing the textarea clears the warning and re-validates on the next save attempt
 
 !!! tip
-    HTML validation is purely client-side — it's a convenience to catch typos, not a security boundary. Translators are trusted users who may intentionally use unconventional markup.
+    HTML validation is purely client-side: a convenience to catch typos, not a security boundary. Translators are trusted users who may intentionally use unconventional markup.
 
 ## Preview mode
 
