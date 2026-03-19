@@ -173,6 +173,15 @@
   /** @type {RegExp} */
   const ZWC_RE = /\uFEFF[\u200B\u200C]{16}\uFEFF/g;
 
+  /**
+   * Matches a lone \uFEFF start flag that is NOT the leading boundary of a
+   * full 18-char ZWC end marker.  End markers have the pattern:
+   *   FEFF + 16x(200B|200C) + FEFF
+   * The negative lookahead ensures we only match standalone start flags.
+   * @type {RegExp}
+   */
+  const START_FLAG_RE = /\uFEFF(?![\u200B\u200C]{16}\uFEFF)/g;
+
   /** @type {StringTable} */
   const STRING_TABLE = window.__LT_STRINGS__ || {};
 
@@ -269,23 +278,93 @@
           nodeToWrap = /** @type {Text} */ (tn);
         }
 
+        // Strip start flags from the content node (handles the plain-text case
+        // where both start flag and end marker are in the same text node).
+        if (nodeToWrap && nodeToWrap.nodeType === Node.TEXT_NODE) {
+          START_FLAG_RE.lastIndex = 0;
+          nodeToWrap.textContent = (nodeToWrap.textContent || "").replace(START_FLAG_RE, "");
+        }
+
+        var didMultiWrap = false;
+
         if (nodeToWrap) {
-          const wrapParent = nodeToWrap.parentNode;
-          // Wrap in <lt-t> unless parent cannot contain child elements
-          if (wrapParent && wrapParent.nodeName !== "OPTION" && wrapParent.nodeName !== "TITLE" && wrapParent.nodeName !== "SCRIPT" && wrapParent.nodeName !== "STYLE") {
-            const ltEl = document.createElement("lt-t");
-            ltEl.dataset.ltMsgid = meta.m;
-            ltEl.dataset.ltContext = meta.c;
-            wrapParent.insertBefore(ltEl, nodeToWrap);
-            ltEl.appendChild(nodeToWrap);
-            registeredNodes.push({ node: nodeToWrap, msgid: meta.m, context: meta.c, span: ltEl });
-          } else {
-            registeredNodes.push({ node: nodeToWrap, msgid: meta.m, context: meta.c, span: null });
+          var wrapParent = nodeToWrap.parentNode;
+          var canWrap = wrapParent && wrapParent.nodeName !== "OPTION" && wrapParent.nodeName !== "TITLE" && wrapParent.nodeName !== "SCRIPT" && wrapParent.nodeName !== "STYLE";
+
+          // ── Multi-node wrapping via start flag ──
+          // Walk backwards from contentNode through previousSiblings looking
+          // for the ZWC start flag.  When found, wrap all nodes from the
+          // flag position through contentNode in a single <lt-t>.
+          if (canWrap && contentNode) {
+            var cursor = contentNode;
+            while (cursor) {
+              if (cursor.nodeType === Node.TEXT_NODE) {
+                START_FLAG_RE.lastIndex = 0;
+                var flagMatch = START_FLAG_RE.exec(cursor.textContent || "");
+                if (flagMatch) {
+                  var flagIdx = flagMatch.index;
+                  // Strip the flag character
+                  cursor.textContent = (cursor.textContent || "").slice(0, flagIdx) + (cursor.textContent || "").slice(flagIdx + 1);
+                  // If there is text before the flag, split — prefix stays outside
+                  var wrapStart = cursor;
+                  if (flagIdx > 0) {
+                    wrapStart = /** @type {Text} */ (cursor.splitText(flagIdx));
+                  }
+                  // Collect all nodes from wrapStart through contentNode (inclusive)
+                  var nodesToWrap = [];
+                  var n = wrapStart;
+                  while (n) {
+                    nodesToWrap.push(n);
+                    if (n === contentNode) break;
+                    n = n.nextSibling;
+                  }
+                  // Also include tn if it has content and follows contentNode
+                  if (tn !== contentNode && tn.textContent && tn.textContent.length > 0 && tn.parentNode === wrapParent) {
+                    // Check if tn is immediately after contentNode
+                    if (contentNode.nextSibling === tn) {
+                      nodesToWrap.push(tn);
+                    }
+                  }
+                  if (nodesToWrap.length > 0) {
+                    var ltEl = document.createElement("lt-t");
+                    ltEl.dataset.ltMsgid = meta.m;
+                    ltEl.dataset.ltContext = meta.c;
+                    wrapParent.insertBefore(ltEl, nodesToWrap[0]);
+                    for (var ni = 0; ni < nodesToWrap.length; ni++) {
+                      ltEl.appendChild(nodesToWrap[ni]);
+                    }
+                    // Find the first text node inside for registration
+                    var firstText = _firstTextNode(ltEl);
+                    registeredNodes.push({ node: firstText || nodeToWrap, msgid: meta.m, context: meta.c, span: ltEl });
+                    didMultiWrap = true;
+                  }
+                  break;
+                }
+              }
+              // Stop walking at parent boundary or if we hit another <lt-t>
+              var prev = cursor.previousSibling;
+              if (!prev || (prev.nodeType === Node.ELEMENT_NODE && /** @type {Element} */ (prev).tagName === "LT-T")) break;
+              cursor = prev;
+            }
+          }
+
+          // ── Fallback: single-node wrapping ──
+          if (!didMultiWrap) {
+            if (canWrap) {
+              var ltEl2 = document.createElement("lt-t");
+              ltEl2.dataset.ltMsgid = meta.m;
+              ltEl2.dataset.ltContext = meta.c;
+              wrapParent.insertBefore(ltEl2, nodeToWrap);
+              ltEl2.appendChild(nodeToWrap);
+              registeredNodes.push({ node: nodeToWrap, msgid: meta.m, context: meta.c, span: ltEl2 });
+            } else {
+              registeredNodes.push({ node: nodeToWrap, msgid: meta.m, context: meta.c, span: null });
+            }
           }
         }
 
         // Clean up empty text node left after marker removal
-        if (tn !== nodeToWrap && tn.textContent === "" && tn.parentNode) {
+        if (!didMultiWrap && tn !== nodeToWrap && tn.textContent === "" && tn.parentNode) {
           tn.parentNode.removeChild(tn);
         }
 
@@ -314,8 +393,8 @@
         const attrId = decodeZWC(attrMatch[0]);
         const attrMeta = STRING_TABLE[attrId];
         if (!attrMeta) continue;
-        // Strip ALL ZWC markers from the attribute value
-        el.setAttribute(attr.name, attr.value.replace(ZWC_RE, ""));
+        // Strip ALL ZWC markers and start flags from the attribute value
+        el.setAttribute(attr.name, attr.value.replace(ZWC_RE, "").replace(START_FLAG_RE, ""));
         ltAttrs.push({ a: attr.name, m: attrMeta.m, c: attrMeta.c });
       }
       if (ltAttrs.length) {
@@ -324,7 +403,16 @@
     }
   }
 
-
+  /**
+   * Find the first text node inside a DOM subtree.
+   * @param {Node} root - Root node to search within.
+   * @returns {Text|null}
+   */
+  function _firstTextNode(root) {
+    var tw = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    var n = tw.nextNode();
+    return n ? /** @type {Text} */ (n) : null;
+  }
 
   // ─── Shared Helpers ──────────────────────────────────
 
@@ -565,11 +653,25 @@
    * @returns {void}
    */
   function _updateDomInPlace(msgid, context, displayText, isPreviewEntry) {
+    // NOTE: We always use innerHTML so that HTML formatting tags in translations
+    // (e.g. <strong>, <em>) render correctly after save without a page reload.
+    // This code path only runs for the translator who just saved via the widget
+    // (a trusted, permissioned user previewing their own input).  Other visitors
+    // see the server-rendered version on next page load.  If _updateDomInPlace
+    // is ever used for untrusted content, HTML sanitization must be added here.
+
     // Update registered text nodes (and their wrapping spans if in edit mode)
     for (let ri = 0; ri < registeredNodes.length; ri++) {
       const entry = registeredNodes[ri];
       if (entry.msgid === msgid && entry.context === context) {
-        entry.node.textContent = displayText;
+        if (entry.span) {
+          entry.span.innerHTML = displayText;
+          // Update the registered text node ref to the first text node inside
+          var ft = _firstTextNode(entry.span);
+          if (ft) entry.node = ft;
+        } else {
+          entry.node.textContent = displayText;
+        }
         if (entry.span) {
           if (isPreviewEntry) {
             entry.span.classList.add("lt-preview");
@@ -588,7 +690,7 @@
     for (let i = 0; i < spans.length; i++) {
       const sp = spans[i];
       if (sp.dataset.ltMsgid === msgid && (sp.dataset.ltContext || "") === context) {
-        sp.textContent = displayText;
+        sp.innerHTML = displayText;
         if (isPreviewEntry) {
           sp.classList.add("lt-preview");
         } else {
@@ -599,7 +701,7 @@
       }
     }
 
-    // Update attribute translations
+    // Update attribute translations (always use textContent — attributes don't render HTML)
     const attrEls = document.querySelectorAll("[data-lt-attrs]");
     for (let j = 0; j < attrEls.length; j++) {
       const attrs = _parseLtAttrs(/** @type {HTMLElement} */ (attrEls[j]));

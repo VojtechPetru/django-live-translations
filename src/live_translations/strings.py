@@ -1,18 +1,26 @@
 """Zero-width character markers and gettext monkey-patching for live translation editing.
 
-Patched gettext/pgettext functions append an invisible 18-character ZWC marker
-(encoding a per-request string-table ID) to each translated string.  The marker
-survives Django's autoescaping because ZWC characters are not HTML-special.
+Patched gettext/pgettext functions insert an invisible ZWC start flag and append
+an 18-character ZWC end marker (encoding a per-request string-table ID) to each
+translated string.  Both markers survive Django's autoescaping because ZWC
+characters are not HTML-special.
+
+The start flag (a single ``\\uFEFF``) is inserted at **position 1** of the
+translated string (safe from ``capfirst``).  When the translation starts with an
+HTML tag (``result[0] == '<'``), the flag is inserted at position 0 instead to
+avoid breaking the tag name.
 
 The middleware injects the string table as ``window.__LT_STRINGS__`` and the
-client-side JS strips the markers, builds an internal registry, and wraps text
-nodes in temporary ``<span>`` elements only while edit mode is active.
+client-side JS uses the start flag to locate the beginning of a translation span
+(which may contain multiple DOM nodes when HTML tags are present), strips the
+markers, builds an internal registry, and wraps text nodes in ``<lt-t>`` elements.
 """
 
 import contextvars
 import logging
 import typing as t
 
+import django.utils.safestring
 import django.utils.translation
 
 if t.TYPE_CHECKING:
@@ -124,18 +132,48 @@ type _GettextFn = t.Callable[[str], str]
 type _PgettextFn = t.Callable[[str, str], str]
 
 
-def _append_marker(result: str, key: MsgKey) -> str:
-    """Append a ZWC-encoded string-table ID to a translated string.
+def _insert_markers(result: str, key: MsgKey) -> str:
+    """Insert a ZWC start flag and append a ZWC end marker to a translated string.
+
+    The start flag (a single ``\\uFEFF``) is placed at position 1 so that
+    ``capfirst`` (which does ``x[0].upper() + x[1:]``) operates on the first
+    visible character.  When the translation starts with an HTML tag
+    (``result[0] == '<'``), the flag goes at position 0 instead — inserting
+    inside a tag name would break HTML, and ``capfirst`` on ``<`` is a no-op.
+
+    **SafeString preservation**: Django's ``{% trans %}`` passes template
+    literals as ``SafeString`` through ``gettext``.  Slicing and concatenating
+    a ``SafeString`` loses the type (Python ``str.__getitem__`` returns plain
+    ``str``).  We must re-wrap the output with ``mark_safe`` when the input
+    was ``SafeData``, otherwise Django's ``conditional_escape`` will HTML-escape
+    the result and translations containing ``<strong>`` etc. will render as
+    literal text.
 
     Also applies preview overrides when active.
     """
+    was_safe = isinstance(result, django.utils.safestring.SafeData)
+
     preview = lt_preview_overrides.get(None)
     if preview is not None:
         pv = preview.get(key)
         if pv is not None:
             result = pv
     string_id = register_string(key)
-    return result + encode_zwc(string_id)
+    end_marker = encode_zwc(string_id)
+
+    if len(result) == 0:
+        output = end_marker
+    elif len(result) == 1:
+        output = result + ZWC_BOUNDARY + end_marker
+    elif result[0] == "<":
+        # HTML at position 0: flag before the tag to avoid breaking tag names.
+        # capfirst on "<..." is a no-op anyway.
+        output = ZWC_BOUNDARY + result + end_marker
+    else:
+        # Normal case: flag at position 1 (after first char, safe from capfirst).
+        output = result[0] + ZWC_BOUNDARY + result[1:] + end_marker
+
+    return django.utils.safestring.mark_safe(output) if was_safe else output  # noqa: S308
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +214,7 @@ def install_gettext_patch() -> None:
         # Django may pass lazy proxy objects; force to str once upfront.
         message = str(message)
         try:
-            return _append_marker(result, MsgKey(message, ""))
+            return _insert_markers(result, MsgKey(message, ""))
         except Exception:
             logger.exception("Failed to append translation marker")
             return result
@@ -188,7 +226,7 @@ def install_gettext_patch() -> None:
         # Django may pass lazy proxy objects; force to str once upfront.
         message, context = str(message), str(context)
         try:
-            return _append_marker(result, MsgKey(message, context))
+            return _insert_markers(result, MsgKey(message, context))
         except Exception:
             logger.exception("Failed to append translation marker")
             return result
