@@ -625,29 +625,143 @@
   // ─── Language display names & flags ──────────────────
   /** @type {Object<string, LangMeta>} */
   const LANG_META = {
-    cs: { flag: "\uD83C\uDDE8\uD83C\uDDFF", name: "Czech" },
-    en: { flag: "\uD83C\uDDEC\uD83C\uDDE7", name: "English" },
-    de: { flag: "\uD83C\uDDE9\uD83C\uDDEA", name: "German" },
-    pl: { flag: "\uD83C\uDDF5\uD83C\uDDF1", name: "Polish" },
-    sk: { flag: "\uD83C\uDDF8\uD83C\uDDF0", name: "Slovak" },
-    fr: { flag: "\uD83C\uDDEB\uD83C\uDDF7", name: "French" },
-    es: { flag: "\uD83C\uDDEA\uD83C\uDDF8", name: "Spanish" },
-    it: { flag: "\uD83C\uDDEE\uD83C\uDDF9", name: "Italian" },
-    pt: { flag: "\uD83C\uDDF5\uD83C\uDDF9", name: "Portuguese" },
-    nl: { flag: "\uD83C\uDDF3\uD83C\uDDF1", name: "Dutch" },
-    ru: { flag: "\uD83C\uDDF7\uD83C\uDDFA", name: "Russian" },
-    uk: { flag: "\uD83C\uDDFA\uD83C\uDDE6", name: "Ukrainian" },
-    ja: { flag: "\uD83C\uDDEF\uD83C\uDDF5", name: "Japanese" },
-    zh: { flag: "\uD83C\uDDE8\uD83C\uDDF3", name: "Chinese" },
-    ko: { flag: "\uD83C\uDDF0\uD83C\uDDF7", name: "Korean" },
+    af: { flag: "🇿🇦", name: "Afrikaans" },
+    am: { flag: "🇪🇹", name: "Amharic" },
+    ar: { flag: "🇸🇦", name: "Arabic" },
+    "ar-dz": { flag: "🇩🇿", name: "Arabic (Algeria)" },
+    ast: { flag: "🇪🇸", name: "Asturian" },
+    az: { flag: "🇦🇿", name: "Azerbaijani" },
+    be: { flag: "🇧🇾", name: "Belarusian" },
+    bg: { flag: "🇧🇬", name: "Bulgarian" },
+    bn: { flag: "🇧🇩", name: "Bengali" },
+    br: { flag: "🇫🇷", name: "Breton" },
+    bs: { flag: "🇧🇦", name: "Bosnian" },
+    ca: { flag: "🇦🇩", name: "Catalan" },
+    cs: { flag: "🇨🇿", name: "Czech" },
+    cy: { flag: "🏴\uDB40\uDC67\uDB40\uDC62\uDB40\uDC77\uDB40\uDC6C\uDB40\uDC73\uDB40\uDC7F", name: "Welsh" },
+    da: { flag: "🇩🇰", name: "Danish" },
+    de: { flag: "🇩🇪", name: "German" },
+    "de-at": { flag: "🇦🇹", name: "German (Austria)" },
+    "de-ch": { flag: "🇨🇭", name: "German (Switzerland)" },
+    dsb: { flag: "🇩🇪", name: "Lower Sorbian" },
+    el: { flag: "🇬🇷", name: "Greek" },
+    en: { flag: "🇬🇧", name: "English" },
+    "en-au": { flag: "🇦🇺", name: "English (Australia)" },
+    "en-ca": { flag: "🇨🇦", name: "English (Canada)" },
+    "en-gb": { flag: "🇬🇧", name: "English (UK)" },
+    "en-ie": { flag: "🇮🇪", name: "English (Ireland)" },
+    "en-in": { flag: "🇮🇳", name: "English (India)" },
+    "en-nz": { flag: "🇳🇿", name: "English (New Zealand)" },
+    "en-us": { flag: "🇺🇸", name: "English (US)" },
+    "en-za": { flag: "🇿🇦", name: "English (South Africa)" },
+    eo: { flag: "🌍", name: "Esperanto" },
+    es: { flag: "🇪🇸", name: "Spanish" },
+    "es-ar": { flag: "🇦🇷", name: "Spanish (Argentina)" },
+    "es-cl": { flag: "🇨🇱", name: "Spanish (Chile)" },
+    "es-co": { flag: "🇨🇴", name: "Spanish (Colombia)" },
+    "es-mx": { flag: "🇲🇽", name: "Spanish (Mexico)" },
+    "es-ni": { flag: "🇳🇮", name: "Spanish (Nicaragua)" },
+    "es-pe": { flag: "🇵🇪", name: "Spanish (Peru)" },
+    "es-ve": { flag: "🇻🇪", name: "Spanish (Venezuela)" },
+    et: { flag: "🇪🇪", name: "Estonian" },
+    eu: { flag: "🇪🇸", name: "Basque" },
+    fa: { flag: "🇮🇷", name: "Persian" },
+    fi: { flag: "🇫🇮", name: "Finnish" },
+    fr: { flag: "🇫🇷", name: "French" },
+    "fr-be": { flag: "🇧🇪", name: "French (Belgium)" },
+    "fr-ca": { flag: "🇨🇦", name: "French (Canada)" },
+    "fr-ch": { flag: "🇨🇭", name: "French (Switzerland)" },
+    fy: { flag: "🇳🇱", name: "Frisian" },
+    ga: { flag: "🇮🇪", name: "Irish" },
+    gd: { flag: "🏴\uDB40\uDC67\uDB40\uDC62\uDB40\uDC73\uDB40\uDC63\uDB40\uDC74\uDB40\uDC7F", name: "Scottish Gaelic" },
+    gl: { flag: "🇪🇸", name: "Galician" },
+    he: { flag: "🇮🇱", name: "Hebrew" },
+    hi: { flag: "🇮🇳", name: "Hindi" },
+    hr: { flag: "🇭🇷", name: "Croatian" },
+    hsb: { flag: "🇩🇪", name: "Upper Sorbian" },
+    hu: { flag: "🇭🇺", name: "Hungarian" },
+    hy: { flag: "🇦🇲", name: "Armenian" },
+    ia: { flag: "🌍", name: "Interlingua" },
+    id: { flag: "🇮🇩", name: "Indonesian" },
+    ig: { flag: "🇳🇬", name: "Igbo" },
+    io: { flag: "🌍", name: "Ido" },
+    is: { flag: "🇮🇸", name: "Icelandic" },
+    it: { flag: "🇮🇹", name: "Italian" },
+    ja: { flag: "🇯🇵", name: "Japanese" },
+    ka: { flag: "🇬🇪", name: "Georgian" },
+    kab: { flag: "🇩🇿", name: "Kabyle" },
+    kk: { flag: "🇰🇿", name: "Kazakh" },
+    km: { flag: "🇰🇭", name: "Khmer" },
+    kn: { flag: "🇮🇳", name: "Kannada" },
+    ko: { flag: "🇰🇷", name: "Korean" },
+    ky: { flag: "🇰🇬", name: "Kyrgyz" },
+    lb: { flag: "🇱🇺", name: "Luxembourgish" },
+    lo: { flag: "🇱🇦", name: "Lao" },
+    lt: { flag: "🇱🇹", name: "Lithuanian" },
+    lv: { flag: "🇱🇻", name: "Latvian" },
+    mk: { flag: "🇲🇰", name: "Macedonian" },
+    ml: { flag: "🇮🇳", name: "Malayalam" },
+    mn: { flag: "🇲🇳", name: "Mongolian" },
+    mr: { flag: "🇮🇳", name: "Marathi" },
+    ms: { flag: "🇲🇾", name: "Malay" },
+    my: { flag: "🇲🇲", name: "Burmese" },
+    nb: { flag: "🇳🇴", name: "Norwegian Bokm\u00E5l" },
+    ne: { flag: "🇳🇵", name: "Nepali" },
+    nl: { flag: "🇳🇱", name: "Dutch" },
+    "nl-be": { flag: "🇧🇪", name: "Dutch (Belgium)" },
+    nn: { flag: "🇳🇴", name: "Norwegian Nynorsk" },
+    no: { flag: "🇳🇴", name: "Norwegian" },
+    os: { flag: "🇬🇪", name: "Ossetic" },
+    pa: { flag: "🇮🇳", name: "Punjabi" },
+    pl: { flag: "🇵🇱", name: "Polish" },
+    pt: { flag: "🇵🇹", name: "Portuguese" },
+    "pt-br": { flag: "🇧🇷", name: "Portuguese (Brazil)" },
+    ro: { flag: "🇷🇴", name: "Romanian" },
+    ru: { flag: "🇷🇺", name: "Russian" },
+    si: { flag: "🇱🇰", name: "Sinhala" },
+    sk: { flag: "🇸🇰", name: "Slovak" },
+    sl: { flag: "🇸🇮", name: "Slovenian" },
+    sq: { flag: "🇦🇱", name: "Albanian" },
+    sr: { flag: "🇷🇸", name: "Serbian" },
+    "sr-latn": { flag: "🇷🇸", name: "Serbian (Latin)" },
+    sv: { flag: "🇸🇪", name: "Swedish" },
+    sw: { flag: "🇹🇿", name: "Swahili" },
+    ta: { flag: "🇮🇳", name: "Tamil" },
+    te: { flag: "🇮🇳", name: "Telugu" },
+    tg: { flag: "🇹🇯", name: "Tajik" },
+    th: { flag: "🇹🇭", name: "Thai" },
+    tk: { flag: "🇹🇲", name: "Turkmen" },
+    tl: { flag: "🇵🇭", name: "Filipino" },
+    tr: { flag: "🇹🇷", name: "Turkish" },
+    tt: { flag: "🇷🇺", name: "Tatar" },
+    udm: { flag: "🇷🇺", name: "Udmurt" },
+    uk: { flag: "🇺🇦", name: "Ukrainian" },
+    ur: { flag: "🇵🇰", name: "Urdu" },
+    uz: { flag: "🇺🇿", name: "Uzbek" },
+    vi: { flag: "🇻🇳", name: "Vietnamese" },
+    zh: { flag: "🇨🇳", name: "Chinese" },
+    "zh-cn": { flag: "🇨🇳", name: "Chinese (China)" },
+    "zh-hans": { flag: "🇨🇳", name: "Chinese (Simplified)" },
+    "zh-hant": { flag: "🇹🇼", name: "Chinese (Traditional)" },
+    "zh-tw": { flag: "🇹🇼", name: "Chinese (Taiwan)" },
   };
+
+  /**
+   * Look up LANG_META entry with case-insensitive matching and regional fallback.
+   * @param {string} code - Language code (e.g. "en", "pt-BR", "sr-Latn").
+   * @returns {{ flag: string, name: string } | undefined}
+   */
+  function langMeta(code) {
+    const lower = code.toLowerCase();
+    return LANG_META[lower] || LANG_META[lower.split("-")[0]];
+  }
 
   /**
    * @param {string} code - ISO 639-1 language code.
    * @returns {string} Emoji flag + English name, or uppercased code if unknown.
    */
   function langLabel(code) {
-    const meta = LANG_META[code];
+    const meta = langMeta(code);
     if (meta) return meta.flag + "  " + meta.name;
     return code.toUpperCase();
   }
@@ -1228,7 +1342,7 @@
 
     for (let i = 0; i < LANGUAGES.length; i++) {
       (function (lang) {
-        const meta = LANG_META[lang];
+        const meta = langMeta(lang);
         const entry = (_editData && _editData.translations[lang]) || {};
         const pill = document.createElement("button");
         pill.type = "button";
@@ -1578,7 +1692,7 @@
       // Structured per-language errors: {lang: ["missing %(key)s", ...]}
       for (const lang in details) {
         const line = document.createElement("div");
-        const meta = LANG_META[lang];
+        const meta = langMeta(lang);
         const label = meta ? meta.flag + " " + meta.name : lang.toUpperCase();
         line.textContent = label + ": " + details[lang].join(", ");
         errorEl.appendChild(line);
@@ -1899,7 +2013,7 @@
 
       for (let p = 0; p < langs.length; p++) {
         (function (code) {
-          const meta = LANG_META[code];
+          const meta = langMeta(code);
           const pill = document.createElement("button");
           pill.type = "button";
           pill.className = "lt-history__filter-pill" + (_historyLangFilter === code ? " lt-history__filter-pill--active" : "");
@@ -1958,11 +2072,11 @@
       // Flag (only when showing all languages)
       let hasFlag = false;
       if (!_historyLangFilter) {
-        const langMeta = LANG_META[entry.language];
-        if (langMeta) {
+        const entryMeta = langMeta(entry.language);
+        if (entryMeta) {
           const flag = document.createElement("span");
           flag.className = "lt-history__flag";
-          flag.textContent = langMeta.flag;
+           flag.textContent = entryMeta.flag;
           header.appendChild(flag);
           hasFlag = true;
         }
@@ -2670,7 +2784,7 @@
       var langTrigger = document.createElement("button");
       langTrigger.type = "button";
       langTrigger.className = "lt-hint__lang-trigger";
-      var currentMeta = LANG_META[_pageLang()];
+      var currentMeta = langMeta(_pageLang());
       langTrigger.textContent = currentMeta
         ? currentMeta.flag + " " + _pageLang().toUpperCase()
         : _pageLang().toUpperCase();
@@ -2688,7 +2802,7 @@
             item.classList.add("lt-hint__lang-item--active");
           }
 
-          var meta = LANG_META[lang];
+          var meta = langMeta(lang);
           var isDraft = DRAFT_LANGUAGES.indexOf(lang) !== -1;
           item.textContent = meta ? meta.flag + "  " + meta.name : lang.toUpperCase();
 
