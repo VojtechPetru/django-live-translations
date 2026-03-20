@@ -23,6 +23,8 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
+_EDITABLE_LANGUAGES_ATTR = "_lt_editable_languages"
+
 
 def require_translation_permission[F: t.Callable[..., django.http.JsonResponse]](view: F) -> F:
     """Decorator that returns 403 if the user lacks the configured translation permission."""
@@ -30,11 +32,28 @@ def require_translation_permission[F: t.Callable[..., django.http.JsonResponse]]
     @functools.wraps(view)
     def wrapper(request: django.http.HttpRequest, *args: object, **kwargs: object) -> django.http.JsonResponse:
         checker = conf.get_permission_checker()
-        if not checker(request):
+        result = checker(request)
+        settings = conf.get_settings()
+        editable = conf.resolve_editable_languages(result, settings.languages)
+        if editable is None:
             return django.http.JsonResponse({"error": "Forbidden"}, status=403)
+        setattr(request, _EDITABLE_LANGUAGES_ATTR, editable)
         return view(request, *args, **kwargs)
 
     return t.cast("F", wrapper)
+
+
+def _forbidden_languages(request: django.http.HttpRequest, languages: t.Iterable[LanguageCode]) -> set[LanguageCode]:
+    """Return the subset of *languages* that the current user may not edit."""
+    editable: set[LanguageCode] = getattr(request, _EDITABLE_LANGUAGES_ATTR, set())
+    return set(languages) - editable
+
+
+def _language_permission_error(forbidden: set[LanguageCode]) -> django.http.JsonResponse:
+    """Build a 403 response listing the forbidden language codes."""
+    return django.http.JsonResponse(
+        {"error": f"No permission for language(s): {', '.join(sorted(forbidden))}"}, status=403
+    )
 
 
 @require_translation_permission
@@ -60,7 +79,7 @@ def get_translations(request: django.http.HttpRequest) -> django.http.JsonRespon
 @require_translation_permission
 @django.views.decorators.csrf.csrf_protect
 @django.views.decorators.http.require_POST
-def save_translations(request: django.http.HttpRequest) -> django.http.JsonResponse:
+def save_translations(request: django.http.HttpRequest) -> django.http.JsonResponse:  # noqa: PLR0911
     """POST /__live-translations__/translations/save/"""
     try:
         body: dict[str, t.Any] = json.loads(request.body)
@@ -71,6 +90,10 @@ def save_translations(request: django.http.HttpRequest) -> django.http.JsonRespo
     translations: dict[LanguageCode, str] = body.get("translations", {})
     active_flags: dict[LanguageCode, bool] = body.get("active_flags", {})
     page_language: LanguageCode = body.get("page_language", "")
+
+    forbidden = _forbidden_languages(request, set(translations.keys()) | set(active_flags.keys()))
+    if forbidden:
+        return _language_permission_error(forbidden)
 
     try:
         result = services.save_translations(
@@ -136,6 +159,12 @@ def delete_translation(request: django.http.HttpRequest) -> django.http.JsonResp
     elif language:
         resolved_languages = [language]
 
+    # Permission check: specific languages or all configured
+    check_langs = resolved_languages if resolved_languages is not None else conf.get_settings().languages
+    forbidden = _forbidden_languages(request, check_langs)
+    if forbidden:
+        return _language_permission_error(forbidden)
+
     result = services.delete_translations(
         key=key,
         languages=resolved_languages,
@@ -166,6 +195,10 @@ def bulk_activate(request: django.http.HttpRequest) -> django.http.JsonResponse:
     for item in msgid_list:
         if not isinstance(item, dict) or "msgid" not in item:
             return django.http.JsonResponse({"error": "Each item must have a 'msgid' key"}, status=400)
+
+    forbidden = _forbidden_languages(request, [language])
+    if forbidden:
+        return _language_permission_error(forbidden)
 
     keys = [MsgKey(msgid=item["msgid"], context=item.get("context", "")) for item in msgid_list]
     result = services.bulk_activate(language=language, keys=keys)

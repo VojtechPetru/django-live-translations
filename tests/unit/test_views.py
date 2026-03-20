@@ -197,3 +197,75 @@ class TestBulkActivateView:
         response = bulk_activate(request)
         assert response.status_code == 400
         assert "msgid" in json.loads(response.content)["error"]
+
+
+# ---------------------------------------------------------------------------
+# Per-language permission granularity
+# ---------------------------------------------------------------------------
+
+_LANG_PERM_SETTINGS = {
+    "BACKEND": "tests.backends.TestBackend",
+    "LANGUAGES": ["en", "cs", "de"],
+    "LOCALE_DIR": "/tmp",
+    "PERMISSION_CHECK": "tests.permissions.allow_en_cs",
+}
+
+
+class TestPerLanguagePermission:
+    """Per-language permission checks on write views."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, settings: "SettingsWrapper"):
+        settings.LIVE_TRANSLATIONS = _LANG_PERM_SETTINGS
+        conf.get_settings.cache_clear()
+        conf.get_backend_instance.cache_clear()
+        conf.get_permission_checker.cache_clear()
+
+    @pytest.mark.django_db
+    def test_save_permitted_language_succeeds(self, make_request):
+        request = make_request("post", _SAVE_PATH, data={"msgid": "hello", "translations": {"en": "Hi"}})
+        response = save_translations(request)
+        assert response.status_code == 200
+
+    def test_save_forbidden_language_403(self, make_request):
+        request = make_request("post", _SAVE_PATH, data={"msgid": "hello", "translations": {"de": "Hallo"}})
+        response = save_translations(request)
+        assert response.status_code == 403
+        body = json.loads(response.content)
+        assert "de" in body["error"]
+
+    def test_save_mixed_permitted_forbidden_403(self, make_request):
+        request = make_request("post", _SAVE_PATH, data={"msgid": "hello", "translations": {"en": "Hi", "de": "Hallo"}})
+        response = save_translations(request)
+        assert response.status_code == 403
+
+    def test_delete_forbidden_language_403(self, make_request):
+        request = make_request("post", _DELETE_PATH, data={"msgid": "hello", "context": "", "language": "de"})
+        response = delete_translation(request)
+        assert response.status_code == 403
+
+    def test_delete_all_with_partial_permission_403(self, make_request):
+        """Delete-all (no languages specified) requires permission for all configured languages."""
+        request = make_request("post", _DELETE_PATH, data={"msgid": "hello", "context": ""})
+        response = delete_translation(request)
+        assert response.status_code == 403
+
+    def test_bulk_activate_forbidden_language_403(self, make_request):
+        request = make_request("post", _BULK_PATH, data={"language": "de", "msgids": [{"msgid": "hello"}]})
+        response = bulk_activate(request)
+        assert response.status_code == 403
+
+    def test_get_translations_with_partial_permission_succeeds(self, make_request):
+        """Read views should work even with partial language permission."""
+        request = make_request("get", _GET_PATH, data={"msgid": "hello"})
+        response = get_translations(request)
+        # Should not be 403 (read access is unrestricted)
+        assert response.status_code != 403
+
+    @pytest.mark.django_db
+    def test_get_history_with_partial_permission_succeeds(self, make_request):
+        request = make_request("get", "/__live-translations__/translations/history/", data={"msgid": "hello"})
+        from live_translations.views import get_history
+
+        response = get_history(request)
+        assert response.status_code != 403

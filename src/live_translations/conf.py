@@ -7,7 +7,7 @@ import django.conf
 import django.http
 import django.utils.module_loading
 
-from live_translations.types import LanguageCode
+from live_translations.types import LanguageCode, PermissionCheck, PermissionResult
 
 if t.TYPE_CHECKING:
     from live_translations.backends.base import TranslationBackend
@@ -16,16 +16,14 @@ __all__ = [
     "API_PREFIX",
     "LiveTranslationsConf",
     "LiveTranslationsSettings",
-    "PermissionCheck",
     "default_permission_check",
     "get_backend_instance",
     "get_permission_checker",
     "get_settings",
     "is_draft_language",
     "is_preview_request",
+    "resolve_editable_languages",
 ]
-
-type PermissionCheck = t.Callable[[django.http.HttpRequest], bool]
 
 API_PREFIX = "/__live-translations__"
 
@@ -91,7 +89,9 @@ class LiveTranslationsSettings(t.TypedDict, total=False):
     Falls back to ``settings.LOCALE_PATHS[0]``, then ``settings.BASE_DIR / "locale"``."""
 
     PERMISSION_CHECK: str | PermissionCheck
-    """Callable ``(HttpRequest) -> bool`` that gates access to the editing UI.
+    """Callable ``(HttpRequest) -> bool | set[LanguageCode]`` that gates access to the editing UI.
+    Return ``True`` for full access, ``False`` for no access, or a set of language codes
+    to restrict editing to those languages (read access remains for all).
     Dotted path or function reference. Default: authenticated superusers only."""
 
     TRANSLATION_ACTIVE_BY_DEFAULT: bool
@@ -188,6 +188,22 @@ def is_draft_language(language: str) -> bool:
 
 def is_preview_request(request: django.http.HttpRequest) -> bool:
     return request.COOKIES.get("lt_preview") == "1"
+
+
+def resolve_editable_languages(
+    permission_result: PermissionResult,
+    all_languages: list[LanguageCode],
+) -> set[LanguageCode] | None:
+    """Resolve a permission checker result into a concrete set of editable languages.
+
+    Returns ``None`` when the user has no access at all.
+    """
+    if permission_result is True:
+        return set(all_languages)
+    if permission_result is False or not permission_result:
+        return None
+    intersection = set(permission_result) & set(all_languages)
+    return intersection or None
 
 
 @functools.cache

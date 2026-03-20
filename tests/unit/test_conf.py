@@ -1,4 +1,4 @@
-"""Tests for live_translations.conf — draft language detection."""
+"""Tests for live_translations.conf — draft language detection and permission resolution."""
 
 import pytest
 
@@ -88,3 +88,31 @@ class TestDraftLanguagesFallbackToLanguageCode:
         assert result.languages == ["en"]
         # "en" is not in settings.LANGUAGES (which is []), so it's technically draft
         assert result.draft_languages == ["en"]
+
+
+class TestResolveEditableLanguages:
+    """Tests for conf.resolve_editable_languages()."""
+
+    def test_true_returns_all_languages(self):
+        result = conf.resolve_editable_languages(permission_result=True, all_languages=["en", "cs", "de"])
+        assert result == {"en", "cs", "de"}
+
+    def test_false_returns_none(self):
+        result = conf.resolve_editable_languages(permission_result=False, all_languages=["en", "cs"])
+        assert result is None
+
+    def test_empty_set_returns_none(self):
+        result = conf.resolve_editable_languages(set(), ["en", "cs"])
+        assert result is None
+
+    def test_set_returns_intersection(self):
+        result = conf.resolve_editable_languages({"en", "de"}, ["en", "cs", "de"])
+        assert result == {"en", "de"}
+
+    def test_no_overlap_returns_none(self):
+        result = conf.resolve_editable_languages({"ja"}, ["en", "cs"])
+        assert result is None
+
+    def test_partial_overlap_returns_intersection(self):
+        result = conf.resolve_editable_languages({"en", "ja"}, ["en", "cs"])
+        assert result == {"en"}

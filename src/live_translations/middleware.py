@@ -18,7 +18,7 @@ import django.urls
 import django.utils.translation
 
 from live_translations import conf, strings, views
-from live_translations.types import OverrideMap, StringTable
+from live_translations.types import LanguageCode, OverrideMap, StringTable
 
 __all__ = ["LiveTranslationsMiddleware"]
 
@@ -76,8 +76,11 @@ class LiveTranslationsMiddleware:
         if self._is_admin_path(request.path):
             return self.get_response(request)
 
+        settings = conf.get_settings()
         checker = conf.get_permission_checker()
-        is_active = checker(request)
+        permission_result = checker(request)
+        editable = conf.resolve_editable_languages(permission_result, settings.languages)
+        is_active = editable is not None
 
         # Draft language override via lt_lang cookie (draft languages only).
         # We store it on the request but DON'T activate yet — activating before
@@ -120,7 +123,7 @@ class LiveTranslationsMiddleware:
                 self._strip_zwc(response)
                 return response
 
-            self._inject_assets(request, response, preview_entries=preview_overrides)
+            self._inject_assets(request, response, preview_entries=preview_overrides, editable_languages=editable)
             return response
         finally:
             strings.reset_string_registry()
@@ -186,6 +189,7 @@ class LiveTranslationsMiddleware:
         response: django.http.HttpResponse,
         *,
         preview_entries: OverrideMap | None = None,
+        editable_languages: set[LanguageCode] | None = None,
     ) -> None:
         content = response.content.decode(response.charset)
 
@@ -212,6 +216,13 @@ class LiveTranslationsMiddleware:
             )
             preview_config = f",preview:true,previewEntries:{entries_json}"
 
+        editable_config = ""
+        if editable_languages is not None and editable_languages != set(settings.languages):
+            # Emit in the same order as settings.languages for deterministic output
+            ordered = [lang for lang in settings.languages if lang in editable_languages]
+            editable_json = ",".join(f'"{lang}"' for lang in ordered)
+            editable_config = f",editableLanguages:[{editable_json}]"
+
         shortcut_edit_js = json.dumps(settings.shortcut_edit)
         shortcut_preview_js = json.dumps(settings.shortcut_preview)
 
@@ -231,6 +242,7 @@ class LiveTranslationsMiddleware:
             f"activeByDefault:{active_by_default},"
             f"shortcutEdit:{shortcut_edit_js},"
             f"shortcutPreview:{shortcut_preview_js}"
+            f"{editable_config}"
             f"{preview_config}}};"
             f"window.__LT_STRINGS__={strings_json};"
             "</script>"

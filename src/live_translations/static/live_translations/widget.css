@@ -266,6 +266,10 @@
   right: 0;
 }
 
+.lt-editor__tab--readonly {
+  opacity: 0.6;
+}
+
 .lt-editor__dot--dirty {
   background: #60a5fa;
   margin-left: 6px;
@@ -458,6 +462,12 @@
 .lt-field__input--fuzzy:focus {
   border-color: #f59e0b;
   box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.12);
+}
+
+.lt-field__input--readonly {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background: #1f1f23;
 }
 
 .lt-field__input--marked-delete {

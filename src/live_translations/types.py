@@ -2,6 +2,9 @@
 
 import typing as t
 
+if t.TYPE_CHECKING:
+    import django.http
+
 __all__ = [
     "BulkActivateResult",
     "DbOverride",
@@ -13,6 +16,8 @@ __all__ = [
     "LanguageCode",
     "MsgKey",
     "OverrideMap",
+    "PermissionCheck",
+    "PermissionResult",
     "SaveResult",
     "StringId",
     "StringTable",
@@ -21,6 +26,10 @@ __all__ = [
 ]
 
 type LanguageCode = str
+
+type PermissionResult = bool | set[LanguageCode]
+
+type PermissionCheck = t.Callable[["django.http.HttpRequest"], PermissionResult]
 
 
 class MsgKey(t.NamedTuple):
