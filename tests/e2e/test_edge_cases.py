@@ -20,7 +20,7 @@ class TestEdgeCases:
         response = page_as_superuser.request.get(f"{base_url}{API_PREFIX}/translations/?msgid=&context=")
         assert response.status == 400
 
-    def test_save_with_invalid_language_returns_400(self, page_as_superuser: Page, base_url: str) -> None:
+    def test_save_with_unconfigured_language_returns_403(self, page_as_superuser: Page, base_url: str) -> None:
         csrf = page_as_superuser.evaluate("() => window.__LT_CONFIG__?.csrfToken || ''")
         response = page_as_superuser.request.post(
             f"{base_url}{API_PREFIX}/translations/save/",
@@ -35,9 +35,9 @@ class TestEdgeCases:
             ),
             headers={"Content-Type": "application/json", "X-CSRFToken": csrf},
         )
-        assert response.status == 400
+        assert response.status == 403
         body = response.json()
-        assert "Invalid language" in body.get("error", "")
+        assert "xx" in body.get("error", "")
 
     def test_save_with_invalid_json_returns_400(self, page_as_superuser: Page, base_url: str) -> None:
         csrf = page_as_superuser.evaluate("() => window.__LT_CONFIG__?.csrfToken || ''")

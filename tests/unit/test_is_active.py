@@ -339,7 +339,7 @@ class TestDeleteTranslationView:
     def _setup(self, settings: "SettingsWrapper"):
         settings.LIVE_TRANSLATIONS = {
             "BACKEND": "tests.backends.TestBackend",
-            "LANGUAGES": ["en", "cs"],
+            "LANGUAGES": ["en", "cs", "de"],
             "LOCALE_DIR": "/tmp",
         }
         conf.get_settings.cache_clear()

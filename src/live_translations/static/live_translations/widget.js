@@ -149,6 +149,18 @@
   const DRAFT_LANGUAGES = CONFIG.draftLanguages || [];
   /** @type {string} */
   const CURRENT_LANGUAGE = CONFIG.currentLanguage || "";
+  /** @type {string[]|null} */
+  const EDITABLE_LANGUAGES = CONFIG.editableLanguages || null;
+
+  /**
+   * Check whether a language is editable by the current user.
+   * When EDITABLE_LANGUAGES is null, all languages are editable.
+   * @param {string} lang - Language code.
+   * @returns {boolean}
+   */
+  function _isEditable(lang) {
+    return EDITABLE_LANGUAGES === null || EDITABLE_LANGUAGES.indexOf(lang) !== -1;
+  }
 
   // ─── String Table & ZWC Marker Resolution ───────────
 
@@ -1346,7 +1358,7 @@
         const entry = (_editData && _editData.translations[lang]) || {};
         const pill = document.createElement("button");
         pill.type = "button";
-        pill.className = "lt-editor__tab" + (_editLang === lang ? " lt-editor__tab--active" : "");
+        pill.className = "lt-editor__tab" + (_editLang === lang ? " lt-editor__tab--active" : "") + (!_isEditable(lang) ? " lt-editor__tab--readonly" : "");
 
         // Leading dot (inactive override / marked for deletion)
         var leadDot = document.createElement("span");
@@ -1600,6 +1612,11 @@
       textarea.disabled = true;
       textarea.classList.add("lt-field__input--marked-delete");
     }
+    var langEditable = _isEditable(lang);
+    if (!langEditable) {
+      textarea.disabled = true;
+      textarea.classList.add("lt-field__input--readonly");
+    }
 
     // Active toggle
     const isActive = _editedActiveFlags[lang];
@@ -1609,7 +1626,10 @@
 
     const toggleWrap = document.createElement("label");
     toggleWrap.className = "lt-field__toggle";
-    if (isDraftLang) {
+    if (!langEditable) {
+      // Non-editable languages — hide the toggle
+      toggleWrap.style.display = "none";
+    } else if (isDraftLang) {
       // Draft languages are always active — hide the toggle entirely
       toggleWrap.style.display = "none";
     } else if (markedForDelete) {
@@ -1716,7 +1736,7 @@
     const lang = _editLang;
     const entry = (_editData.translations[lang]) || {};
 
-    if (!entry.has_override) {
+    if (!entry.has_override || !_isEditable(lang)) {
       btn.style.display = "none";
       return;
     }
@@ -1774,6 +1794,7 @@
     const langsToDelete = [];
     for (let i = 0; i < LANGUAGES.length; i++) {
       const lang = LANGUAGES[i];
+      if (!_isEditable(lang)) continue;
       if (_deletionsMarked[lang]) {
         langsToDelete.push(lang);
         continue;
@@ -2208,7 +2229,7 @@
 
       // ── Restore button (text changes only, skip current state per language) ──
       const isCurrent = newestPerLang[entry.language] === entry.id;
-      if (!isStateChange && !isCurrent) {
+      if (!isStateChange && !isCurrent && _isEditable(entry.language)) {
         _appendRestoreControl(header, item, entry);
       }
 

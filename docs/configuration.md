@@ -35,7 +35,7 @@ LIVE_TRANSLATIONS = {
 | `GETTEXT_DOMAIN` | `str` | `"django"` | Gettext domain — the basename of `.po`/`.mo` catalog files (e.g. `"django"` resolves to `django.po`/`django.mo`, `"djangojs"` to `djangojs.po`/`djangojs.mo`). |
 | `LANGUAGES` | `list[str]` | From `settings.LANGUAGES` | Language codes available for editing. Set explicitly to expose only a subset. |
 | `LOCALE_DIR` | `str \| Path` | `LOCALE_PATHS[0]` or `BASE_DIR/locale` | Path to the locale directory containing `{lang}/LC_MESSAGES/` subdirectories. |
-| `PERMISSION_CHECK` | `str \| Callable` | Superuser check | Callable `(HttpRequest) -> bool` that controls access to the editing UI. Accepts a dotted path or function reference. |
+| `PERMISSION_CHECK` | `str \| Callable` | Superuser check | Callable `(HttpRequest) -> bool \| set[str]` that controls access to the editing UI. Return `True` for full access, `False` for no access, or a set of language codes to restrict editing to those languages. Accepts a dotted path or function reference. See [Permissions](permissions.md#per-language-permissions). |
 | `TRANSLATION_ACTIVE_BY_DEFAULT` | `bool` | `False` | Whether newly saved translations are immediately active. When `False`, overrides require explicit activation. |
 | `SHORTCUT_EDIT` | `str` | `"ctrl+shift+e"` | Keyboard shortcut to toggle edit mode. Format: `+`-separated modifiers and key. |
 | `SHORTCUT_PREVIEW` | `str` | `"ctrl+shift+p"` | Keyboard shortcut to toggle preview mode. Same format as `SHORTCUT_EDIT`. |
@@ -129,7 +129,7 @@ The directory containing your `{lang}/LC_MESSAGES/` subdirectories. Resolution o
 
 ### `PERMISSION_CHECK`
 
-Override the default superuser check with a custom callable. See [Permissions](permissions.md) for detailed examples.
+Override the default superuser check with a custom callable. The callable receives an `HttpRequest` and returns `True` (full access), `False` (no access), or a `set[str]` of language codes to restrict editing to specific languages. See [Permissions](permissions.md) for detailed examples including per-language access control.
 
 ```python
 LIVE_TRANSLATIONS = {

@@ -69,6 +69,79 @@ def can_edit_translations(request: HttpRequest) -> bool:
     return request.user.has_perm("live_translations.change_translationentry")
 ```
 
+## Per-language permissions
+
+The permission checker can return a **set of language codes** instead of a boolean to restrict which languages a user may edit. Users can still *view* all languages, but write operations (save, delete, activate) are blocked for languages outside the returned set.
+
+### Return type
+
+| Return value | Effect |
+|---|---|
+| `True` | Full access — user can edit all configured languages |
+| `False` | No access — widget is not injected |
+| `set[str]` | Partial access — user can only edit the languages in the set |
+| Empty `set()` | Treated as `False` — no access |
+
+### Example: restrict by user profile
+
+```python
+# myapp/permissions.py
+from django.http import HttpRequest
+
+
+def can_edit_translations(request: HttpRequest) -> bool | set[str]:
+    if not hasattr(request, "user") or not request.user.is_authenticated:
+        return False
+
+    # Superusers can edit everything
+    if request.user.is_superuser:
+        return True
+
+    # Staff can only edit their assigned languages
+    if request.user.is_staff:
+        return set(request.user.profile.allowed_languages)
+
+    return False
+```
+
+### Example: team-based language access
+
+```python
+# myapp/permissions.py
+from django.http import HttpRequest
+
+TEAM_LANGUAGES = {
+    "translators-eu": {"de", "fr", "es", "it"},
+    "translators-asia": {"ja", "ko", "zh"},
+}
+
+
+def can_edit_translations(request: HttpRequest) -> bool | set[str]:
+    if not hasattr(request, "user") or not request.user.is_authenticated:
+        return False
+
+    languages: set[str] = set()
+    for group in request.user.groups.values_list("name", flat=True):
+        languages |= TEAM_LANGUAGES.get(group, set())
+
+    return languages or False
+```
+
+### Frontend behavior
+
+When a user has partial language permissions:
+
+- All language tabs are visible, but non-editable tabs have reduced opacity
+- Textareas for non-editable languages are disabled
+- The active/inactive toggle is hidden for non-editable languages
+- The "Delete Override" button is hidden for non-editable languages
+- The "Restore" button in history is hidden for non-editable languages
+- Save skips non-editable languages automatically
+
+### Backend enforcement
+
+Per-language permissions are enforced server-side on all write endpoints. Frontend restrictions are a convenience — the API rejects unauthorized language writes regardless.
+
 ## Preview mode
 
 Preview mode allows authorized users to see inactive translations overlaid on the page without activating them. This is useful for reviewing translations before making them live.
@@ -92,3 +165,5 @@ All API endpoints under `/__live-translations__/` are protected by the same perm
 | `/__live-translations__/translations/bulk-activate/` | POST | Activate multiple translations |
 
 No URL configuration is needed - these are handled automatically by the middleware.
+
+Write endpoints (`save`, `delete`, `bulk-activate`) additionally enforce per-language permissions when the checker returns a set. Read endpoints (`translations`, `history`) are not language-restricted — users with any level of access can view all languages.

@@ -1008,3 +1008,55 @@ class TestDraftLanguageOverride:
 
         content = response.content.decode()
         assert "currentLanguage:'xx'" in content
+
+
+@pytest.mark.django_db
+class TestPerLanguageConfig:
+    """editableLanguages in __LT_CONFIG__."""
+
+    def test_full_permission_omits_editable_languages(self, make_request, settings):
+        response = _html_response("<html><body>X</body></html>")
+        mw = LiveTranslationsMiddleware(lambda r: response)
+
+        settings.LIVE_TRANSLATIONS = _middleware_settings(languages=["en", "cs"])
+        _clear_caches()
+        mw._inject_assets(make_request("get", "/page/"), response, editable_languages={"en", "cs"})
+
+        content = response.content.decode()
+        assert "editableLanguages" not in content
+
+    def test_partial_permission_includes_editable_languages(self, make_request, settings):
+        response = _html_response("<html><body>X</body></html>")
+        mw = LiveTranslationsMiddleware(lambda r: response)
+
+        settings.LIVE_TRANSLATIONS = _middleware_settings(languages=["en", "cs", "de"])
+        _clear_caches()
+        mw._inject_assets(make_request("get", "/page/"), response, editable_languages={"en"})
+
+        content = response.content.decode()
+        assert 'editableLanguages:["en"]' in content
+
+    def test_no_permission_does_not_inject(self, make_request, settings):
+        """When checker returns False, middleware doesn't inject assets at all."""
+        inner_response = _html_response("<html><body>Page</body></html>")
+        inner = lambda r: inner_response  # noqa: E731
+        mw = LiveTranslationsMiddleware(inner)
+
+        settings.LIVE_TRANSLATIONS = _middleware_settings(permission=False)
+        _clear_caches()
+        request = make_request("get", "/page/", has_permission=False)
+        response = mw(request)
+
+        assert b"__LT_CONFIG__" not in response.content
+
+    def test_partial_permission_preserves_language_order(self, make_request, settings):
+        """editableLanguages should maintain the same order as settings.languages."""
+        response = _html_response("<html><body>X</body></html>")
+        mw = LiveTranslationsMiddleware(lambda r: response)
+
+        settings.LIVE_TRANSLATIONS = _middleware_settings(languages=["en", "cs", "de"])
+        _clear_caches()
+        mw._inject_assets(make_request("get", "/page/"), response, editable_languages={"de", "en"})
+
+        content = response.content.decode()
+        assert 'editableLanguages:["en","de"]' in content
