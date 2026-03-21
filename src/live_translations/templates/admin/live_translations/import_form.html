@@ -54,7 +54,7 @@
       </tr>
     </thead>
     <tbody>
-      {% for entry in result.preview|slice:":100" %}
+      {% for entry in result.preview|slice:":100000" %}
       <tr style="border-top: 1px solid #ddd;">
         <td style="padding: 6px 8px;">
           {% if entry.action == "create" %}
@@ -86,8 +86,8 @@
       {% endfor %}
     </tbody>
   </table>
-  {% if result.preview|length > 100 %}
-  <p class="help" style="margin-top: 8px;">Showing first 100 of {{ result.preview|length }} entries.</p>
+  {% if result.preview|length > 100000 %}
+  <p class="help" style="margin-top: 8px;">Showing first 100,000 of {{ result.preview|length }} entries.</p>
   {% endif %}
   {% endif %}
 </div>
