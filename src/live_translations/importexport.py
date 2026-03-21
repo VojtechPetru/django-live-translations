@@ -18,6 +18,7 @@ from live_translations.types import DbOverride, LanguageCode, MsgKey
 __all__ = [
     "ExportRow",
     "ImportResult",
+    "PreviewEntry",
     "export_csv",
     "export_po",
     "export_po_zip",
@@ -43,6 +44,20 @@ class ImportResult(t.TypedDict):
     created: int
     updated: int
     errors: list[str]
+    dry_run: t.NotRequired[bool]
+    unchanged: t.NotRequired[int]
+    preview: t.NotRequired[list["PreviewEntry"]]
+
+
+class PreviewEntry(t.NamedTuple):
+    action: str  # "create" or "update"
+    language: LanguageCode
+    msgid: str
+    context: str
+    msgstr: str
+    is_active: bool
+    old_msgstr: str
+    old_is_active: bool | None
 
 
 # ---------------------------------------------------------------------------
@@ -212,11 +227,54 @@ def export_po_zip(
 # ---------------------------------------------------------------------------
 
 
-def _bulk_import(rows: list[ExportRow]) -> ImportResult:
-    """Core import logic: upsert TranslationEntry rows from ExportRow list."""
+def _snapshot_existing(
+    valid_rows: list[ExportRow],
+) -> dict[tuple[LanguageCode, str, str], tuple[str, bool]]:
+    """Snapshot existing DB entries for the given rows."""
+    lookup_q = django.db.models.Q()
+    for row in valid_rows:
+        lookup_q |= django.db.models.Q(language=row.language, msgid=row.msgid, context=row.context)
+
+    existing: dict[tuple[LanguageCode, str, str], tuple[str, bool]] = {}
+    for lang, mid, ctx, msgstr, is_active in models.TranslationEntry.objects.qs.filter(lookup_q).values_list(
+        "language", "msgid", "context", "msgstr", "is_active"
+    ):
+        existing[(lang, mid, ctx)] = (msgstr, is_active)
+    return existing
+
+
+def _build_preview(
+    valid_rows: list[ExportRow],
+    existing: dict[tuple[LanguageCode, str, str], tuple[str, bool]],
+) -> tuple[int, int, int, list[PreviewEntry]]:
+    """Classify rows as create/update/unchanged and build preview entries."""
+    preview: list[PreviewEntry] = []
+    created = 0
+    updated = 0
+    unchanged = 0
+    for row in valid_rows:
+        key = (row.language, row.msgid, row.context)
+        old = existing.get(key)
+        if old is None:
+            created += 1
+            preview.append(
+                PreviewEntry("create", row.language, row.msgid, row.context, row.msgstr, row.is_active, "", None)
+            )
+        elif old == (row.msgstr, row.is_active):
+            updated += 1
+            unchanged += 1
+        else:
+            updated += 1
+            preview.append(
+                PreviewEntry("update", row.language, row.msgid, row.context, row.msgstr, row.is_active, old[0], old[1])
+            )
+    return created, updated, unchanged, preview
+
+
+def _validate_rows(rows: list[ExportRow]) -> tuple[list[ExportRow], list[str]]:
+    """Validate import rows, returning valid rows and errors."""
     errors: list[str] = []
     valid_rows: list[ExportRow] = []
-
     for i, row in enumerate(rows, 1):
         if not row.msgid:
             errors.append(f"Row {i}: empty msgid")
@@ -225,19 +283,23 @@ def _bulk_import(rows: list[ExportRow]) -> ImportResult:
             errors.append(f"Row {i}: empty language")
             continue
         valid_rows.append(row)
+    return valid_rows, errors
+
+
+def _bulk_import(rows: list[ExportRow], *, dry_run: bool = False) -> ImportResult:
+    """Core import logic: upsert TranslationEntry rows from ExportRow list."""
+    valid_rows, errors = _validate_rows(rows)
 
     if not valid_rows:
-        return ImportResult(created=0, updated=0, errors=errors)
+        return ImportResult(created=0, updated=0, errors=errors, dry_run=dry_run, unchanged=0, preview=[])
 
-    # Snapshot existing entries for counting created vs updated
-    existing_keys: set[tuple[LanguageCode, str, str]] = set()
-    lookup_q = django.db.models.Q()
-    for row in valid_rows:
-        lookup_q |= django.db.models.Q(language=row.language, msgid=row.msgid, context=row.context)
+    existing = _snapshot_existing(valid_rows)
+    created, updated, unchanged, preview = _build_preview(valid_rows, existing)
 
-    existing_qs = models.TranslationEntry.objects.qs.filter(lookup_q).values_list("language", "msgid", "context")
-    for lang, mid, ctx in existing_qs:
-        existing_keys.add((lang, mid, ctx))
+    if dry_run:
+        return ImportResult(
+            created=created, updated=updated, errors=errors, dry_run=True, unchanged=unchanged, preview=preview
+        )
 
     now = django.utils.timezone.now()
     entries_to_create = [
@@ -260,7 +322,6 @@ def _bulk_import(rows: list[ExportRow]) -> ImportResult:
             unique_fields=["language", "msgid", "context"],
         )
 
-        # Record history
         history_entries = [(row.language, MsgKey(row.msgid, row.context)) for row in valid_rows]
 
         if history_entries:
@@ -273,22 +334,19 @@ def _bulk_import(rows: list[ExportRow]) -> ImportResult:
 
         conf.get_backend_instance().bump_catalog_version()
 
-    created = sum(1 for r in valid_rows if (r.language, r.msgid, r.context) not in existing_keys)
-    updated = len(valid_rows) - created
-
     return ImportResult(created=created, updated=updated, errors=errors)
 
 
-def import_csv(content: str) -> ImportResult:
+def import_csv(content: str, *, dry_run: bool = False) -> ImportResult:
     try:
         reader = csv.DictReader(io.StringIO(content))
         if reader.fieldnames is None:
-            return ImportResult(created=0, updated=0, errors=["Empty or invalid CSV file"])
+            return ImportResult(created=0, updated=0, errors=["Empty or invalid CSV file"], dry_run=dry_run)
 
         missing = {"language", "msgid", "msgstr"} - set(reader.fieldnames)
         if missing:
             msg = f"Missing required columns: {', '.join(sorted(missing))}"
-            return ImportResult(created=0, updated=0, errors=[msg])
+            return ImportResult(created=0, updated=0, errors=[msg], dry_run=dry_run)
 
         rows: list[ExportRow] = []
         for _i, line in enumerate(reader, 2):  # row 2 = first data row after header
@@ -304,16 +362,16 @@ def import_csv(content: str) -> ImportResult:
                 )
             )
     except csv.Error as e:
-        return ImportResult(created=0, updated=0, errors=[f"CSV parse error: {e}"])
+        return ImportResult(created=0, updated=0, errors=[f"CSV parse error: {e}"], dry_run=dry_run)
 
-    return _bulk_import(rows)
+    return _bulk_import(rows, dry_run=dry_run)
 
 
-def import_po(content: str, language: LanguageCode) -> ImportResult:
+def import_po(content: str, language: LanguageCode, *, dry_run: bool = False) -> ImportResult:
     try:
         po = polib.pofile(content)
     except Exception as e:  # noqa: BLE001
-        return ImportResult(created=0, updated=0, errors=[f"PO parse error: {e}"])
+        return ImportResult(created=0, updated=0, errors=[f"PO parse error: {e}"], dry_run=dry_run)
 
     # If language not given, try PO metadata
     lang = language
@@ -324,6 +382,7 @@ def import_po(content: str, language: LanguageCode) -> ImportResult:
             created=0,
             updated=0,
             errors=["Language not specified and not found in PO metadata"],
+            dry_run=dry_run,
         )
 
     rows: list[ExportRow] = []
@@ -355,27 +414,41 @@ def import_po(content: str, language: LanguageCode) -> ImportResult:
                 )
             )
 
-    return _bulk_import(rows)
+    return _bulk_import(rows, dry_run=dry_run)
 
 
-def import_po_zip(data: bytes) -> ImportResult:
+def import_po_zip(data: bytes, *, dry_run: bool = False) -> ImportResult:
     try:
         zf = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile:
-        return ImportResult(created=0, updated=0, errors=["Invalid zip file"])
+        return ImportResult(created=0, updated=0, errors=["Invalid zip file"], dry_run=dry_run)
 
     total_created = 0
     total_updated = 0
+    total_unchanged = 0
     all_errors: list[str] = []
+    all_preview: list[PreviewEntry] = []
 
     for name in sorted(zf.namelist()):
         if not name.endswith(".po"):
             continue
         lang = name.rsplit("/", 1)[-1].removesuffix(".po")
         content = zf.read(name).decode("utf-8")
-        result = import_po(content, language=lang)
+        result = import_po(content, language=lang, dry_run=dry_run)
         total_created += result["created"]
         total_updated += result["updated"]
         all_errors.extend(result["errors"])
+        if dry_run:
+            all_preview.extend(result.get("preview", []))
+            total_unchanged += result.get("unchanged", 0)
 
+    if dry_run:
+        return ImportResult(
+            created=total_created,
+            updated=total_updated,
+            errors=all_errors,
+            dry_run=True,
+            unchanged=total_unchanged,
+            preview=all_preview,
+        )
     return ImportResult(created=total_created, updated=total_updated, errors=all_errors)

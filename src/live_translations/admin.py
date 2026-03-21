@@ -270,24 +270,28 @@ class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
 
         if request.method == "POST":
             uploaded = request.FILES.get("file")
+            dry_run = bool(request.POST.get("dry_run"))
             if uploaded:
                 name = (uploaded.name or "").lower()
                 if name.endswith(".csv"):
                     content = uploaded.read().decode("utf-8")
-                    result = importexport.import_csv(content)
+                    result = importexport.import_csv(content, dry_run=dry_run)
                 elif name.endswith(".zip"):
                     data = uploaded.read()
-                    result = importexport.import_po_zip(data)
+                    result = importexport.import_po_zip(data, dry_run=dry_run)
                 elif name.endswith(".po"):
                     content = uploaded.read().decode("utf-8")
                     language = request.POST.get("language", "")
-                    result = importexport.import_po(content, language=language)
+                    result = importexport.import_po(content, language=language, dry_run=dry_run)
                 else:
                     result = importexport.ImportResult(
-                        created=0, updated=0, errors=["Unsupported file type. Use .csv, .po, or .zip."]
+                        created=0,
+                        updated=0,
+                        errors=["Unsupported file type. Use .csv, .po, or .zip."],
+                        dry_run=dry_run,
                     )
             else:
-                result = importexport.ImportResult(created=0, updated=0, errors=["No file uploaded."])
+                result = importexport.ImportResult(created=0, updated=0, errors=["No file uploaded."], dry_run=dry_run)
 
         context = {
             "title": "Import Translations",

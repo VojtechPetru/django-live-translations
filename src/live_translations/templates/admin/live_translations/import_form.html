@@ -14,6 +14,84 @@
 
 {% block content %}
 {% if result %}
+{% if result.dry_run %}
+<div class="module">
+  <h2>Dry Run Preview</h2>
+  <p class="help" style="font-size: 13px;">No changes were made. Review the preview below, then import again without &ldquo;Dry run&rdquo; to apply.</p>
+  <table>
+    <tr><th>Would create</th><td>{{ result.created }}</td></tr>
+    <tr>
+      <th>Would update</th>
+      <td>
+        {{ result.updated }}
+        {% if result.unchanged %}
+          ({{ result.unchanged }} already up to date)
+        {% endif %}
+      </td>
+    </tr>
+  </table>
+  {% if result.errors %}
+  <div class="errornote" style="margin-top: 10px;">
+    <p>Errors:</p>
+    <ul>
+      {% for error in result.errors %}
+        <li>{{ error }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+  {% if result.preview %}
+  <h3 style="margin-top: 15px;">Changes</h3>
+  <table style="width: 100%; border-collapse: collapse;">
+    <thead>
+      <tr>
+        <th style="text-align: left; padding: 6px 8px;">Action</th>
+        <th style="text-align: left; padding: 6px 8px;">Language</th>
+        <th style="text-align: left; padding: 6px 8px;">Message ID</th>
+        <th style="text-align: left; padding: 6px 8px;">Context</th>
+        <th style="text-align: left; padding: 6px 8px;">Translation</th>
+        <th style="text-align: left; padding: 6px 8px;">Active</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for entry in result.preview|slice:":100" %}
+      <tr style="border-top: 1px solid #ddd;">
+        <td style="padding: 6px 8px;">
+          {% if entry.action == "create" %}
+            <span style="background: #dff0d8; color: #3c763d; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: bold;">CREATE</span>
+          {% else %}
+            <span style="background: #d9edf7; color: #31708f; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: bold;">UPDATE</span>
+          {% endif %}
+        </td>
+        <td style="padding: 6px 8px;">{{ entry.language }}</td>
+        <td style="padding: 6px 8px; font-family: monospace; font-size: 12px;">{{ entry.msgid|truncatechars:50 }}</td>
+        <td style="padding: 6px 8px;">{{ entry.context }}</td>
+        <td style="padding: 6px 8px;">
+          {% if entry.action == "update" %}
+            <del style="color: #999;">{{ entry.old_msgstr|truncatechars:40 }}</del><br>
+            {{ entry.msgstr|truncatechars:40 }}
+          {% else %}
+            {{ entry.msgstr|truncatechars:40 }}
+          {% endif %}
+        </td>
+        <td style="padding: 6px 8px;">
+          {% if entry.action == "update" and entry.old_is_active != entry.is_active %}
+            <del style="color: #999;">{% if entry.old_is_active %}Yes{% else %}No{% endif %}</del>
+            &rarr; {% if entry.is_active %}Yes{% else %}No{% endif %}
+          {% else %}
+            {% if entry.is_active %}Yes{% else %}No{% endif %}
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if result.preview|length > 100 %}
+  <p class="help" style="margin-top: 8px;">Showing first 100 of {{ result.preview|length }} entries.</p>
+  {% endif %}
+  {% endif %}
+</div>
+{% else %}
 <div class="module">
   <h2>Import Results</h2>
   <table>
@@ -31,6 +109,7 @@
   </div>
   {% endif %}
 </div>
+{% endif %}
 {% endif %}
 
 <form method="post" enctype="multipart/form-data" id="import-form">
@@ -54,6 +133,13 @@
           <option value="{{ lang }}">{{ lang }}</option>
         {% endfor %}
       </select>
+    </div>
+  </fieldset>
+
+  <fieldset class="module aligned">
+    <h2>Options</h2>
+    <div class="form-row">
+      <label><input type="checkbox" name="dry_run" value="1"> Dry run (preview changes without importing)</label>
     </div>
   </fieldset>
 

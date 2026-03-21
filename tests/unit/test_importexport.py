@@ -856,6 +856,147 @@ class TestImportView:
 
 
 # ---------------------------------------------------------------------------
+# Dry run
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+class TestDryRun:
+    def _make_csv(self, rows: list[dict[str, str]]) -> str:
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=["language", "msgid", "context", "msgstr", "is_active"])
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+        return buf.getvalue()
+
+    def test_csv_dry_run_creates(self) -> None:
+        content = self._make_csv(
+            [{"language": "cs", "msgid": "hello", "context": "", "msgstr": "Ahoj", "is_active": "true"}]
+        )
+        result = importexport.import_csv(content, dry_run=True)
+        assert result["dry_run"] is True
+        assert result["created"] == 1
+        assert result["updated"] == 0
+        assert result["unchanged"] == 0
+        assert len(result["preview"]) == 1  # type: ignore[arg-type]
+
+        preview = result["preview"][0]  # type: ignore[index]
+        assert preview.action == "create"
+        assert preview.language == "cs"
+        assert preview.msgid == "hello"
+        assert preview.msgstr == "Ahoj"
+        assert preview.old_msgstr == ""
+        assert preview.old_is_active is None
+
+        # No DB write
+        assert models.TranslationEntry.objects.qs.count() == 0
+
+    def test_csv_dry_run_updates(self) -> None:
+        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
+        content = self._make_csv(
+            [{"language": "cs", "msgid": "hello", "context": "", "msgstr": "Cau", "is_active": "false"}]
+        )
+        result = importexport.import_csv(content, dry_run=True)
+        assert result["dry_run"] is True
+        assert result["created"] == 0
+        assert result["updated"] == 1
+        assert result["unchanged"] == 0
+        assert len(result["preview"]) == 1  # type: ignore[arg-type]
+
+        preview = result["preview"][0]  # type: ignore[index]
+        assert preview.action == "update"
+        assert preview.msgstr == "Cau"
+        assert preview.old_msgstr == "Ahoj"
+        assert preview.is_active is False
+        assert preview.old_is_active is True
+
+        # DB unchanged
+        entry = models.TranslationEntry.objects.qs.get(language="cs", msgid="hello")
+        assert entry.msgstr == "Ahoj"
+
+    def test_csv_dry_run_unchanged(self) -> None:
+        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
+        content = self._make_csv(
+            [{"language": "cs", "msgid": "hello", "context": "", "msgstr": "Ahoj", "is_active": "true"}]
+        )
+        result = importexport.import_csv(content, dry_run=True)
+        assert result["created"] == 0
+        assert result["updated"] == 1
+        assert result["unchanged"] == 1
+        assert len(result["preview"]) == 0  # type: ignore[arg-type]
+
+    def test_csv_dry_run_mixed(self) -> None:
+        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
+        content = self._make_csv(
+            [
+                {"language": "cs", "msgid": "hello", "context": "", "msgstr": "Cau", "is_active": "true"},
+                {"language": "cs", "msgid": "bye", "context": "", "msgstr": "Nashle", "is_active": "true"},
+            ]
+        )
+        result = importexport.import_csv(content, dry_run=True)
+        assert result["created"] == 1
+        assert result["updated"] == 1
+        assert result["unchanged"] == 0
+        assert len(result["preview"]) == 2  # type: ignore[arg-type]
+
+        actions = {p.action for p in result["preview"]}  # type: ignore[union-attr]
+        assert actions == {"create", "update"}
+
+    def test_po_dry_run(self) -> None:
+        po = polib.POFile()
+        po.metadata = {"Language": "cs"}
+        po.append(polib.POEntry(msgid="hello", msgstr="Ahoj"))
+        result = importexport.import_po(str(po), language="cs", dry_run=True)
+        assert result["dry_run"] is True
+        assert result["created"] == 1
+        assert models.TranslationEntry.objects.qs.count() == 0
+
+    def test_po_zip_dry_run(self) -> None:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            po = polib.POFile()
+            po.metadata = {"Language": "cs"}
+            po.append(polib.POEntry(msgid="hello", msgstr="Ahoj"))
+            zf.writestr("cs.po", str(po))
+        result = importexport.import_po_zip(buf.getvalue(), dry_run=True)
+        assert result["dry_run"] is True
+        assert result["created"] == 1
+        assert result.get("preview") is not None
+        assert len(result["preview"]) == 1  # type: ignore[arg-type]
+        assert models.TranslationEntry.objects.qs.count() == 0
+
+    def test_dry_run_error_includes_flag(self) -> None:
+        result = importexport.import_csv("", dry_run=True)
+        assert result["dry_run"] is True
+        assert result["errors"] == ["Empty or invalid CSV file"]
+
+    def test_admin_import_view_dry_run(self, settings: "SettingsWrapper") -> None:
+        settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["cs", "en"], "LOCALE_DIR": "/tmp"}
+        conf.get_settings.cache_clear()
+
+        csv_content = "language,msgid,context,msgstr,is_active\ncs,hello,,Ahoj,true\n"
+        factory = django.test.RequestFactory()
+        request = factory.post(
+            "/admin/live_translations/translationentry/import/",
+            data={"file": io.BytesIO(csv_content.encode("utf-8")), "dry_run": "1"},
+            format="multipart",
+        )
+        request.FILES["file"].name = "test.csv"  # type: ignore[union-attr]
+        request.user = django.contrib.auth.get_user_model()(username="admin", is_superuser=True, is_staff=True)
+
+        ma = _get_admin_instance()
+        response = ma.import_view(request)
+        assert response.status_code == 200
+        assert isinstance(response, django.template.response.TemplateResponse)
+        assert response.context_data is not None
+        result = response.context_data["result"]
+        assert result["dry_run"] is True
+        assert result["created"] == 1
+        assert models.TranslationEntry.objects.qs.count() == 0
+
+
+# ---------------------------------------------------------------------------
 # Changelist template
 # ---------------------------------------------------------------------------
 
