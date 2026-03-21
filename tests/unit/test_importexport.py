@@ -23,10 +23,18 @@ from live_translations.importexport import ExportRow
 if t.TYPE_CHECKING:
     from pytest_django.fixtures import SettingsWrapper
 
+    from tests.backends import TestBackend  # type: ignore[import-not-found]
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+_BASE_SETTINGS = {
+    "LANGUAGES": ["cs", "en"],
+    "LOCALE_DIR": "/tmp",
+    "BACKEND": "tests.backends.TestBackend",
+}
 
 
 def _make_admin_request(
@@ -71,15 +79,15 @@ def _setup_po_files(tmp_path: pathlib.Path, translations: dict[str, dict[str, st
     return locale_dir
 
 
-def _configure_db_backend(
+def _configure_settings(
     settings: "SettingsWrapper",
     locale_dir: pathlib.Path,
     languages: list[str],
 ) -> None:
     settings.LIVE_TRANSLATIONS = {
+        **_BASE_SETTINGS,
         "LANGUAGES": languages,
         "LOCALE_DIR": str(locale_dir),
-        "BACKEND": "live_translations.backends.db.DatabaseBackend",
     }
     conf.get_settings.cache_clear()
     conf.get_backend_instance.cache_clear()
@@ -156,7 +164,7 @@ class TestExportCSV:
 
     def test_include_defaults_merges_po_and_db(self, tmp_path: pathlib.Path, settings: "SettingsWrapper") -> None:
         locale_dir = _setup_po_files(tmp_path, {"cs": {"hello": "Ahoj", "bye": "Nashle"}})
-        _configure_db_backend(settings, locale_dir, ["cs"])
+        _configure_settings(settings, locale_dir, ["cs"])
 
         # DB override for "hello"
         models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Cau", is_active=True)
@@ -166,10 +174,8 @@ class TestExportCSV:
         rows = _parse_csv(result)
         assert len(rows) == 2
         by_msgid = {r["msgid"]: r for r in rows}
-        # DB override wins
-        assert by_msgid["hello"]["msgstr"] == "Cau"
-        # PO default preserved
-        assert by_msgid["bye"]["msgstr"] == "Nashle"
+        assert by_msgid["hello"]["msgstr"] == "Cau", "DB override should win over PO default"
+        assert by_msgid["bye"]["msgstr"] == "Nashle", "PO default preserved when no DB override"
 
     def test_csv_handles_commas_and_newlines(self) -> None:
         models.TranslationEntry.objects.create(
@@ -191,7 +197,7 @@ class TestExportCSV:
 class TestExportPO:
     def test_active_override_replaces_default(self, tmp_path: pathlib.Path, settings: "SettingsWrapper") -> None:
         locale_dir = _setup_po_files(tmp_path, {"cs": {"hello": "Ahoj"}})
-        _configure_db_backend(settings, locale_dir, ["cs"])
+        _configure_settings(settings, locale_dir, ["cs"])
 
         models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Cau", is_active=True)
 
@@ -207,7 +213,7 @@ class TestExportPO:
         self, tmp_path: pathlib.Path, settings: "SettingsWrapper"
     ) -> None:
         locale_dir = _setup_po_files(tmp_path, {"cs": {"hello": "Ahoj"}})
-        _configure_db_backend(settings, locale_dir, ["cs"])
+        _configure_settings(settings, locale_dir, ["cs"])
 
         models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Cau", is_active=False)
 
@@ -216,18 +222,16 @@ class TestExportPO:
 
         entry = po.find("hello")
         assert entry is not None
-        # msgstr should be the PO default (active value), not the override
-        assert entry.msgstr == "Ahoj"
+        assert entry.msgstr == "Ahoj", "Inactive override should keep PO default as msgstr"
         assert "fuzzy" in entry.flags
-        # ltpending comment should contain the override value
         assert entry.comment is not None
         assert LT_PENDING_PREFIX in entry.comment
         decoded = base64.b64decode(entry.comment.split(LT_PENDING_PREFIX)[1]).decode()
-        assert decoded == "Cau"
+        assert decoded == "Cau", "ltpending comment should contain the override value"
 
     def test_inactive_override_without_po_default(self, tmp_path: pathlib.Path, settings: "SettingsWrapper") -> None:
         locale_dir = _setup_po_files(tmp_path, {"cs": {}})
-        _configure_db_backend(settings, locale_dir, ["cs"])
+        _configure_settings(settings, locale_dir, ["cs"])
 
         models.TranslationEntry.objects.create(
             language="cs", msgid="new_key", context="", msgstr="Novy", is_active=False
@@ -238,13 +242,13 @@ class TestExportPO:
 
         entry = po.find("new_key")
         assert entry is not None
-        assert entry.msgstr == ""  # no PO default
+        assert entry.msgstr == "", "No PO default means empty msgstr"
         assert "fuzzy" in entry.flags
         assert LT_PENDING_PREFIX in entry.comment
 
     def test_po_default_without_override(self, tmp_path: pathlib.Path, settings: "SettingsWrapper") -> None:
         locale_dir = _setup_po_files(tmp_path, {"cs": {"hello": "Ahoj"}})
-        _configure_db_backend(settings, locale_dir, ["cs"])
+        _configure_settings(settings, locale_dir, ["cs"])
 
         result = importexport.export_po(language="cs")
         po = polib.pofile(result)
@@ -256,7 +260,7 @@ class TestExportPO:
 
     def test_po_metadata(self, tmp_path: pathlib.Path, settings: "SettingsWrapper") -> None:
         locale_dir = _setup_po_files(tmp_path, {"cs": {}})
-        _configure_db_backend(settings, locale_dir, ["cs"])
+        _configure_settings(settings, locale_dir, ["cs"])
 
         result = importexport.export_po(language="cs")
         po = polib.pofile(result)
@@ -264,7 +268,7 @@ class TestExportPO:
 
     def test_empty_export(self, tmp_path: pathlib.Path, settings: "SettingsWrapper") -> None:
         locale_dir = _setup_po_files(tmp_path, {"cs": {}})
-        _configure_db_backend(settings, locale_dir, ["cs"])
+        _configure_settings(settings, locale_dir, ["cs"])
 
         result = importexport.export_po(language="cs")
         po = polib.pofile(result)
@@ -272,7 +276,7 @@ class TestExportPO:
 
     def test_msgctxt_preserved(self, tmp_path: pathlib.Path, settings: "SettingsWrapper") -> None:
         locale_dir = _setup_po_files(tmp_path, {"cs": {}})
-        _configure_db_backend(settings, locale_dir, ["cs"])
+        _configure_settings(settings, locale_dir, ["cs"])
 
         models.TranslationEntry.objects.create(
             language="cs", msgid="hello", context="greeting", msgstr="Ahoj", is_active=True
@@ -295,7 +299,7 @@ class TestExportPO:
 class TestExportPOZip:
     def test_zip_contains_per_language_files(self, tmp_path: pathlib.Path, settings: "SettingsWrapper") -> None:
         locale_dir = _setup_po_files(tmp_path, {"cs": {}, "en": {}})
-        _configure_db_backend(settings, locale_dir, ["cs", "en"])
+        _configure_settings(settings, locale_dir, ["cs", "en"])
 
         models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
         models.TranslationEntry.objects.create(
@@ -312,7 +316,7 @@ class TestExportPOZip:
 
     def test_zip_language_filter(self, tmp_path: pathlib.Path, settings: "SettingsWrapper") -> None:
         locale_dir = _setup_po_files(tmp_path, {"cs": {}, "en": {}})
-        _configure_db_backend(settings, locale_dir, ["cs", "en"])
+        _configure_settings(settings, locale_dir, ["cs", "en"])
 
         models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
         models.TranslationEntry.objects.create(
@@ -330,9 +334,13 @@ class TestExportPOZip:
 
 @pytest.mark.django_db
 class TestImportCSV:
-    @unittest.mock.patch("live_translations.importexport.conf.get_backend_instance")
-    def test_basic_import(self, mock_backend: unittest.mock.MagicMock) -> None:
-        mock_backend.return_value.bump_catalog_version = unittest.mock.MagicMock()
+    @pytest.fixture(autouse=True)
+    def _setup(self, settings: "SettingsWrapper") -> None:
+        settings.LIVE_TRANSLATIONS = {**_BASE_SETTINGS}
+        conf.get_settings.cache_clear()
+        conf.get_backend_instance.cache_clear()
+
+    def test_basic_import(self) -> None:
         content = _make_csv(
             [
                 {"language": "cs", "msgid": "hello", "context": "", "msgstr": "Ahoj", "is_active": "true"},
@@ -351,9 +359,7 @@ class TestImportCSV:
         entry_en = models.TranslationEntry.objects.qs.get(language="en", msgid="hello")
         assert entry_en.is_active is False
 
-    @unittest.mock.patch("live_translations.importexport.conf.get_backend_instance")
-    def test_update_existing(self, mock_backend: unittest.mock.MagicMock) -> None:
-        mock_backend.return_value.bump_catalog_version = unittest.mock.MagicMock()
+    def test_update_existing(self) -> None:
         models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
         content = _make_csv(
             [
@@ -378,9 +384,7 @@ class TestImportCSV:
         result = importexport.import_csv("")
         assert result["errors"] == ["Empty or invalid CSV file"]
 
-    @unittest.mock.patch("live_translations.importexport.conf.get_backend_instance")
-    def test_empty_msgid_skipped(self, mock_backend: unittest.mock.MagicMock) -> None:
-        mock_backend.return_value.bump_catalog_version = unittest.mock.MagicMock()
+    def test_empty_msgid_skipped(self) -> None:
         content = _make_csv(
             [
                 {"language": "cs", "msgid": "", "context": "", "msgstr": "Ahoj", "is_active": "true"},
@@ -392,9 +396,7 @@ class TestImportCSV:
         assert len(result["errors"]) == 1
         assert "empty msgid" in result["errors"][0]
 
-    @unittest.mock.patch("live_translations.importexport.conf.get_backend_instance")
-    def test_context_defaults_to_empty(self, mock_backend: unittest.mock.MagicMock) -> None:
-        mock_backend.return_value.bump_catalog_version = unittest.mock.MagicMock()
+    def test_context_defaults_to_empty(self) -> None:
         # CSV without context column
         content = "language,msgid,msgstr\ncs,hello,Ahoj\n"
         result = importexport.import_csv(content)
@@ -402,14 +404,44 @@ class TestImportCSV:
         entry = models.TranslationEntry.objects.qs.get(language="cs", msgid="hello")
         assert entry.context == ""
 
-    @unittest.mock.patch("live_translations.importexport.conf.get_backend_instance")
-    def test_is_active_defaults_to_true(self, mock_backend: unittest.mock.MagicMock) -> None:
-        mock_backend.return_value.bump_catalog_version = unittest.mock.MagicMock()
+    def test_is_active_defaults_to_true(self) -> None:
         content = "language,msgid,msgstr\ncs,hello,Ahoj\n"
         result = importexport.import_csv(content)
         assert result["created"] == 1
         entry = models.TranslationEntry.objects.qs.get(language="cs", msgid="hello")
-        assert entry.is_active is True
+        assert entry.is_active is True, "New entries default to active"
+
+    def test_empty_language_skipped(self) -> None:
+        content = _make_csv(
+            [
+                {"language": "", "msgid": "hello", "context": "", "msgstr": "Ahoj", "is_active": "true"},
+                {"language": "cs", "msgid": "bye", "context": "", "msgstr": "Nashle", "is_active": "true"},
+            ]
+        )
+        result = importexport.import_csv(content)
+        assert result["created"] == 1
+        assert len(result["errors"]) == 1
+        assert "empty language" in result["errors"][0]
+
+    def test_all_unchanged_skips_upsert(self) -> None:
+        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
+        content = _make_csv(
+            [{"language": "cs", "msgid": "hello", "context": "", "msgstr": "Ahoj", "is_active": "true"}]
+        )
+        result = importexport.import_csv(content)
+        assert result["created"] == 0
+        assert result["updated"] == 0
+        assert result["errors"] == []
+        backend = t.cast("TestBackend", conf.get_backend_instance())
+        assert not backend.get_calls("bump_catalog_version"), "No catalog bump when nothing changed"
+
+    def test_csv_parse_error(self) -> None:
+        with unittest.mock.patch("live_translations.importexport.csv.DictReader") as mock_reader:
+            mock_reader.return_value.fieldnames = ["language", "msgid", "msgstr"]
+            mock_reader.return_value.__iter__ = unittest.mock.Mock(side_effect=csv.Error("bad csv"))
+            result = importexport.import_csv("dummy")
+        assert result["created"] == 0
+        assert any("CSV parse error" in e for e in result["errors"])
 
 
 # ---------------------------------------------------------------------------
@@ -419,6 +451,12 @@ class TestImportCSV:
 
 @pytest.mark.django_db
 class TestImportPO:
+    @pytest.fixture(autouse=True)
+    def _setup(self, settings: "SettingsWrapper") -> None:
+        settings.LIVE_TRANSLATIONS = {**_BASE_SETTINGS}
+        conf.get_settings.cache_clear()
+        conf.get_backend_instance.cache_clear()
+
     def _make_po(self, entries: list[dict[str, t.Any]], language: str = "cs") -> str:
         po = polib.POFile()
         po.metadata = {"Content-Type": "text/plain; charset=UTF-8", "Language": language}
@@ -433,9 +471,7 @@ class TestImportPO:
             po.append(entry)
         return str(po)
 
-    @unittest.mock.patch("live_translations.importexport.conf.get_backend_instance")
-    def test_basic_import(self, mock_backend: unittest.mock.MagicMock) -> None:
-        mock_backend.return_value.bump_catalog_version = unittest.mock.MagicMock()
+    def test_basic_import(self) -> None:
         content = self._make_po(
             [
                 {"msgid": "hello", "msgstr": "Ahoj"},
@@ -451,11 +487,9 @@ class TestImportPO:
         assert entry.is_active is True
 
         entry_bye = models.TranslationEntry.objects.qs.get(language="cs", msgid="bye")
-        assert entry_bye.is_active is False
+        assert entry_bye.is_active is False, "Fuzzy PO entries import as inactive"
 
-    @unittest.mock.patch("live_translations.importexport.conf.get_backend_instance")
-    def test_with_msgctxt(self, mock_backend: unittest.mock.MagicMock) -> None:
-        mock_backend.return_value.bump_catalog_version = unittest.mock.MagicMock()
+    def test_with_msgctxt(self) -> None:
         content = self._make_po(
             [
                 {"msgid": "hello", "msgstr": "Ahoj", "msgctxt": "greeting"},
@@ -463,12 +497,11 @@ class TestImportPO:
         )
         result = importexport.import_po(content, language="cs")
         assert result["created"] == 1
+
         entry = models.TranslationEntry.objects.qs.get(language="cs", msgid="hello", context="greeting")
         assert entry.msgstr == "Ahoj"
 
-    @unittest.mock.patch("live_translations.importexport.conf.get_backend_instance")
-    def test_language_from_metadata(self, mock_backend: unittest.mock.MagicMock) -> None:
-        mock_backend.return_value.bump_catalog_version = unittest.mock.MagicMock()
+    def test_language_from_metadata(self) -> None:
         content = self._make_po([{"msgid": "hello", "msgstr": "Ahoj"}], language="cs")
         result = importexport.import_po(content, language="")
         assert result["created"] == 1
@@ -483,11 +516,8 @@ class TestImportPO:
         assert result["created"] == 0
         assert any("Language not specified" in e for e in result["errors"])
 
-    @unittest.mock.patch("live_translations.importexport.conf.get_backend_instance")
-    def test_ltpending_takes_precedence_over_fuzzy(self, mock_backend: unittest.mock.MagicMock) -> None:
+    def test_ltpending_takes_precedence_over_fuzzy(self) -> None:
         """When a PO entry has both ltpending and fuzzy, the ltpending value is used as msgstr."""
-        mock_backend.return_value.bump_catalog_version = unittest.mock.MagicMock()
-
         po = polib.POFile()
         po.metadata = {"Language": "cs"}
         entry = polib.POEntry(msgid="hello", msgstr="Ahoj")  # PO default
@@ -500,15 +530,11 @@ class TestImportPO:
         assert result["created"] == 1
 
         db_entry = models.TranslationEntry.objects.qs.get(language="cs", msgid="hello")
-        # Should use the ltpending value, not msgstr
-        assert db_entry.msgstr == "Cau"
+        assert db_entry.msgstr == "Cau", "Should use the ltpending value, not msgstr"
         assert db_entry.is_active is False
 
-    @unittest.mock.patch("live_translations.importexport.conf.get_backend_instance")
-    def test_fuzzy_without_ltpending(self, mock_backend: unittest.mock.MagicMock) -> None:
+    def test_fuzzy_without_ltpending(self) -> None:
         """Standard fuzzy PO entry (no ltpending) uses msgstr as the value."""
-        mock_backend.return_value.bump_catalog_version = unittest.mock.MagicMock()
-
         po = polib.POFile()
         po.metadata = {"Language": "cs"}
         entry = polib.POEntry(msgid="hello", msgstr="Ahoj")
@@ -522,6 +548,12 @@ class TestImportPO:
         assert db_entry.msgstr == "Ahoj"
         assert db_entry.is_active is False
 
+    @unittest.mock.patch("live_translations.importexport.polib.pofile", side_effect=ValueError("bad PO"))
+    def test_po_parse_error(self, _mock_pofile: unittest.mock.MagicMock) -> None:  # noqa: PT019
+        result = importexport.import_po("bad content", language="cs")
+        assert result["created"] == 0
+        assert any("PO parse error" in e for e in result["errors"])
+
 
 # ---------------------------------------------------------------------------
 # PO Zip Import
@@ -530,10 +562,13 @@ class TestImportPO:
 
 @pytest.mark.django_db
 class TestImportPOZip:
-    @unittest.mock.patch("live_translations.importexport.conf.get_backend_instance")
-    def test_multi_language_zip(self, mock_backend: unittest.mock.MagicMock) -> None:
-        mock_backend.return_value.bump_catalog_version = unittest.mock.MagicMock()
+    @pytest.fixture(autouse=True)
+    def _setup(self, settings: "SettingsWrapper") -> None:
+        settings.LIVE_TRANSLATIONS = {**_BASE_SETTINGS}
+        conf.get_settings.cache_clear()
+        conf.get_backend_instance.cache_clear()
 
+    def test_multi_language_zip(self) -> None:
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
             po_cs = polib.POFile()
@@ -557,6 +592,19 @@ class TestImportPOZip:
         result = importexport.import_po_zip(b"not a zip")
         assert any("Invalid zip file" in e for e in result["errors"])
 
+    def test_non_po_files_skipped(self) -> None:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            po = polib.POFile()
+            po.metadata = {"Language": "cs"}
+            po.append(polib.POEntry(msgid="hello", msgstr="Ahoj"))
+            zf.writestr("cs.po", str(po))
+            zf.writestr("README.txt", "not a PO file")
+
+        result = importexport.import_po_zip(buf.getvalue())
+        assert result["created"] == 1
+        assert result["errors"] == []
+
 
 # ---------------------------------------------------------------------------
 # Round-trip: export -> import
@@ -565,9 +613,13 @@ class TestImportPOZip:
 
 @pytest.mark.django_db
 class TestRoundTrip:
-    @unittest.mock.patch("live_translations.importexport.conf.get_backend_instance")
-    def test_csv_round_trip(self, mock_backend: unittest.mock.MagicMock) -> None:
-        mock_backend.return_value.bump_catalog_version = unittest.mock.MagicMock()
+    @pytest.fixture(autouse=True)
+    def _setup(self, settings: "SettingsWrapper") -> None:
+        settings.LIVE_TRANSLATIONS = {**_BASE_SETTINGS}
+        conf.get_settings.cache_clear()
+        conf.get_backend_instance.cache_clear()
+
+    def test_csv_round_trip(self) -> None:
         models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
         models.TranslationEntry.objects.create(
             language="cs", msgid="bye", context="farewell", msgstr="Nashle", is_active=False
@@ -595,17 +647,14 @@ class TestRoundTrip:
         assert entry_bye.msgstr == "Nashle"
         assert entry_bye.is_active is False
 
-    @unittest.mock.patch("live_translations.importexport.conf.get_backend_instance")
     def test_po_round_trip_with_ltpending(
         self,
-        mock_backend: unittest.mock.MagicMock,
         tmp_path: pathlib.Path,
         settings: "SettingsWrapper",
     ) -> None:
         """PO round-trip: inactive entries use ltpending, import reads it back."""
-        mock_backend.return_value.bump_catalog_version = unittest.mock.MagicMock()
         locale_dir = _setup_po_files(tmp_path, {"cs": {"hello": "Ahoj", "bye": "Nashle"}})
-        _configure_db_backend(settings, locale_dir, ["cs"])
+        _configure_settings(settings, locale_dir, ["cs"])
 
         models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Cau", is_active=True)
         models.TranslationEntry.objects.create(language="cs", msgid="bye", context="", msgstr="Sbohem", is_active=False)
@@ -631,16 +680,13 @@ class TestRoundTrip:
         assert entry_bye.msgstr == "Sbohem"
         assert entry_bye.is_active is False
 
-    @unittest.mock.patch("live_translations.importexport.conf.get_backend_instance")
     def test_po_zip_round_trip(
         self,
-        mock_backend: unittest.mock.MagicMock,
         tmp_path: pathlib.Path,
         settings: "SettingsWrapper",
     ) -> None:
-        mock_backend.return_value.bump_catalog_version = unittest.mock.MagicMock()
         locale_dir = _setup_po_files(tmp_path, {"cs": {}, "en": {}})
-        _configure_db_backend(settings, locale_dir, ["cs", "en"])
+        _configure_settings(settings, locale_dir, ["cs", "en"])
 
         models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
         models.TranslationEntry.objects.create(language="en", msgid="hello", context="", msgstr="Hi", is_active=True)
@@ -658,6 +704,170 @@ class TestRoundTrip:
 
         assert models.TranslationEntry.objects.qs.get(language="cs", msgid="hello").msgstr == "Ahoj"
         assert models.TranslationEntry.objects.qs.get(language="en", msgid="hello").msgstr == "Hi"
+
+
+# ---------------------------------------------------------------------------
+# Cross-backend round-trips (simulating environment migration)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+class TestCrossBackendRoundTrip:
+    """Simulate moving translations between environments (e.g. PO-based -> DB-based).
+
+    Export merges PO defaults with DB overrides; import always writes to the
+    DB model.  These tests verify the full migration path preserves all
+    translation data including active/inactive state.
+    """
+
+    def test_csv_export_with_po_defaults_import_to_clean_db(
+        self,
+        tmp_path: pathlib.Path,
+        settings: "SettingsWrapper",
+    ) -> None:
+        """Export CSV with include_defaults from PO env, import into empty DB env."""
+        # Source environment: PO files + one DB override
+        locale_dir = _setup_po_files(tmp_path, {"cs": {"hello": "Ahoj", "bye": "Nashle", "thanks": "Diky"}})
+        _configure_settings(settings, locale_dir, ["cs"])
+        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Cau", is_active=True)
+        models.TranslationEntry.objects.create(language="cs", msgid="bye", context="", msgstr="Sbohem", is_active=False)
+
+        # Export all (PO defaults + DB overrides merged)
+        qs = models.TranslationEntry.objects.qs.all()
+        csv_content = importexport.export_csv(qs, include_defaults=True, languages=["cs"])
+
+        # Simulate clean target environment: wipe DB, remove PO files
+        models.TranslationEntry.objects.qs.all().delete()
+
+        # Import into fresh environment
+        result = importexport.import_csv(csv_content)
+        assert result["errors"] == []
+        assert result["created"] == 3
+
+        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="hello").msgstr == "Cau"
+        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="hello").is_active is True
+        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="bye").msgstr == "Sbohem"
+        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="bye").is_active is False
+        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="thanks").msgstr == "Diky"
+
+    def test_po_export_from_db_env_import_to_clean_env(
+        self,
+        tmp_path: pathlib.Path,
+        settings: "SettingsWrapper",
+    ) -> None:
+        """Export PO from DB env with overrides, import into env with no PO files."""
+        # Source: PO defaults + DB overrides (active + inactive)
+        locale_dir = _setup_po_files(tmp_path, {"cs": {"hello": "Ahoj", "bye": "Nashle"}})
+        _configure_settings(settings, locale_dir, ["cs"])
+        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Cau", is_active=True)
+        models.TranslationEntry.objects.create(language="cs", msgid="bye", context="", msgstr="Sbohem", is_active=False)
+
+        po_content = importexport.export_po(language="cs")
+
+        # Target: clean DB, empty PO files (different environment)
+        models.TranslationEntry.objects.qs.all().delete()
+        empty_locale = _setup_po_files(tmp_path / "target", {"cs": {}})
+        _configure_settings(settings, empty_locale, ["cs"])
+
+        result = importexport.import_po(po_content, language="cs")
+        assert result["errors"] == []
+        assert result["created"] == 2
+
+        hello = models.TranslationEntry.objects.qs.get(language="cs", msgid="hello")
+        assert hello.msgstr == "Cau"
+        assert hello.is_active is True
+
+        bye = models.TranslationEntry.objects.qs.get(language="cs", msgid="bye")
+        assert bye.msgstr == "Sbohem"
+        assert bye.is_active is False
+
+    def test_po_zip_multi_language_migration(
+        self,
+        tmp_path: pathlib.Path,
+        settings: "SettingsWrapper",
+    ) -> None:
+        """Export PO zip with multiple languages, import into clean environment."""
+        locale_dir = _setup_po_files(tmp_path, {"cs": {"hello": "Ahoj"}, "en": {"hello": "Hello"}})
+        _configure_settings(settings, locale_dir, ["cs", "en"])
+        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Cau", is_active=True)
+        models.TranslationEntry.objects.create(language="en", msgid="hello", context="", msgstr="Hi!", is_active=False)
+
+        zip_data = importexport.export_po_zip(languages=None)
+
+        # Clean target
+        models.TranslationEntry.objects.qs.all().delete()
+        empty_locale = _setup_po_files(tmp_path / "target", {"cs": {}, "en": {}})
+        _configure_settings(settings, empty_locale, ["cs", "en"])
+
+        result = importexport.import_po_zip(zip_data)
+        assert result["errors"] == []
+        assert result["created"] == 2
+
+        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="hello").msgstr == "Cau"
+        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="hello").is_active is True
+        assert models.TranslationEntry.objects.qs.get(language="en", msgid="hello").msgstr == "Hi!"
+        assert models.TranslationEntry.objects.qs.get(language="en", msgid="hello").is_active is False
+
+    def test_export_modify_reimport(self) -> None:
+        """Export CSV, modify translations externally, reimport -- updates applied."""
+        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
+        models.TranslationEntry.objects.create(language="cs", msgid="bye", context="", msgstr="Nashle", is_active=True)
+
+        # Export
+        qs = models.TranslationEntry.objects.qs.all()
+        csv_content = importexport.export_csv(qs, include_defaults=False, languages=None)
+
+        # Simulate external editing: change one translation, add a new one
+        rows = _parse_csv(csv_content)
+        for row in rows:
+            if row["msgid"] == "hello":
+                row["msgstr"] = "Cau"
+        rows.append({"language": "cs", "msgid": "thanks", "context": "", "msgstr": "Diky", "is_active": "true"})
+        modified_csv = _make_csv(rows)
+
+        result = importexport.import_csv(modified_csv)
+        assert result["errors"] == []
+        assert result["created"] == 1, "Only 'thanks' is new"
+        assert result["updated"] == 1, "Only 'hello' changed"
+
+        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="hello").msgstr == "Cau"
+        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="bye").msgstr == "Nashle"
+        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="thanks").msgstr == "Diky"
+
+    def test_csv_to_po_format_conversion(
+        self,
+        tmp_path: pathlib.Path,
+        settings: "SettingsWrapper",
+    ) -> None:
+        """Export as CSV, clear DB, import. Then export as PO -- verifies cross-format portability."""
+        locale_dir = _setup_po_files(tmp_path, {"cs": {}})
+        _configure_settings(settings, locale_dir, ["cs"])
+
+        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
+        models.TranslationEntry.objects.create(language="cs", msgid="bye", context="", msgstr="Nashle", is_active=False)
+
+        # Export as CSV
+        qs = models.TranslationEntry.objects.qs.all()
+        csv_content = importexport.export_csv(qs, include_defaults=False, languages=None)
+
+        # Clear and reimport from CSV
+        models.TranslationEntry.objects.qs.all().delete()
+        result = importexport.import_csv(csv_content)
+        assert result["created"] == 2
+        assert result["errors"] == []
+
+        # Now export as PO and verify it's valid and complete
+        po_content = importexport.export_po(language="cs")
+        po = polib.pofile(po_content)
+
+        hello = po.find("hello")
+        assert hello is not None
+        assert hello.msgstr == "Ahoj"
+        assert "fuzzy" not in hello.flags
+
+        bye = po.find("bye")
+        assert bye is not None
+        assert "fuzzy" in bye.flags, "Inactive entries should get fuzzy flag in PO export"
 
 
 # ---------------------------------------------------------------------------
@@ -682,7 +892,7 @@ class TestExportAdminActions:
 
     def test_export_selected_po_zip_action(self, tmp_path: pathlib.Path, settings: "SettingsWrapper") -> None:
         locale_dir = _setup_po_files(tmp_path, {"cs": {}})
-        _configure_db_backend(settings, locale_dir, ["cs"])
+        _configure_settings(settings, locale_dir, ["cs"])
 
         models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
         ma = _get_admin_instance()
@@ -745,7 +955,7 @@ class TestExportView:
 
     def test_post_po_single_language(self, tmp_path: pathlib.Path, settings: "SettingsWrapper") -> None:
         locale_dir = _setup_po_files(tmp_path, {"cs": {}})
-        _configure_db_backend(settings, locale_dir, ["cs", "en"])
+        _configure_settings(settings, locale_dir, ["cs", "en"])
         models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
 
         ma = _get_admin_instance()
@@ -764,6 +974,15 @@ class TestExportView:
         response = ma.export_view(request)
         assert response["Content-Type"] == "application/zip"
 
+    def test_post_invalid_language(self, settings: "SettingsWrapper") -> None:
+        settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["cs", "en"], "LOCALE_DIR": "/tmp"}
+        conf.get_settings.cache_clear()
+
+        ma = _get_admin_instance()
+        request = _make_admin_request("post", data={"format": "csv", "scope": "overrides", "language": "xx"})
+        response = ma.export_view(request)
+        assert response.status_code == 400
+
 
 # ---------------------------------------------------------------------------
 # Admin import view
@@ -772,9 +991,13 @@ class TestExportView:
 
 @pytest.mark.django_db
 class TestImportView:
-    def test_get_returns_template_response(self, settings: "SettingsWrapper") -> None:
-        settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["cs", "en"], "LOCALE_DIR": "/tmp"}
+    @pytest.fixture(autouse=True)
+    def _setup(self, settings: "SettingsWrapper") -> None:
+        settings.LIVE_TRANSLATIONS = {**_BASE_SETTINGS}
         conf.get_settings.cache_clear()
+        conf.get_backend_instance.cache_clear()
+
+    def test_get_returns_template_response(self) -> None:
         ma = _get_admin_instance()
         request = _make_admin_request()
         response = ma.import_view(request)
@@ -785,12 +1008,7 @@ class TestImportView:
         assert response.context_data["languages"] == ["cs", "en"]
         assert response.context_data["result"] is None
 
-    @unittest.mock.patch("live_translations.importexport.conf.get_backend_instance")
-    def test_post_csv_import(self, mock_backend: unittest.mock.MagicMock, settings: "SettingsWrapper") -> None:
-        mock_backend.return_value.bump_catalog_version = unittest.mock.MagicMock()
-        settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["cs", "en"], "LOCALE_DIR": "/tmp"}
-        conf.get_settings.cache_clear()
-
+    def test_post_csv_import(self) -> None:
         csv_content = "language,msgid,context,msgstr,is_active\ncs,hello,,Ahoj,true\n"
         factory = django.test.RequestFactory()
         request = factory.post(
@@ -810,10 +1028,7 @@ class TestImportView:
         assert result["created"] == 1
         assert result["errors"] == []
 
-    def test_post_no_file(self, settings: "SettingsWrapper") -> None:
-        settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["cs", "en"], "LOCALE_DIR": "/tmp"}
-        conf.get_settings.cache_clear()
-
+    def test_post_no_file(self) -> None:
         ma = _get_admin_instance()
         request = _make_admin_request("post", data={})
         response = ma.import_view(request)
@@ -823,10 +1038,7 @@ class TestImportView:
         result = response.context_data["result"]
         assert "No file uploaded" in result["errors"][0]
 
-    def test_post_unsupported_format(self, settings: "SettingsWrapper") -> None:
-        settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["cs", "en"], "LOCALE_DIR": "/tmp"}
-        conf.get_settings.cache_clear()
-
+    def test_post_unsupported_format(self) -> None:
         factory = django.test.RequestFactory()
         request = factory.post(
             "/admin/live_translations/translationentry/import/",
@@ -843,6 +1055,55 @@ class TestImportView:
         assert response.context_data is not None
         result = response.context_data["result"]
         assert "Unsupported file type" in result["errors"][0]
+
+    def test_post_zip_import(self) -> None:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            po = polib.POFile()
+            po.metadata = {"Language": "cs"}
+            po.append(polib.POEntry(msgid="hello", msgstr="Ahoj"))
+            zf.writestr("cs.po", str(po))
+
+        factory = django.test.RequestFactory()
+        request = factory.post(
+            "/admin/live_translations/translationentry/import/",
+            data={"file": io.BytesIO(buf.getvalue())},
+            format="multipart",
+        )
+        request.FILES["file"].name = "translations.zip"  # type: ignore[union-attr]
+        request.user = django.contrib.auth.get_user_model()(username="admin", is_superuser=True, is_staff=True)
+
+        ma = _get_admin_instance()
+        response = ma.import_view(request)
+        assert response.status_code == 200
+        assert isinstance(response, django.template.response.TemplateResponse)
+        assert response.context_data is not None
+        result = response.context_data["result"]
+        assert result["created"] == 1
+        assert result["errors"] == []
+
+    def test_post_po_import(self) -> None:
+        po = polib.POFile()
+        po.metadata = {"Language": "cs"}
+        po.append(polib.POEntry(msgid="hello", msgstr="Ahoj"))
+
+        factory = django.test.RequestFactory()
+        request = factory.post(
+            "/admin/live_translations/translationentry/import/",
+            data={"file": io.BytesIO(str(po).encode("utf-8")), "language": "cs"},
+            format="multipart",
+        )
+        request.FILES["file"].name = "cs.po"  # type: ignore[union-attr]
+        request.user = django.contrib.auth.get_user_model()(username="admin", is_superuser=True, is_staff=True)
+
+        ma = _get_admin_instance()
+        response = ma.import_view(request)
+        assert response.status_code == 200
+        assert isinstance(response, django.template.response.TemplateResponse)
+        assert response.context_data is not None
+        result = response.context_data["result"]
+        assert result["created"] == 1
+        assert result["errors"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -954,7 +1215,7 @@ class TestDryRun:
         assert result["errors"] == ["Empty or invalid CSV file"]
 
     def test_admin_import_view_dry_run(self, settings: "SettingsWrapper") -> None:
-        settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["cs", "en"], "LOCALE_DIR": "/tmp"}
+        settings.LIVE_TRANSLATIONS = {**_BASE_SETTINGS}
         conf.get_settings.cache_clear()
 
         csv_content = "language,msgid,context,msgstr,is_active\ncs,hello,,Ahoj,true\n"
