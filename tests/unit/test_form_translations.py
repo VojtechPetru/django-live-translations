@@ -17,6 +17,7 @@ import pytest
 
 from live_translations.strings import (
     _ZWC_BITS,
+    WJ,
     ZWC_BOUNDARY,
     encode_zwc,
     lt_active,
@@ -132,7 +133,7 @@ class TestStringRegistry:
 class TestCapfirstPreservesMarker:
     """Django's capfirst does ``x[0].upper() + x[1:]``.
 
-    The start flag is at position 1 (in the ``x[1:]`` slice), so capfirst
+    The WJ start flag is at position 1 (in the ``x[1:]`` slice), so capfirst
     uppercases the first visible character and the start flag + end marker
     both survive intact.
     """
@@ -144,12 +145,12 @@ class TestCapfirstPreservesMarker:
 
             text = _insert_markers("full name", MsgKey("form.name.label", ""))
             result = django.utils.text.capfirst(text)
-            # First char uppercased, start flag at position 1 survives
+            # First char uppercased, WJ start flag at position 1 survives
             assert result[0] == "F"
-            assert result[1] == ZWC_BOUNDARY  # start flag
+            assert result[1] == WJ  # position-1 start flag
             assert result[2:].startswith("ull name")
-            # End marker boundary present
-            assert result.count(ZWC_BOUNDARY) >= 3  # 1 start flag + 2 end marker boundaries
+            # End marker boundaries present
+            assert result.count(ZWC_BOUNDARY) >= 2  # 2 end marker boundaries
         finally:
             lt_active.reset(token)
 
@@ -201,7 +202,7 @@ class TestFormattingPreservesMarker:
         assert result == "Hello World" + marker
 
     def test_start_flag_survives_percent_formatting(self) -> None:
-        """Start flag at position 1 is not affected by %-formatting."""
+        """WJ start flag at position 1 is not affected by %-formatting."""
         token = lt_active.set(True)
         try:
             from live_translations.strings import _insert_markers
@@ -209,8 +210,8 @@ class TestFormattingPreservesMarker:
             # _insert_markers inserts flag then appends end marker.
             # We simulate post-formatting by checking the flag position.
             text = _insert_markers("Value: %(x)s done", MsgKey("test", ""))
-            # Flag is at position 1
-            assert text[1] == ZWC_BOUNDARY
+            # WJ flag is at position 1
+            assert text[1] == WJ
         finally:
             lt_active.reset(token)
 
@@ -277,12 +278,12 @@ class TestStartFlagInsertion:
     """Verify that _insert_markers inserts a \\uFEFF start flag at the correct position."""
 
     def test_start_flag_at_position_1(self) -> None:
-        """Normal text: start flag at position 1 (after first visible char)."""
+        """Normal text: WJ start flag at position 1 (after first visible char)."""
         from live_translations.strings import _insert_markers
 
         result = _insert_markers("Hello world", MsgKey("test", ""))
         assert result[0] == "H"
-        assert result[1] == ZWC_BOUNDARY  # start flag
+        assert result[1] == WJ  # position-1 start flag (WORD JOINER)
         assert result[2:].startswith("ello world")
         # End marker at the end
         assert result.endswith(ZWC_BOUNDARY)
@@ -308,23 +309,23 @@ class TestStartFlagInsertion:
         assert result[-1] == ZWC_BOUNDARY
 
     def test_start_flag_for_single_char(self) -> None:
-        """Single-char translation: flag appended after the char."""
+        """Single-char translation: WJ flag appended after the char."""
         from live_translations.strings import _insert_markers
 
         result = _insert_markers("X", MsgKey("single", ""))
         assert result[0] == "X"
-        assert result[1] == ZWC_BOUNDARY  # start flag
+        assert result[1] == WJ  # position-1 start flag
         # Followed by 18-char end marker
         assert len(result) == 1 + 1 + 18  # char + flag + end marker
 
     def test_start_flag_survives_capfirst(self) -> None:
-        """capfirst uppercases position 0, start flag at position 1 survives."""
+        """capfirst uppercases position 0, WJ start flag at position 1 survives."""
         from live_translations.strings import _insert_markers
 
         text = _insert_markers("hello", MsgKey("test", ""))
         result = django.utils.text.capfirst(text)
         assert result[0] == "H"
-        assert result[1] == ZWC_BOUNDARY  # start flag
+        assert result[1] == WJ  # position-1 start flag
 
     def test_html_start_flag_capfirst_noop(self) -> None:
         """capfirst on '<...' is a no-op, flag at position 0 is safe."""
@@ -350,7 +351,7 @@ class TestStartFlagInsertion:
         assert result[1] == "<"  # type: ignore[bad-index]
 
     def test_preserves_safestring_normal_text(self) -> None:
-        """SafeString not starting with '<' — flag at position 1, type preserved."""
+        """SafeString not starting with '<' — WJ flag at position 1, type preserved."""
         import django.utils.safestring
 
         from live_translations.strings import _insert_markers
@@ -360,7 +361,7 @@ class TestStartFlagInsertion:
         assert isinstance(result, django.utils.safestring.SafeData)
         # pyrefly doesn't know SafeData subclasses str
         assert result[0] == "H"  # type: ignore[bad-index]
-        assert result[1] == ZWC_BOUNDARY  # type: ignore[bad-index]  # flag at position 1
+        assert result[1] == WJ  # type: ignore[bad-index]  # position-1 start flag
 
     def test_plain_str_stays_plain(self) -> None:
         """Plain str input does NOT get promoted to SafeString."""
@@ -370,3 +371,28 @@ class TestStartFlagInsertion:
 
         result = _insert_markers("plain text", MsgKey("plain", ""))
         assert not isinstance(result, django.utils.safestring.SafeData)
+
+    def test_position_1_flag_uses_distinct_character(self) -> None:
+        """Position-1 and position-0 flags must use different characters.
+
+        When inline HTML splits a translation into multiple DOM nodes, the JS
+        walks backwards to find the start flag and wraps from there.  For
+        position-0 flags (HTML start), it splits at flagIdx — text before is
+        non-translation.  For position-1 flags (normal text), the char at
+        flagIdx-1 is the FIRST translation char and must be included.  Using
+        distinct characters lets the JS apply the correct split strategy.
+        """
+        from live_translations.strings import _insert_markers
+
+        normal = _insert_markers("Hello world", MsgKey("test", ""))
+        html = _insert_markers("<strong>bold</strong>", MsgKey("html", ""))
+
+        # Position-1 flag character (at index 1 of normal text)
+        flag_p1 = normal[1]
+        # Position-0 flag character (at index 0 of HTML-starting text)
+        flag_p0 = html[0]
+
+        assert flag_p1 != flag_p0, (
+            f"position-1 flag ({flag_p1!r}) and position-0 flag ({flag_p0!r}) "
+            "must use different characters so JS can distinguish wrapping strategy"
+        )

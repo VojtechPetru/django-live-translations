@@ -437,6 +437,20 @@ class TestStripZwc:
         assert content == "<strong>bold</strong>"
         assert "\ufeff" not in content
 
+    def test_strips_position_1_wj_flags(self):
+        """Position-1 WJ (\\u2060) start flags are stripped alongside end markers."""
+        end_marker = "\ufeff" + "\u200b" * 16 + "\ufeff"
+        # Simulates: "H" + WJ_flag + "ello" + end_marker
+        body = f"H\u2060ello{end_marker}"
+        response = django.http.HttpResponse(body, content_type="text/plain")
+
+        LiveTranslationsMiddleware._strip_zwc(response)
+
+        content = response.content.decode()
+        assert content == "Hello"
+        assert "\u2060" not in content
+        assert "\ufeff" not in content
+
 
 @pytest.mark.django_db
 class TestInjectAssets:

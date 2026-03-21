@@ -186,13 +186,20 @@
   const ZWC_RE = /\uFEFF[\u200B\u200C]{16}\uFEFF/g;
 
   /**
-   * Matches a lone \uFEFF start flag that is NOT the leading boundary of a
-   * full 18-char ZWC end marker.  End markers have the pattern:
-   *   FEFF + 16x(200B|200C) + FEFF
-   * The negative lookahead ensures we only match standalone start flags.
+   * Matches a start flag character that is NOT the leading boundary of a
+   * full 18-char ZWC end marker.  Two flag characters are used:
+   *   - \uFEFF (BOM) — position-0 flag for HTML-starting translations
+   *   - \u2060 (WJ)  — position-1 flag for normal text translations
+   * End markers have the pattern: FEFF + 16x(200B|200C) + FEFF.
+   * The negative lookahead ensures standalone \uFEFF flags are matched
+   * without consuming end-marker boundaries.  \u2060 never appears in
+   * end markers so needs no lookahead.
    * @type {RegExp}
    */
-  const START_FLAG_RE = /\uFEFF(?![\u200B\u200C]{16}\uFEFF)/g;
+  const START_FLAG_RE = /\uFEFF(?![\u200B\u200C]{16}\uFEFF)|\u2060/g;
+
+  /** Word Joiner — position-1 start flag for normal text translations. */
+  const WJ = "\u2060";
 
   /** @type {StringTable} */
   const STRING_TABLE = window.__LT_STRINGS__ || {};
@@ -315,12 +322,17 @@
                 var flagMatch = START_FLAG_RE.exec(cursor.textContent || "");
                 if (flagMatch) {
                   var flagIdx = flagMatch.index;
+                  var flagChar = flagMatch[0];
                   // Strip the flag character
                   cursor.textContent = (cursor.textContent || "").slice(0, flagIdx) + (cursor.textContent || "").slice(flagIdx + 1);
-                  // If there is text before the flag, split — prefix stays outside
+                  // Determine split position:
+                  // - Position-0 flag (\uFEFF): split at flagIdx (text before is non-translation)
+                  // - Position-1 flag (\u2060): split at flagIdx-1 (char before flag is the
+                  //   first translation char and must be included in <lt-t>)
+                  var splitAt = flagChar === WJ ? flagIdx - 1 : flagIdx;
                   var wrapStart = cursor;
-                  if (flagIdx > 0) {
-                    wrapStart = /** @type {Text} */ (cursor.splitText(flagIdx));
+                  if (splitAt > 0) {
+                    wrapStart = /** @type {Text} */ (cursor.splitText(splitAt));
                   }
                   // Collect all nodes from wrapStart through contentNode (inclusive)
                   var nodesToWrap = [];
