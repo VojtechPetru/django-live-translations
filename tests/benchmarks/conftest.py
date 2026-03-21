@@ -322,7 +322,7 @@ def db_backend_with_overrides(
     n: int = request.param
 
     # Clean slate
-    TranslationEntry.objects.all().delete()
+    TranslationEntry.objects.qs.all().delete()
 
     # Populate with n entries per language (80% active / 20% inactive)
     populate_db_overrides(n, LANGUAGES)

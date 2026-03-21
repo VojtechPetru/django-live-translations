@@ -142,7 +142,7 @@ class TestSaveTranslations:
         backend = self._make_backend()
         backend.save_translations(MsgKey("hello", ""), {"en": "Hi"})
 
-        entry = models.TranslationEntry.objects.get(language="en", msgid="hello")
+        entry = models.TranslationEntry.objects.qs.get(language="en", msgid="hello")
         assert entry.is_active is active_default
 
     def test_explicit_active_flag_overrides_setting(self, settings: "SettingsWrapper"):
@@ -153,7 +153,7 @@ class TestSaveTranslations:
         backend = self._make_backend()
         backend.save_translations(MsgKey("hello", ""), {"en": "Hi"}, active_flags={"en": True})
 
-        entry = models.TranslationEntry.objects.get(language="en", msgid="hello")
+        entry = models.TranslationEntry.objects.qs.get(language="en", msgid="hello")
         assert entry.is_active is True
 
     def test_explicit_active_flag_updates_existing(self, settings: "SettingsWrapper"):
@@ -167,7 +167,7 @@ class TestSaveTranslations:
         backend = self._make_backend()
         backend.save_translations(MsgKey("hello", ""), {"en": "New"}, active_flags={"en": False})
 
-        entry = models.TranslationEntry.objects.get(language="en", msgid="hello")
+        entry = models.TranslationEntry.objects.qs.get(language="en", msgid="hello")
         assert entry.msgstr == "New"
         assert entry.is_active is False
 
@@ -181,7 +181,7 @@ class TestSaveTranslations:
         backend = self._make_backend()
         backend.save_translations(MsgKey("hello", ""), {"en": "New"})
 
-        entry = models.TranslationEntry.objects.get(language="en", msgid="hello")
+        entry = models.TranslationEntry.objects.qs.get(language="en", msgid="hello")
         assert entry.msgstr == "New"
         # Without explicit flags, the setting fallback (False) is used in defaults
         assert entry.is_active is False
@@ -236,7 +236,7 @@ class TestAdminActions:
         e1 = models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=False)
         e2 = models.TranslationEntry.objects.create(language="en", msgid="msg2", msgstr="M2", is_active=False)
 
-        qs = models.TranslationEntry.objects.all()
+        qs = models.TranslationEntry.objects.qs.all()
         updated = qs.filter(is_active=False).update(is_active=True)
 
         assert updated == 2
@@ -249,7 +249,7 @@ class TestAdminActions:
         e1 = models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=True)
         e2 = models.TranslationEntry.objects.create(language="en", msgid="msg2", msgstr="M2", is_active=True)
 
-        qs = models.TranslationEntry.objects.all()
+        qs = models.TranslationEntry.objects.qs.all()
         updated = qs.filter(is_active=True).update(is_active=False)
 
         assert updated == 2
@@ -262,7 +262,7 @@ class TestAdminActions:
         """If all selected translations are already active, update returns 0."""
         models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=True)
 
-        qs = models.TranslationEntry.objects.all()
+        qs = models.TranslationEntry.objects.qs.all()
         updated = qs.filter(is_active=False).update(is_active=True)
         assert updated == 0
 
@@ -366,7 +366,7 @@ class TestDeleteTranslationView:
         data = json.loads(response.content)
         assert data["ok"] is True
         assert data["deleted"] == 2
-        assert models.TranslationEntry.objects.count() == 0
+        assert models.TranslationEntry.objects.qs.count() == 0
         assert backend._version > version_before
 
     def test_records_history(self, make_request):
@@ -399,8 +399,8 @@ class TestDeleteTranslationView:
         assert data["ok"] is True
         assert data["deleted"] == 1
         # English override still exists
-        assert models.TranslationEntry.objects.count() == 1
-        assert models.TranslationEntry.objects.get().language == "en"
+        assert models.TranslationEntry.objects.qs.count() == 1
+        assert models.TranslationEntry.objects.qs.get().language == "en"
 
     def test_deletes_multiple_languages(self, make_request):
         models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="")
@@ -425,8 +425,8 @@ class TestDeleteTranslationView:
         data = json.loads(response.content)
         assert data["ok"] is True
         assert data["deleted"] == 2
-        assert models.TranslationEntry.objects.count() == 1
-        assert models.TranslationEntry.objects.get().language == "en"
+        assert models.TranslationEntry.objects.qs.count() == 1
+        assert models.TranslationEntry.objects.qs.get().language == "en"
 
     def test_missing_msgid_returns_400(self, make_request):
         from live_translations import views
@@ -483,8 +483,8 @@ class TestBulkActivateView:
         assert data["ok"] is True
         assert data["activated"] == 1
 
-        en_entry = models.TranslationEntry.objects.get(language="en", msgid="hello")
-        cs_entry = models.TranslationEntry.objects.get(language="cs", msgid="hello")
+        en_entry = models.TranslationEntry.objects.qs.get(language="en", msgid="hello")
+        cs_entry = models.TranslationEntry.objects.qs.get(language="cs", msgid="hello")
         assert en_entry.is_active is True
         assert cs_entry.is_active is False
 
@@ -555,8 +555,8 @@ class TestSaveNoPhantomEntries:
             active_flags={"en": True, "cs": False},  # cs flag matches default
         )
 
-        assert models.TranslationEntry.objects.count() == 1
-        entry = models.TranslationEntry.objects.get()
+        assert models.TranslationEntry.objects.qs.count() == 1
+        entry = models.TranslationEntry.objects.qs.get()
         assert entry.language == "en"
         assert entry.msgstr == "Hi there"
 
@@ -572,7 +572,7 @@ class TestSaveNoPhantomEntries:
             active_flags={"en": True, "cs": True},
         )
 
-        assert models.TranslationEntry.objects.count() == 0
+        assert models.TranslationEntry.objects.qs.count() == 0
 
     def test_existing_entry_still_updated_even_if_matches_default(self, settings: "SettingsWrapper"):
         """An existing DB row is always updated, even when the new value matches the PO default."""
@@ -584,7 +584,7 @@ class TestSaveNoPhantomEntries:
         backend = self._make_backend(defaults={"en": {"hello": "Hello"}})
         backend.save_translations(MsgKey("hello", ""), {"en": "Hello"}, active_flags={"en": True})
 
-        entry = models.TranslationEntry.objects.get()
+        entry = models.TranslationEntry.objects.qs.get()
         assert entry.msgstr == "Hello"
         assert entry.is_active is True
 
@@ -597,8 +597,8 @@ class TestSaveNoPhantomEntries:
         # Value matches PO default, but active flag (True) differs from setting (False)
         backend.save_translations(MsgKey("hello", ""), {"en": "Hello"}, active_flags={"en": True})
 
-        assert models.TranslationEntry.objects.count() == 1
-        entry = models.TranslationEntry.objects.get()
+        assert models.TranslationEntry.objects.qs.count() == 1
+        entry = models.TranslationEntry.objects.qs.get()
         assert entry.is_active is True
 
     def test_missing_po_default_treated_as_empty(self, settings: "SettingsWrapper"):
@@ -613,4 +613,4 @@ class TestSaveNoPhantomEntries:
             {"en": "Hello", "de": ""},  # both match their defaults (en="Hello", de="")
         )
 
-        assert models.TranslationEntry.objects.count() == 0
+        assert models.TranslationEntry.objects.qs.count() == 0

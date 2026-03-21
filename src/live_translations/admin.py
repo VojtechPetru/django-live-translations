@@ -6,9 +6,14 @@ import django.contrib.admin
 import django.contrib.auth
 import django.db.models
 import django.http
+import django.template.response
+import django.urls
 import django.utils.html
 
-from live_translations import models, services
+from live_translations import conf, importexport, models, services
+
+if t.TYPE_CHECKING:
+    from live_translations.types import LanguageCode
 
 __all__ = ["ModifiedByFilter", "TranslationEntryAdmin", "TranslationHistoryAdmin"]
 
@@ -69,6 +74,8 @@ class ModifiedByFilter(django.contrib.admin.SimpleListFilter):
 
 @django.contrib.admin.register(models.TranslationEntry)
 class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
+    change_list_template = "admin/live_translations/change_list.html"
+
     list_display = [
         "msgid_short",
         "language",
@@ -136,7 +143,7 @@ class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
         )
         # Refresh obj so admin has the correct pk for redirects
         if not obj.pk:
-            saved = models.TranslationEntry.objects.get(language=obj.language, msgid=obj.msgid, context=obj.context)
+            saved = models.TranslationEntry.objects.qs.for_key(obj.key).get(language=obj.language)
             obj.pk = saved.pk
 
     def delete_model(
@@ -171,7 +178,140 @@ class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
         updated = services.deactivate_entries(queryset=queryset)
         self.message_user(request, f"{updated} translation(s) deactivated.")
 
-    actions = ["activate_translations", "deactivate_translations"]
+    @django.contrib.admin.action(description="Export selected as CSV")
+    def export_selected_csv(
+        self,
+        request: django.http.HttpRequest,
+        queryset: django.db.models.QuerySet[models.TranslationEntry],
+    ) -> django.http.HttpResponse:
+        qs = models.TranslationEntry.objects.qs.filter(pk__in=queryset)
+        csv_content = importexport.export_csv(qs, include_defaults=False, languages=None)
+        response = django.http.HttpResponse(csv_content, content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="translations.csv"'
+        return response
+
+    @django.contrib.admin.action(description="Export selected as PO (zip)")
+    def export_selected_po_zip(
+        self,
+        request: django.http.HttpRequest,
+        queryset: django.db.models.QuerySet[models.TranslationEntry],
+    ) -> django.http.HttpResponse:
+        zip_content = importexport.export_po_zip(languages=None)
+        response = django.http.HttpResponse(zip_content, content_type="application/zip")
+        response["Content-Disposition"] = 'attachment; filename="translations.zip"'
+        return response
+
+    actions = [
+        "activate_translations",
+        "deactivate_translations",
+        "export_selected_csv",
+        "export_selected_po_zip",
+    ]
+
+    def get_urls(self) -> list[django.urls.URLPattern]:
+        custom_urls = [
+            django.urls.path(
+                "export/",
+                self.admin_site.admin_view(self.export_view),
+                name="live_translations_translationentry_export",
+            ),
+            django.urls.path(
+                "import/",
+                self.admin_site.admin_view(self.import_view),
+                name="live_translations_translationentry_import",
+            ),
+        ]
+        return custom_urls + super().get_urls()
+
+    def export_view(
+        self,
+        request: django.http.HttpRequest,
+    ) -> django.http.HttpResponse:
+        settings = conf.get_settings()
+        if request.method == "POST":
+            fmt: t.Literal["csv", "po"] = request.POST.get("format", "csv")  # type: ignore[assignment]
+            scope: t.Literal["overrides", "all"] = request.POST.get("scope", "overrides")  # type: ignore[assignment]
+            language: LanguageCode = request.POST.get("language", "")
+            if language and language not in settings.languages:
+                return django.http.HttpResponseBadRequest("Invalid language")
+            include_defaults = scope == "all"
+            languages: list[LanguageCode] | None = [language] if language else None
+            queryset = models.TranslationEntry.objects.qs.all()
+
+            if fmt == "po":
+                if language:
+                    po_content = importexport.export_po(language=language)
+                    response = django.http.HttpResponse(po_content, content_type="text/x-gettext-translation")
+                    response["Content-Disposition"] = f'attachment; filename="{language}.po"'
+                    return response
+                zip_content = importexport.export_po_zip(languages=None)
+                response = django.http.HttpResponse(zip_content, content_type="application/zip")
+                response["Content-Disposition"] = 'attachment; filename="translations.zip"'
+                return response
+
+            csv_content = importexport.export_csv(queryset, include_defaults=include_defaults, languages=languages)
+            response = django.http.HttpResponse(csv_content, content_type="text/csv")
+            response["Content-Disposition"] = 'attachment; filename="translations.csv"'
+            return response
+
+        context = {
+            "title": "Export Translations",
+            "languages": settings.languages,
+            "has_permission": True,
+            "site_header": self.admin_site.site_header,
+            "site_title": self.admin_site.site_title,
+        }
+        return django.template.response.TemplateResponse(
+            request,
+            "admin/live_translations/export_form.html",
+            context,
+        )
+
+    def import_view(
+        self,
+        request: django.http.HttpRequest,
+    ) -> django.http.HttpResponse:
+        settings = conf.get_settings()
+        result: importexport.ImportResult | None = None
+
+        if request.method == "POST":
+            uploaded = request.FILES.get("file")
+            dry_run = bool(request.POST.get("dry_run"))
+            if uploaded:
+                name = (uploaded.name or "").lower()
+                if name.endswith(".csv"):
+                    content = uploaded.read().decode("utf-8")
+                    result = importexport.import_csv(content, dry_run=dry_run)
+                elif name.endswith(".zip"):
+                    data: bytes = uploaded.read()
+                    result = importexport.import_po_zip(data, dry_run=dry_run)
+                elif name.endswith(".po"):
+                    content = uploaded.read().decode("utf-8")
+                    language: LanguageCode = request.POST.get("language", "")
+                    result = importexport.import_po(content, language=language, dry_run=dry_run)
+                else:
+                    result = importexport.ImportResult(
+                        created=0,
+                        updated=0,
+                        errors=["Unsupported file type. Use .csv, .po, or .zip."],
+                        dry_run=dry_run,
+                    )
+            else:
+                result = importexport.ImportResult(created=0, updated=0, errors=["No file uploaded."], dry_run=dry_run)
+
+        context = {
+            "title": "Import Translations",
+            "languages": settings.languages,
+            "result": result,
+            "has_permission": True,
+            "site_header": self.admin_site.site_header,
+            "site_title": self.admin_site.site_title,
+        }
+        return django.template.response.TemplateResponse(
+            request,
+            "admin/live_translations/import_form.html",
+            context,
+        )
 
 
 @django.contrib.admin.register(models.TranslationHistory)

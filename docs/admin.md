@@ -29,10 +29,16 @@ The PO default lets you compare your override against the baseline `.po` file va
 
 ### Bulk actions
 
-Two actions are available on selected entries:
+Four actions are available on selected entries:
 
 - **Activate selected translations**: sets `is_active = True` and triggers cache invalidation
 - **Deactivate selected translations**: sets `is_active = False` and triggers cache invalidation
+- **Export selected as CSV**: downloads a CSV file with the selected entries
+- **Export selected as PO (zip)**: downloads a zip archive of PO files for the selected entries
+
+### Import & Export
+
+The change list toolbar includes **Export** and **Import** buttons for bulk operations with CSV and PO files. See [Import & Export](import-export.md) for details.
 
 ## Translation history
 

@@ -13,6 +13,7 @@ nav = [
   { "Backends" = "backends.md" },
   { "Permissions" = "permissions.md" },
   { "Django Admin" = "admin.md" },
+  { "Import & Export" = "import-export.md" },
   { "How It Works" = "how-it-works.md" },
   { "Troubleshooting" = "troubleshooting.md" },
 ]

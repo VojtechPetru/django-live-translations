@@ -93,7 +93,7 @@ Stores translation overrides in the database (`TranslationEntry` model) and fall
 | Survives redeployment | No | Yes |
 | Requires migrations | No | Yes |
 | Requires cache | No | Yes |
-| Version controllable | Yes (commit `.po` files) | No (unless exported) |
+| Version controllable | Yes (commit `.po` files) | Via [export](import-export.md) |
 | Inactive translations | Base64 in `.po` comments | `is_active` field |
 | Edit history | Yes (needs DB) | Yes |
 

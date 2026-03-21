@@ -1,0 +1,77 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block title %}Export Translations{% endblock %}
+{% block content_title %}<h1>Export Translations</h1>{% endblock %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="../../../">Home</a>
+    &rsaquo; <a href="../">Translation overrides</a>
+    &rsaquo; Export
+  </div>
+{% endblock %}
+
+{% block content %}
+<form method="post" id="export-form">
+  {% csrf_token %}
+
+  <fieldset class="module aligned">
+    <h2>Format</h2>
+    <div class="form-row">
+      <label><input type="radio" name="format" value="csv" checked> CSV</label>
+      <label style="margin-left: 20px;"><input type="radio" name="format" value="po"> PO</label>
+    </div>
+  </fieldset>
+
+  <fieldset class="module aligned" id="scope-fieldset">
+    <h2>Scope</h2>
+    <div class="form-row">
+      <label><input type="radio" name="scope" value="overrides" checked> Overrides only</label>
+      <label style="margin-left: 20px;"><input type="radio" name="scope" value="all"> All (including .po defaults)</label>
+    </div>
+    <p class="help" id="scope-note" style="display: none;">PO export always includes .po defaults.</p>
+  </fieldset>
+
+  <fieldset class="module aligned">
+    <h2>Language</h2>
+    <div class="form-row">
+      <select name="language">
+        <option value="">All languages</option>
+        {% for lang in languages %}
+          <option value="{{ lang }}">{{ lang }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </fieldset>
+
+  <div class="submit-row">
+    <input type="submit" value="Export" class="default">
+    <a href="../" class="button cancel-link">Back</a>
+  </div>
+</form>
+
+<script>
+(function() {
+  var radios = document.querySelectorAll('input[name="format"]');
+  var scopeInputs = document.querySelectorAll('input[name="scope"]');
+  var scopeAll = document.querySelector('input[name="scope"][value="all"]');
+  var scopeNote = document.getElementById('scope-note');
+
+  function update() {
+    var isPO = document.querySelector('input[name="format"]:checked').value === 'po';
+    if (isPO) {
+      scopeAll.checked = true;
+    }
+    for (var i = 0; i < scopeInputs.length; i++) {
+      scopeInputs[i].disabled = isPO;
+    }
+    scopeNote.style.display = isPO ? '' : 'none';
+  }
+
+  for (var i = 0; i < radios.length; i++) {
+    radios[i].addEventListener('change', update);
+  }
+})();
+</script>
+{% endblock %}

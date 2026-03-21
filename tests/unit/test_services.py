@@ -445,7 +445,7 @@ class TestDeleteTranslations:
 
         assert result["ok"] is True
         assert result["deleted"] == 2
-        assert models.TranslationEntry.objects.count() == 0
+        assert models.TranslationEntry.objects.qs.count() == 0
 
     def test_deletes_specific_languages(self, test_backend: "TestBackend"):
         models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="")
@@ -454,8 +454,8 @@ class TestDeleteTranslations:
         result = services.delete_translations(key=MsgKey("hello", ""), languages=["cs"])
 
         assert result["deleted"] == 1
-        assert models.TranslationEntry.objects.count() == 1
-        remaining = models.TranslationEntry.objects.first()
+        assert models.TranslationEntry.objects.qs.count() == 1
+        remaining = models.TranslationEntry.objects.qs.first()
         assert remaining is not None
         assert remaining.language == "en"
 
@@ -505,17 +505,17 @@ class TestDeleteEntries:
         models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="")
         models.TranslationEntry.objects.create(language="cs", msgid="hello", msgstr="Ahoj", context="")
 
-        qs = models.TranslationEntry.objects.all()
+        qs = models.TranslationEntry.objects.qs.all()
         count = services.delete_entries(queryset=qs)
 
         assert count == 2
-        assert models.TranslationEntry.objects.count() == 0
+        assert models.TranslationEntry.objects.qs.count() == 0
 
     def test_records_history_per_entry(self, test_backend: "TestBackend"):
         models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="")
         models.TranslationEntry.objects.create(language="cs", msgid="world", msgstr="Svet", context="ctx")
 
-        qs = models.TranslationEntry.objects.all()
+        qs = models.TranslationEntry.objects.qs.all()
         services.delete_entries(queryset=qs)
 
         assert models.TranslationHistory.objects.count() == 2
@@ -525,7 +525,7 @@ class TestDeleteEntries:
     def test_history_includes_old_value(self, test_backend: "TestBackend"):
         models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="")
 
-        qs = models.TranslationEntry.objects.all()
+        qs = models.TranslationEntry.objects.qs.all()
         services.delete_entries(queryset=qs)
 
         h = models.TranslationHistory.objects.get()
@@ -537,13 +537,13 @@ class TestDeleteEntries:
         models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="")
 
         initial_version = test_backend._version
-        qs = models.TranslationEntry.objects.all()
+        qs = models.TranslationEntry.objects.qs.all()
         services.delete_entries(queryset=qs)
 
         assert test_backend._version == initial_version + 1
 
     def test_empty_queryset_returns_zero(self, test_backend: "TestBackend"):
-        qs = models.TranslationEntry.objects.none()
+        qs = models.TranslationEntry.objects.qs.none()
         initial_version = test_backend._version
 
         count = services.delete_entries(queryset=qs)
@@ -555,7 +555,7 @@ class TestDeleteEntries:
     def test_preserves_context_in_history(self, test_backend: "TestBackend"):
         models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="greeting")
 
-        qs = models.TranslationEntry.objects.all()
+        qs = models.TranslationEntry.objects.qs.all()
         services.delete_entries(queryset=qs)
 
         h = models.TranslationHistory.objects.get()
@@ -721,7 +721,7 @@ class TestActivateEntries:
         e1 = models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=False)
         e2 = models.TranslationEntry.objects.create(language="en", msgid="msg2", msgstr="M2", is_active=False)
 
-        qs = models.TranslationEntry.objects.all()
+        qs = models.TranslationEntry.objects.qs.all()
         count = services.activate_entries(queryset=qs)
 
         assert count == 2
@@ -733,7 +733,7 @@ class TestActivateEntries:
     def test_skips_already_active(self, test_backend: "TestBackend"):
         models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=True)
 
-        qs = models.TranslationEntry.objects.all()
+        qs = models.TranslationEntry.objects.qs.all()
         count = services.activate_entries(queryset=qs)
 
         assert count == 0
@@ -741,7 +741,7 @@ class TestActivateEntries:
     def test_records_history(self, test_backend: "TestBackend"):
         models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", context="", is_active=False)
 
-        qs = models.TranslationEntry.objects.all()
+        qs = models.TranslationEntry.objects.qs.all()
         services.activate_entries(queryset=qs)
 
         h = models.TranslationHistory.objects.get()
@@ -753,7 +753,7 @@ class TestActivateEntries:
         models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=False)
 
         initial_version = test_backend._version
-        qs = models.TranslationEntry.objects.all()
+        qs = models.TranslationEntry.objects.qs.all()
         services.activate_entries(queryset=qs)
 
         assert test_backend._version == initial_version + 1
@@ -762,7 +762,7 @@ class TestActivateEntries:
         models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=True)
 
         initial_version = test_backend._version
-        qs = models.TranslationEntry.objects.all()
+        qs = models.TranslationEntry.objects.qs.all()
         services.activate_entries(queryset=qs)
 
         assert test_backend._version == initial_version
@@ -771,7 +771,7 @@ class TestActivateEntries:
         models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=True)
         e2 = models.TranslationEntry.objects.create(language="en", msgid="msg2", msgstr="M2", is_active=False)
 
-        qs = models.TranslationEntry.objects.all()
+        qs = models.TranslationEntry.objects.qs.all()
         count = services.activate_entries(queryset=qs)
 
         assert count == 1
@@ -785,7 +785,7 @@ class TestDeactivateEntries:
         e1 = models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=True)
         e2 = models.TranslationEntry.objects.create(language="en", msgid="msg2", msgstr="M2", is_active=True)
 
-        qs = models.TranslationEntry.objects.all()
+        qs = models.TranslationEntry.objects.qs.all()
         count = services.deactivate_entries(queryset=qs)
 
         assert count == 2
@@ -797,7 +797,7 @@ class TestDeactivateEntries:
     def test_skips_already_inactive(self, test_backend: "TestBackend"):
         models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=False)
 
-        qs = models.TranslationEntry.objects.all()
+        qs = models.TranslationEntry.objects.qs.all()
         count = services.deactivate_entries(queryset=qs)
 
         assert count == 0
@@ -805,7 +805,7 @@ class TestDeactivateEntries:
     def test_records_history(self, test_backend: "TestBackend"):
         models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", context="", is_active=True)
 
-        qs = models.TranslationEntry.objects.all()
+        qs = models.TranslationEntry.objects.qs.all()
         services.deactivate_entries(queryset=qs)
 
         h = models.TranslationHistory.objects.get()
@@ -817,7 +817,7 @@ class TestDeactivateEntries:
         models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=True)
 
         initial_version = test_backend._version
-        qs = models.TranslationEntry.objects.all()
+        qs = models.TranslationEntry.objects.qs.all()
         services.deactivate_entries(queryset=qs)
 
         assert test_backend._version == initial_version + 1
@@ -826,7 +826,7 @@ class TestDeactivateEntries:
         models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=False)
 
         initial_version = test_backend._version
-        qs = models.TranslationEntry.objects.all()
+        qs = models.TranslationEntry.objects.qs.all()
         services.deactivate_entries(queryset=qs)
 
         assert test_backend._version == initial_version
