@@ -5,7 +5,7 @@ import typing as t
 import django.conf
 import django.db.models
 
-from live_translations.types import MsgKey
+from live_translations.types import LanguageCode, MsgKey
 
 __all__ = [
     "TranslationEntry",
@@ -16,9 +16,16 @@ __all__ = [
 
 
 class TranslationEntryQuerySet(django.db.models.QuerySet["TranslationEntry"]):
+    def for_language(
+        self,
+        language: "LanguageCode",
+        /,
+    ) -> t.Self:
+        return self.filter(language=language)
+
     def for_languages(
         self,
-        languages: list[str],
+        languages: list["LanguageCode"],
     ) -> t.Self:
         return self.filter(language__in=languages)
 

@@ -191,7 +191,11 @@ class TestSaveModel:
         request = _make_request()
 
         fake_saved = unittest.mock.MagicMock(pk=99)
-        with unittest.mock.patch.object(models.TranslationEntry.objects, "get", return_value=fake_saved) as mock_get:
+        mock_qs = unittest.mock.MagicMock()
+        mock_qs.for_key.return_value.get.return_value = fake_saved
+        with unittest.mock.patch.object(
+            models.TranslationEntryManager, "qs", new_callable=unittest.mock.PropertyMock, return_value=mock_qs
+        ):
             ma.save_model(request, obj, None, change=False)
 
         mock_save.assert_called_once_with(
@@ -199,7 +203,8 @@ class TestSaveModel:
             translations={"cs": "Ahoj"},
             active_flags={"cs": False},
         )
-        mock_get.assert_called_once_with(language="cs", msgid="hello", context="ctx")
+        mock_qs.for_key.assert_called_once_with(MsgKey("hello", "ctx"))
+        mock_qs.for_key.return_value.get.assert_called_once_with(language="cs")
         assert obj.pk == 99
 
     @unittest.mock.patch.object(services, "save_translations")
@@ -208,10 +213,13 @@ class TestSaveModel:
         obj = _make_entry(pk=42)
         request = _make_request()
 
-        with unittest.mock.patch.object(models.TranslationEntry.objects, "get") as mock_get:
+        mock_qs = unittest.mock.MagicMock()
+        with unittest.mock.patch.object(
+            models.TranslationEntryManager, "qs", new_callable=unittest.mock.PropertyMock, return_value=mock_qs
+        ):
             ma.save_model(request, obj, None, change=True)
 
-        mock_get.assert_not_called()
+        mock_qs.for_key.assert_not_called()
         assert obj.pk == 42
 
 
@@ -407,7 +415,7 @@ class TestModifiedByFilter:
     def test_queryset_returns_none_when_no_value(self) -> None:
         f = self._make_filter(value=None)
         request = _make_request()
-        qs = models.TranslationEntry.objects.all()
+        qs = models.TranslationEntry.objects.qs.all()
         result = f.queryset(request, qs)
         assert result is None
 
@@ -451,13 +459,13 @@ class TestModifiedByFilter:
         # Filter by alice
         f = self._make_filter(value=str(alice.pk))
         request = _make_request()
-        result = f.queryset(request, models.TranslationEntry.objects.all())
+        result = f.queryset(request, models.TranslationEntry.objects.qs.all())
         assert result is not None
         assert list(result) == [entry_alice]
 
         # Filter by bob
         f = self._make_filter(value=str(bob.pk))
-        result = f.queryset(request, models.TranslationEntry.objects.all())
+        result = f.queryset(request, models.TranslationEntry.objects.qs.all())
         assert result is not None
         assert list(result) == [entry_bob]
 

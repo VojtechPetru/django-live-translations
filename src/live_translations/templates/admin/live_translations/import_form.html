@@ -1,0 +1,65 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block title %}Import Translations{% endblock %}
+{% block content_title %}<h1>Import Translations</h1>{% endblock %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="../../../">Home</a>
+    &rsaquo; <a href="../">Translation overrides</a>
+    &rsaquo; Import
+  </div>
+{% endblock %}
+
+{% block content %}
+{% if result %}
+<div class="module">
+  <h2>Import Results</h2>
+  <table>
+    <tr><th>Created</th><td>{{ result.created }}</td></tr>
+    <tr><th>Updated</th><td>{{ result.updated }}</td></tr>
+  </table>
+  {% if result.errors %}
+  <div class="errornote" style="margin-top: 10px;">
+    <p>Errors:</p>
+    <ul>
+      {% for error in result.errors %}
+        <li>{{ error }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+<form method="post" enctype="multipart/form-data" id="import-form">
+  {% csrf_token %}
+
+  <fieldset class="module aligned">
+    <h2>File</h2>
+    <div class="form-row">
+      <label for="id_file">Upload file (.csv, .po, or .zip):</label>
+      <input type="file" name="file" id="id_file" accept=".csv,.po,.zip" required>
+    </div>
+  </fieldset>
+
+  <fieldset class="module aligned">
+    <h2>Language (for .po files only)</h2>
+    <div class="form-row">
+      <p class="help">Required for single .po file import. Ignored for CSV and ZIP.</p>
+      <select name="language">
+        <option value="">Auto-detect from file</option>
+        {% for lang in languages %}
+          <option value="{{ lang }}">{{ lang }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </fieldset>
+
+  <div class="submit-row">
+    <input type="submit" value="Import" class="default">
+    <a href="../" class="button cancel-link">Back</a>
+  </div>
+</form>
+{% endblock %}

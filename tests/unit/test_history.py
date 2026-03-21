@@ -336,7 +336,7 @@ class TestHistoryIntegrationWidget:
         backend = self._make_backend(defaults={"en": {"hello": "Default"}})
         backend.save_translations(MsgKey("hello", ""), {"en": "Default"}, active_flags={"en": True})
 
-        entry = models.TranslationEntry.objects.get(language="en", msgid="hello")
+        entry = models.TranslationEntry.objects.qs.get(language="en", msgid="hello")
         assert entry.msgstr == "Default"
         assert entry.is_active is True
         # History records the text change, not a delete
@@ -358,7 +358,7 @@ class TestHistoryIntegrationWidget:
         backend = self._make_backend(defaults={"en": {"hello": "Default"}})
         backend.save_translations(MsgKey("hello", ""), {"en": "Default"}, active_flags={"en": False})
 
-        entry = models.TranslationEntry.objects.get(language="en", msgid="hello")
+        entry = models.TranslationEntry.objects.qs.get(language="en", msgid="hello")
         assert entry.msgstr == "Default"
         assert entry.is_active is False
 
