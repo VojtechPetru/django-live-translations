@@ -1,20 +1,24 @@
+---
+title: Configuration
+description: All available settings for django-live-translations
+---
+
 # Configuration
 
-All configuration is done through the `LIVE_TRANSLATIONS` dictionary in your Django settings. Every key is optional - sensible defaults are derived from Django's own settings.
+All settings live in the `LIVE_TRANSLATIONS` dictionary in your Django settings. Every key is optional.
 
-```python
-# settings.py
+```python title="settings.py"
 LIVE_TRANSLATIONS = {
     "BACKEND": "live_translations.backends.po.POFileBackend",
-    "LANGUAGES": ["en", "cs", "de"],  # optional, defaults to settings.LANGUAGES
-    "LOCALE_DIR": BASE_DIR / "locale",  # optional, defaults to LOCALE_PATHS[0]
+    "LANGUAGES": ["en", "cs", "de"],
+    "LOCALE_DIR": BASE_DIR / "locale",
 }
 ```
 
 !!! tip "Type checking"
-    Use the `LiveTranslationsSettings` TypedDict to get autocomplete and type checking for your configuration:
+    Use the `LiveTranslationsSettings` TypedDict for autocomplete and type safety:
 
-    ```python
+    ```python title="settings.py"
     from typing import TYPE_CHECKING
 
     if TYPE_CHECKING:
@@ -28,142 +32,115 @@ LIVE_TRANSLATIONS = {
 
 ## Settings reference
 
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `BACKEND` | `str \| type` | `"live_translations.backends.po.POFileBackend"` | Translation storage backend. Dotted import path or class reference. |
-| `CACHE` | `str` | `"default"` | Django cache alias for cross-process invalidation. Only used by `DatabaseBackend`. |
-| `GETTEXT_DOMAIN` | `str` | `"django"` | Gettext domain — the basename of `.po`/`.mo` catalog files (e.g. `"django"` resolves to `django.po`/`django.mo`, `"djangojs"` to `djangojs.po`/`djangojs.mo`). |
-| `LANGUAGES` | `list[str]` | From `settings.LANGUAGES` | Language codes available for editing. Set explicitly to expose only a subset. |
-| `LOCALE_DIR` | `str \| Path` | `LOCALE_PATHS[0]` or `BASE_DIR/locale` | Path to the locale directory containing `{lang}/LC_MESSAGES/` subdirectories. |
-| `PERMISSION_CHECK` | `str \| Callable` | Superuser check | Callable `(HttpRequest) -> bool \| set[str]` that controls access to the editing UI. Return `True` for full access, `False` for no access, or a set of language codes to restrict editing to those languages. Accepts a dotted path or function reference. See [Permissions](permissions.md#per-language-permissions). |
-| `TRANSLATION_ACTIVE_BY_DEFAULT` | `bool` | `False` | Whether newly saved translations are immediately active. When `False`, overrides require explicit activation. |
-| `SHORTCUT_EDIT` | `str` | `"ctrl+shift+e"` | Keyboard shortcut to toggle edit mode. Format: `+`-separated modifiers and key. |
-| `SHORTCUT_PREVIEW` | `str` | `"ctrl+shift+p"` | Keyboard shortcut to toggle preview mode. Same format as `SHORTCUT_EDIT`. |
+`BACKEND`
+:   Translation storage backend. Dotted import path or class reference.
 
-## Settings details
+    Default: `"live_translations.backends.po.POFileBackend"`
 
-### `BACKEND`
+    See [Backends](backends.md) for setup and comparison.
 
-Choose between the two built-in backends:
+`CACHE`
+:   Django cache alias for cross-process invalidation. Only used by the [database backend](backends.md#database-backend).
 
-```python
-# PO file backend (default) - reads/writes .po files directly
-LIVE_TRANSLATIONS = {
-    "BACKEND": "live_translations.backends.po.POFileBackend",
-}
+    Default: `"default"`
 
-# Database backend - stores overrides in the DB
-LIVE_TRANSLATIONS = {
-    "BACKEND": "live_translations.backends.db.DatabaseBackend",
-}
-```
+    The cache must be shared across processes (Redis, Memcached, etc.). `LocMemCache` and `DummyCache` will not work in production.
 
-See [Backends](backends.md) for a detailed comparison.
+`GETTEXT_DOMAIN`
+:   Gettext domain, the basename of `.po`/`.mo` catalog files. For example, `"django"` resolves to `django.po`/`django.mo`, while `"djangojs"` targets `djangojs.po`/`djangojs.mo`.
 
-### `CACHE`
+    Default: `"django"`
 
-Only relevant when using the `DatabaseBackend`. The cache is used to synchronize translation overrides across multiple processes (e.g. gunicorn workers).
+`LANGUAGES`
+:   Language codes available for editing. When not set, derived from Django's `settings.LANGUAGES`.
 
-```python
-CACHES = {
-    "translations": {
-        "BACKEND": "django.core.cache.backends.redis.RedisCache",
-        "LOCATION": "redis://127.0.0.1:6379/1",
+    Default: codes from `settings.LANGUAGES`
+
+    ```python title="settings.py"
+    LIVE_TRANSLATIONS = {
+        "LANGUAGES": ["en", "cs"],  # only English and Czech
     }
-}
+    ```
 
-LIVE_TRANSLATIONS = {
-    "BACKEND": "live_translations.backends.db.DatabaseBackend",
-    "CACHE": "translations",
-}
-```
+    Languages listed here but absent from Django's `settings.LANGUAGES` become [draft languages](#draft-languages).
 
-!!! warning
-    The cache must be shared across processes (e.g. gunicorn workers). Use Redis, Memcached, or a similar multi-process cache backend. `LocMemCache` and `DummyCache` won't work in production.
+`LOCALE_DIR`
+:   Path to the locale directory containing `{lang}/LC_MESSAGES/` subdirectories.
 
-### `LANGUAGES`
+    Resolution order:
 
-By default, languages are derived from Django's `settings.LANGUAGES`. Set this explicitly to limit which languages appear in the editor:
+    1. `LIVE_TRANSLATIONS["LOCALE_DIR"]` (if set)
+    2. `settings.LOCALE_PATHS[0]` (if defined)
+    3. `settings.BASE_DIR / "locale"` (fallback)
 
-```python
-LIVE_TRANSLATIONS = {
-    "LANGUAGES": ["en", "cs"],  # only English and Czech
-}
-```
+`PERMISSION_CHECK`
+:   Callable that controls access to the editing UI. Receives an `HttpRequest`, returns `True` (full access), `False` (no access), or a `set[str]` of language codes for per-language access.
 
-#### Draft languages
+    Default: authenticated superusers only
 
-Any language listed in `LANGUAGES` that is **not** present in Django's `settings.LANGUAGES` is automatically treated as a **draft language**. Draft languages are fully editable by translators but are not served to regular users.
+    Accepts a dotted import path or function reference. See [Permissions](permissions.md) for examples.
 
-This lets you prepare translations for a new locale before publishing it:
+`TRANSLATION_ACTIVE_BY_DEFAULT`
+:   Whether newly saved translations are immediately active.
 
-```python
-# settings.py
+    Default: `False`
+
+    When `False`, overrides require explicit activation before they take effect. Set to `True` if you want saves to go live immediately.
+
+`SHORTCUT_EDIT`
+:   Keyboard shortcut to toggle edit mode. Format: `+`-separated modifiers and key (case-insensitive).
+
+    Default: `"ctrl+shift+e"`
+
+    Available modifiers: `ctrl`, `shift`, `alt`, `meta`.
+
+`SHORTCUT_PREVIEW`
+:   Keyboard shortcut to toggle preview mode. Same format as `SHORTCUT_EDIT`.
+
+    Default: `"ctrl+shift+p"`
+
+## Draft languages
+
+Any language code listed in `LANGUAGES` that is not present in Django's `settings.LANGUAGES` is treated as a **draft language**. This lets you prepare translations for a new locale before publishing it to users.
+
+```python title="settings.py"
 LANGUAGES = [
     ("en", "English"),
     ("cs", "Czech"),
 ]
 
 LIVE_TRANSLATIONS = {
-    "LANGUAGES": ["en", "cs", "de"],  # "de" is a draft language
+    "LANGUAGES": ["en", "cs", "de"],  # (1)!
 }
 ```
 
-Draft languages:
+1. `"de"` is a draft language because it's not in `LANGUAGES`.
 
-- Appear in the [language switcher](widget.md#language-switcher) in the hint bar with a "Draft" badge
-- Are fully editable from the translation modal (also marked with a "Draft" badge)
-- **Are always saved as active** - the active/inactive toggle is hidden. Since the entire language is unpublished, there is no need for a separate "inactive" state. This also ensures translations survive `makemessages` (which preserves `msgstr` values but may strip internal comments used for inactive overrides)
-- Are switched via a middleware cookie override (`lt_lang`) - the page renders in the draft language without URL changes
-- Are invisible to users who don't pass the `PERMISSION_CHECK`
+Draft language behavior:
 
-Once ready, add the language to Django's `LANGUAGES` setting and it becomes a published language automatically.
+- Visible in the editor modal and language switcher, marked with a "Draft" badge
+- Translations are **always saved as active**. The active/inactive toggle is hidden because the entire language is unpublished, so "inactive" has no meaning. This also ensures translations survive `makemessages`, which preserves `msgstr` values but may strip custom comments.
+- Switching to a draft language sets a middleware cookie (`lt_lang`) that overrides Django's active language for that session, without changing the URL
+- Invisible to users who don't pass the permission check
 
-### `LOCALE_DIR`
-
-The directory containing your `{lang}/LC_MESSAGES/` subdirectories. Resolution order:
-
-1. `LIVE_TRANSLATIONS["LOCALE_DIR"]` (if set)
-2. `settings.LOCALE_PATHS[0]` (if defined)
-3. `settings.BASE_DIR / "locale"` (fallback)
-
-### `PERMISSION_CHECK`
-
-Override the default superuser check with a custom callable. The callable receives an `HttpRequest` and returns `True` (full access), `False` (no access), or a `set[str]` of language codes to restrict editing to specific languages. See [Permissions](permissions.md) for detailed examples including per-language access control.
-
-```python
-LIVE_TRANSLATIONS = {
-    "PERMISSION_CHECK": "myapp.permissions.can_edit_translations",
-}
-```
-
-### `SHORTCUT_EDIT` / `SHORTCUT_PREVIEW`
-
-Customize keyboard shortcuts using `+`-separated modifier names and a key character (case-insensitive):
-
-```python
-LIVE_TRANSLATIONS = {
-    "SHORTCUT_EDIT": "ctrl+shift+t",
-    "SHORTCUT_PREVIEW": "ctrl+shift+r",
-}
-```
-
-Available modifiers: `ctrl`, `shift`, `alt`, `meta`.
+When the language is ready, add it to Django's `LANGUAGES` and it becomes a published language automatically.
 
 ## System checks
 
-django-live-translations registers Django system checks that run on startup:
+django-live-translations runs Django system checks on startup to catch configuration issues early.
 
 | Check ID | Level | Condition |
 |----------|-------|-----------|
-| `live_translations.E001` | Error | `LANGUAGES` is empty and `settings.LANGUAGES` is not set |
-| `live_translations.W001` | Warning | `django.contrib.staticfiles` is not in `INSTALLED_APPS` |
-| `live_translations.W002` | Warning | Cache alias (for DB backend) is not defined in `CACHES` |
-| `live_translations.W003` | Warning | Cache alias uses `DummyCache` (for DB backend) |
-| `live_translations.W004` | Warning | Unknown keys in `LIVE_TRANSLATIONS` dictionary |
+| `live_translations.E001` | Error | No languages configured anywhere |
+| `live_translations.W001` | Warning | `django.contrib.staticfiles` missing from `INSTALLED_APPS` |
+| `live_translations.W002` | Warning | Cache alias not defined in `CACHES` (DB backend) |
+| `live_translations.W003` | Warning | Cache alias uses `DummyCache` (DB backend) |
+| `live_translations.W004` | Warning | Unrecognized keys in `LIVE_TRANSLATIONS` |
 
-Run checks manually with:
+Run checks manually:
 
 ```bash
 python manage.py check live_translations
 ```
+
+See [Troubleshooting](troubleshooting.md) for more on resolving these.

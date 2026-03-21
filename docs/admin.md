@@ -1,57 +1,45 @@
+---
+title: Django Admin
+description: Managing translation overrides from the Django admin panel
+---
+
 # Django Admin
 
-django-live-translations registers a `TranslationEntryAdmin` in Django's admin site, providing a management interface for translation overrides stored in the database.
+django-live-translations registers two models in Django's admin: `TranslationEntry` for managing overrides and `TranslationHistory` as a read-only audit log.
 
 !!! note
-    The admin interface is primarily useful with the [Database backend](backends.md#database-backend). With the PO file backend, translation overrides live in `.po` files and are not stored in the database.
+    The admin interface is most useful with the [database backend](backends.md#database-backend). With the PO backend, overrides live in `.po` files and these tables remain empty.
 
-## List view
+## Translation entries
 
-The admin list displays all translation overrides with the following columns:
+The list view shows all overrides with columns for message ID, language, translation, context, active status, and last updated timestamp.
 
-- **Message ID** - truncated to 60 characters
-- **Language** - language code
-- **Translation** - the override value, truncated to 80 characters
-- **Context** - gettext message context (if any)
-- **Is Active** - whether the override is currently applied
-- **Updated At** - last modification timestamp
+**Filters**: language, context, active status, modified by (user)
 
-### Filtering and search
+**Search**: across msgid, msgstr, and context fields
 
-- **Filters**: language, context, active status
-- **Search**: searches across msgid, msgstr, and context fields
-- **Ordering**: by msgid and language (default)
+### Detail view
 
-## Detail view
+The edit form has two fieldsets:
 
-The edit form is organized into two fieldsets:
+- **Translation**: PO file default (read-only), the override value, and active toggle
+- **Identification**: language, message ID, and context
 
-**Translation:**
+The PO default lets you compare your override against the baseline `.po` file value.
 
-- `.po` default (read-only) - shows the baseline value from the `.po` file for comparison
-- Translation (`msgstr`) - the override value
-- Is Active - toggle whether this override is applied
+### Bulk actions
 
-**Identification:**
+Two actions are available on selected entries:
 
-- Language
-- Message ID (`msgid`)
-- Context
+- **Activate selected translations**: sets `is_active = True` and triggers cache invalidation
+- **Deactivate selected translations**: sets `is_active = False` and triggers cache invalidation
 
-## Bulk actions
+## Translation history
 
-Two custom actions are available in the list view:
+A read-only audit log of all changes. Shows timestamp, action type, language, message ID, context, and user.
 
-### Activate selected translations
-
-Sets `is_active = True` for all selected entries. Useful for making a batch of reviewed translations live at once.
-
-### Deactivate selected translations
-
-Sets `is_active = False` for all selected entries. Useful for temporarily disabling translations without deleting them.
-
-Both actions trigger the backend's catalog version bump, so changes propagate across processes immediately.
+No entries can be added, edited, or deleted through the admin. The history is append-only.
 
 ## django-unfold support
 
-If [django-unfold](https://github.com/unfoldadmin/django-unfold) is installed, the admin automatically uses unfold's `ModelAdmin` for a modern admin UI. No configuration needed.
+If [django-unfold](https://github.com/unfoldadmin/django-unfold) is installed, the admin automatically uses its `ModelAdmin` base class for a modern UI. No configuration needed.

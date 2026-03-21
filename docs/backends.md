@@ -1,74 +1,68 @@
+---
+title: Backends
+description: Choose between PO file and database storage for translation overrides
+---
+
 # Backends
 
-django-live-translations uses a backend system to abstract translation storage. Two backends are included out of the box, and you can implement your own by subclassing the abstract base class.
+django-live-translations stores translation overrides through a pluggable backend system. Two backends ship out of the box.
 
-## PO file backend (default)
+## PO file backend
 
-```python
+```python title="settings.py"
 LIVE_TRANSLATIONS = {
-    "BACKEND": "live_translations.backends.po.POFileBackend",
+    "BACKEND": "live_translations.backends.po.POFileBackend",  # (1)!
 }
 ```
 
-The `POFileBackend` reads and writes `.po`/`.mo` files directly on disk. This is the default backend and requires no additional setup beyond having a locale directory with `.po` files.
+1. This is the default. You can omit `BACKEND` entirely.
 
-### File structure
+Reads and writes `.po` files directly on disk, then recompiles the `.mo` file on every save. No database or cache required.
+
+Expected file structure:
 
 ```
 locale/
-  en/
-    LC_MESSAGES/
-      django.po    # read/written by POFileBackend
-      django.mo    # recompiled on every save
-  cs/
-    LC_MESSAGES/
-      django.po
-      django.mo
+  en/LC_MESSAGES/
+    django.po
+    django.mo
+  cs/LC_MESSAGES/
+    django.po
+    django.mo
 ```
 
-!!! warning "Best suited for local development"
-    The PO backend writes directly to `.po`/`.mo` files on disk. If used on a deployed server, any translation edits will be **lost on the next deployment** when the codebase (including `.po` files) is replaced. Use the [Database backend](#database-backend) for production environments.
+!!! warning "Best for local development"
+    The PO backend writes directly to disk. On deployed servers, edits are lost on the next deployment when `.po` files are replaced. Use the [database backend](#database-backend) for production.
 
-### Trade-offs
+??? info "How inactive translations work in PO files"
+    When `TRANSLATION_ACTIVE_BY_DEFAULT` is `False`, inactive translations are encoded as base64 in the entry's translator comment:
 
-**Pros:**
+    ```
+    # ltpending:SGVsbG8gV29ybGQ=
+    msgid "Hello"
+    msgstr "original translation"
+    ```
 
-- No database or cache infrastructure required
-- Zero setup - works out of the box
-- Changes are written to `.po` files, which you can commit to version control
-
-**Cons:**
-
-- **Edits are lost on redeployment** - the next deploy overwrites `.po` files with what's in the repo
-- Writes to the filesystem (won't work on read-only deployments like containers)
-- No built-in cross-process synchronization
-- Requires `.po` files to exist for each language
+    The `ltpending:` prefix marks the comment as a pending override. When activated, the pending value replaces `msgstr` and the comment is removed. These comments are stripped from the translator hint displayed in the editor.
 
 ## Database backend
 
-```python
+```python title="settings.py"
 LIVE_TRANSLATIONS = {
     "BACKEND": "live_translations.backends.db.DatabaseBackend",
-    "CACHE": "default",
+    "CACHE": "translations",  # (1)!
 }
 ```
 
-The `DatabaseBackend` stores translation overrides in the database and falls back to `.po` files for defaults. It uses Django's cache framework for cross-process synchronization.
+1. Must match an entry in your `CACHES` setting.
+
+Stores translation overrides in the database (`TranslationEntry` model) and falls back to `.po` files for defaults. Uses Django's cache framework to synchronize overrides across processes.
 
 ### Setup
 
-1. Set the backend in your settings:
+1. Configure a shared cache backend:
 
-    ```python
-    LIVE_TRANSLATIONS = {
-        "BACKEND": "live_translations.backends.db.DatabaseBackend",
-        "CACHE": "translations",  # must match a CACHES entry
-    }
-    ```
-
-2. Ensure you have a proper cache backend configured:
-
-    ```python
+    ```python title="settings.py"
     CACHES = {
         "translations": {
             "BACKEND": "django.core.cache.backends.redis.RedisCache",
@@ -77,55 +71,52 @@ The `DatabaseBackend` stores translation overrides in the database and falls bac
     }
     ```
 
-3. Run migrations:
+2. Run migrations:
 
     ```bash
     python manage.py migrate
     ```
 
-### Trade-offs
+!!! warning
+    The cache must be shared across all processes (e.g. gunicorn workers). Redis or Memcached work well. `LocMemCache` and `DummyCache` will not synchronize.
 
-**Pros:**
-
-- Works on read-only filesystems (containers, serverless)
-- Built-in cross-process synchronization via cache
-- Overrides are independent of `.po` files
-- Full edit history with the `TranslationHistory` model
-
-**Cons:**
-
-- Requires database and cache infrastructure
-- Overrides are not version-controlled (unless you export them)
+??? info "How cross-process sync works"
+    When a translation is saved, a UUID version is written to the cache. On each request, the middleware calls `ensure_current()`, which compares the local version against the cache. If stale, the process clears its translation catalogs and re-injects all DB overrides. There's a brief window (one request cycle) where other processes may serve stale translations.
 
 ## Comparison
 
-| Feature | PO Backend | Database Backend |
-|---------|-----------|-----------------|
-| Storage | `.po`/`.mo` files | Database table |
-| Cross-process sync | Via filesystem | Via cache (Redis, Memcached) |
-| Works on read-only filesystem | No | Yes |
-| Version control | Yes (files in repo) | No |
-| Requires database (migrations) | No | Yes |
-| Edit history | Yes (requires DB) | Yes |
-| `.po` file fallback | N/A | Yes |
-| Inactive translations | Comment-based (`ltpending:`) | `is_active` field |
+| | PO backend | Database backend |
+|---|---|---|
+| Storage | `.po`/`.mo` files on disk | Database table |
+| Cross-process sync | Via filesystem | Via cache |
+| Read-only filesystem | No | Yes |
+| Survives redeployment | No | Yes |
+| Requires migrations | No | Yes |
+| Requires cache | No | Yes |
+| Version controllable | Yes (commit `.po` files) | No (unless exported) |
+| Inactive translations | Base64 in `.po` comments | `is_active` field |
+| Edit history | Yes (needs DB) | Yes |
+
+**Use the PO backend** for local development and small projects where you commit translations to your repo.
+
+**Use the database backend** for production deployments, especially with containers, read-only filesystems, or multiple server processes.
 
 ## Custom backends
 
-To implement a custom backend, subclass `TranslationBackend` and implement the two required abstract methods:
+Subclass `TranslationBackend` and implement the two required methods:
 
-```python
+```python title="myapp/backends.py"
 from live_translations.backends.base import TranslationBackend, TranslationEntry
 from live_translations.types import LanguageCode, MsgKey
 
 
-class MyCustomBackend(TranslationBackend):
+class MyBackend(TranslationBackend):
     def get_translations(
         self,
         key: MsgKey,
         languages: list[LanguageCode],
     ) -> dict[LanguageCode, TranslationEntry]:
-        """Fetch translations for a msgid across multiple languages."""
+        """Fetch translations for a msgid across languages."""
         ...
 
     def save_translations(
@@ -138,23 +129,23 @@ class MyCustomBackend(TranslationBackend):
         ...
 ```
 
-### Optional methods to override
+Optional methods to override:
 
 | Method | Purpose |
 |--------|---------|
-| `ensure_current()` | Check if local overrides are stale and refresh if needed |
-| `inject_overrides()` | Inject overrides into Django's translation catalogs |
+| `ensure_current()` | Check freshness and refresh if stale |
+| `inject_overrides()` | Write overrides into Django's translation catalogs |
 | `bump_catalog_version()` | Signal other processes that overrides changed |
 | `bulk_activate(language, msgids)` | Activate multiple pending translations |
 | `get_inactive_overrides(language)` | Return inactive translations for preview mode |
-| `get_defaults(key, languages)` | Get baseline `.po` file values for display |
+| `get_defaults(key, languages)` | Get baseline `.po` file values |
 | `get_hint(key)` | Get translator comments from `.po` files |
 | `check()` | Return Django system check messages |
 
-Register your backend in settings:
+Register your backend:
 
-```python
+```python title="settings.py"
 LIVE_TRANSLATIONS = {
-    "BACKEND": "myapp.backends.MyCustomBackend",
+    "BACKEND": "myapp.backends.MyBackend",
 }
 ```
