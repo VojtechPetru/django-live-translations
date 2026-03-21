@@ -1,7 +1,7 @@
 [project]
 site_name = "django-live-translations"
 site_url = "https://vojtechpetru.github.io/django-live-translations/"
-site_description = "In-browser translation editing for Django superusers"
+site_description = "In-browser translation editing for Django"
 repo_url = "https://github.com/vojtechpetru/django-live-translations"
 repo_name = "vojtechpetru/django-live-translations"
 
@@ -9,11 +9,12 @@ nav = [
   { "Home" = "index.md" },
   { "Getting Started" = "getting-started.md" },
   { "Configuration" = "configuration.md" },
+  { "Editing Translations" = "editing.md" },
   { "Backends" = "backends.md" },
   { "Permissions" = "permissions.md" },
-  { "Frontend Widget" = "widget.md" },
   { "Django Admin" = "admin.md" },
   { "How It Works" = "how-it-works.md" },
+  { "Troubleshooting" = "troubleshooting.md" },
 ]
 
 extra_css = ["assets/extra.css"]
@@ -27,6 +28,7 @@ features = [
   "content.action.edit",
   "content.action.view",
   "content.code.copy",
+  "content.code.annotate",
   "content.tabs.link",
 ]
 
@@ -45,6 +47,8 @@ custom_fences = [
 [project.markdown_extensions.pymdownx.tabbed]
 alternate_style = true
 
+[project.markdown_extensions.def_list]
+[project.markdown_extensions.pymdownx.keys]
 [project.markdown_extensions.pymdownx.blocks.caption]
 [project.markdown_extensions.admonition]
 [project.markdown_extensions.pymdownx.details]

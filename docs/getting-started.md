@@ -1,8 +1,13 @@
+---
+title: Getting Started
+description: Install django-live-translations and make your first edit
+---
+
 # Getting Started
 
-## Installation
+This page walks you through installation, configuration, and your first translation edit.
 
-Install the package from PyPI:
+## Install the package
 
 === "uv"
 
@@ -22,80 +27,72 @@ Install the package from PyPI:
     pip install django-live-translations
     ```
 
-## Setup
+## Configure Django
 
-### 1. Add to installed apps
+### Add to installed apps
 
-```python
+```python title="settings.py"
 INSTALLED_APPS = [
     # ...
-    "django.contrib.staticfiles",  # required for widget assets
+    "django.contrib.staticfiles",  # (1)!
     "live_translations",
 ]
 ```
 
-!!! note
-    `django.contrib.staticfiles` must be in `INSTALLED_APPS` for the widget's CSS and JavaScript to be served. A system check warning (`live_translations.W001`) is raised if it's missing.
+1. Required for serving the widget's CSS and JavaScript. A system check warning is raised if missing.
 
-### 2. Add the middleware
+### Add the middleware
 
-Add `LiveTranslationsMiddleware` to your `MIDDLEWARE` setting **after** `AuthenticationMiddleware`:
-
-```python
+```python title="settings.py"
 MIDDLEWARE = [
     # ...
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.locale.LocaleMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
-    "live_translations.middleware.LiveTranslationsMiddleware",  # <--
+    "live_translations.middleware.LiveTranslationsMiddleware",  # (1)!
     # ...
 ]
 ```
 
-!!! warning
-    The middleware must come **after** `AuthenticationMiddleware` because it needs access to `request.user` to check permissions.
+1. Must come **after** `AuthenticationMiddleware` because it needs `request.user` to check permissions.
 
-### 3. Run migrations (database backend only)
-
-If you plan to use the database backend, run migrations to create the required tables:
+### Run migrations
 
 ```bash
 python manage.py migrate
 ```
 
-This creates the `TranslationEntry` and `TranslationHistory` tables. If you're using the default PO file backend, this step is optional -- audit history will be silently skipped when the tables don't exist.
+This creates the `TranslationEntry` and `TranslationHistory` tables used for the database backend and edit history. If you only use the PO file backend, migrations are still safe to run but the tables will remain empty (audit history is silently skipped when the tables don't exist).
 
-### 4. Configure (optional)
+### Optional: customize settings
 
-The default configuration works out of the box for most projects. Add `LIVE_TRANSLATIONS` to your settings only if you need to customize behavior:
+The defaults work out of the box for most projects. To customize, add a `LIVE_TRANSLATIONS` dict to your settings:
 
-```python
+```python title="settings.py"
 LIVE_TRANSLATIONS = {
     "LANGUAGES": ["en", "cs", "de"],
     "LOCALE_DIR": BASE_DIR / "locale",
 }
 ```
 
-See the [Configuration](configuration.md) page for all available options.
+See [Configuration](configuration.md) for all options.
 
 ## Verify it works
 
 1. Log in as a superuser
-2. Navigate to any page that uses `{% translate %}` or `gettext()` strings
-3. Press `Ctrl+Shift+E` to toggle edit mode
-4. Translatable strings will be highlighted with blue dashed outlines
+2. Navigate to any page with `{% translate %}` or `gettext()` strings
+3. Press ++ctrl+shift+e++
 
-<!-- TODO: replace with actual screenshot -->
+Translatable strings appear with blue dashed outlines. Click any one to open the editor.
+
 ![Edit mode activated](assets/screenshots/getting-started.png){ loading=lazy }
 /// caption
-Edit mode activated with translatable strings highlighted
+Edit mode highlights all translatable strings on the page.
 ///
-
-Click any highlighted string to open the translation editor.
 
 ## Try the demo app
 
-The repository includes a working example app you can run locally to see the package in action:
+The repository includes an example app:
 
 ```bash
 git clone https://github.com/vojtechpetru/django-live-translations
@@ -106,10 +103,10 @@ python manage.py migrate
 python manage.py runserver
 ```
 
-Open [localhost:8000](http://localhost:8000) and click the "Quick Login" button - it creates a superuser automatically. Then press `Ctrl+Shift+E` to start editing translations. The demo is configured with the PO backend and English/Czech languages.
+Open [localhost:8000](http://localhost:8000) and click "Quick Login" to create a superuser automatically. Press ++ctrl+shift+e++ to start editing. The demo uses the PO backend with English and Czech.
 
 ## Next steps
 
-- [Configuration](configuration.md) - customize settings
-- [Backends](backends.md) - choose between PO files and database storage
-- [Permissions](permissions.md) - control who can access the editing UI
+- [Editing](editing.md) to learn about the editor modal, preview mode, and history
+- [Backends](backends.md) to choose between PO file and database storage
+- [Permissions](permissions.md) to control who can access the editor

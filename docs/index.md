@@ -1,34 +1,43 @@
+---
+title: django-live-translations
+description: In-browser translation editing for Django
+---
+
 # django-live-translations
 
-**In-browser translation editing for Django superusers.**
-
-django-live-translations lets authorized users edit translations directly on any page of your Django application. Toggle edit mode, click any translatable string, and save changes that take effect immediately - no deployment, no restarts, no context switching to `.po` file editors.
-
-It works with all standard Django translation APIs:
-
-- **Template tags** - `{% translate %}` (`{% trans %}`), `{% blocktranslate %}` (`{% blocktrans %}`) (non-plural)
-- **Python calls** - `gettext()`, `pgettext()`, `gettext_lazy()`, `pgettext_lazy()`
-
-Plural forms (`ngettext`, `{% blocktranslate count %}`) are not yet supported.
+Edit translations directly on any page of your Django site. Toggle edit mode with a keyboard shortcut, click any translatable string, save your changes, and see them appear instantly.
 
 <video controls autoplay loop muted playsinline width="100%">
   <source src="assets/screenshots/demo.mp4" type="video/mp4">
 </video>
 
+## What it does
+
+django-live-translations hooks into Django's gettext system and adds an editing layer on top. Authorized users see a widget that lets them modify translations in-place, while regular users see no difference at all.
+
+It works with all standard Django translation APIs:
+
+- `{% translate %}` and `{% blocktranslate %}` template tags
+- `gettext()`, `pgettext()`, and their lazy variants
+
+Plural forms (`ngettext`, `{% blocktranslate count %}`) are not supported yet.
+
 ## Features
 
-- **Inline editing** - click any translatable string to open a multi-language editor modal
-- **Live preview** - changes appear on the page instantly after saving
-- **Preview mode** - review inactive translations before making them live
-- **Draft language support** - prepare translations for unpublished languages before going live
-- **Edit history** - word-level diffs with one-click restore
-- **Bulk activation** - select and activate multiple pending translations at once
-- **Two storage backends** - PO files (default) or database with cache-based sync
-- **Custom permissions** - control who can edit translations with a simple callable
-- **Django admin integration** - manage translation overrides from the admin panel
-- **Zero frontend dependencies** - vanilla JS widget, no build step required
+- **Inline editing** with a multi-language modal editor
+- **Live updates** after saving, no page reload needed
+- **Preview mode** to review inactive translations before going live
+- **Bulk activation** of multiple pending translations at once
+- **Edit history** with word-level diffs and one-click restore
+- **Draft language support** for preparing translations before publishing
+- **Placeholder validation** catches missing `%(name)s` or `{name}` format strings
+- **HTML validation** warns about unclosed or mismatched tags
+- **Two storage backends**: PO files (default) or database with cache sync
+- **Per-language permissions** to restrict who can edit which languages
+- **Django admin integration** for managing translation overrides
+- **Zero frontend dependencies**, vanilla JS, no build step
 
-## Quick start
+## Quick install
 
 === "uv"
 
@@ -48,8 +57,7 @@ Plural forms (`ngettext`, `{% blocktranslate count %}`) are not yet supported.
     pip install django-live-translations
     ```
 
-```python
-# settings.py
+```python title="settings.py"
 INSTALLED_APPS = [
     # ...
     "live_translations",
@@ -58,20 +66,20 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     # ...
     "django.contrib.auth.middleware.AuthenticationMiddleware",
-    "live_translations.middleware.LiveTranslationsMiddleware",
-    # ...
+    "live_translations.middleware.LiveTranslationsMiddleware",  # (1)!
 ]
 ```
 
-Log in as a superuser and press `Ctrl+Shift+E` to activate edit mode.
+1. Must come **after** `AuthenticationMiddleware`.
 
-## Learn more
+Log in as a superuser and press ++ctrl+shift+e++ to start editing.
 
-| Topic | Description |
-|-------|-------------|
-| [Getting Started](getting-started.md) | Installation, setup, and first use |
-| [Configuration](configuration.md) | All available settings |
-| [Backends](backends.md) | PO file vs database storage |
-| [Permissions](permissions.md) | Controlling access to the editing UI |
-| [Frontend Widget](widget.md) | Keyboard shortcuts, modes, and features |
-| [Django Admin](admin.md) | Admin panel integration |
+## Requirements
+
+Python 3.12+ and Django 4.2+.
+
+## Next steps
+
+- [Getting started](getting-started.md) for the full setup walkthrough
+- [Configuration](configuration.md) for all available settings
+- [Backends](backends.md) to choose between PO files and database storage
