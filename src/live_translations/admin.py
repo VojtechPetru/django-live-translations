@@ -12,6 +12,9 @@ import django.utils.html
 
 from live_translations import conf, importexport, models, services
 
+if t.TYPE_CHECKING:
+    from live_translations.types import LanguageCode
+
 __all__ = ["ModifiedByFilter", "TranslationEntryAdmin", "TranslationHistoryAdmin"]
 
 _MSGID_MAX_LEN = 60
@@ -181,7 +184,8 @@ class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
         request: django.http.HttpRequest,
         queryset: django.db.models.QuerySet[models.TranslationEntry],
     ) -> django.http.HttpResponse:
-        csv_content = importexport.export_csv(queryset, include_defaults=False, languages=None)  # type: ignore[arg-type]
+        qs = models.TranslationEntry.objects.qs.filter(pk__in=queryset)
+        csv_content = importexport.export_csv(qs, include_defaults=False, languages=None)
         response = django.http.HttpResponse(csv_content, content_type="text/csv")
         response["Content-Disposition"] = 'attachment; filename="translations.csv"'
         return response
@@ -192,7 +196,7 @@ class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
         request: django.http.HttpRequest,
         queryset: django.db.models.QuerySet[models.TranslationEntry],
     ) -> django.http.HttpResponse:
-        zip_content = importexport.export_po_zip(queryset, languages=None)  # type: ignore[arg-type]
+        zip_content = importexport.export_po_zip(languages=None)
         response = django.http.HttpResponse(zip_content, content_type="application/zip")
         response["Content-Disposition"] = 'attachment; filename="translations.zip"'
         return response
@@ -225,20 +229,22 @@ class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
     ) -> django.http.HttpResponse:
         settings = conf.get_settings()
         if request.method == "POST":
-            fmt = request.POST.get("format", "csv")
-            scope = request.POST.get("scope", "overrides")
-            language = request.POST.get("language", "")
+            fmt: t.Literal["csv", "po"] = request.POST.get("format", "csv")  # type: ignore[assignment]
+            scope: t.Literal["overrides", "all"] = request.POST.get("scope", "overrides")  # type: ignore[assignment]
+            language: LanguageCode = request.POST.get("language", "")
+            if language and language not in settings.languages:
+                return django.http.HttpResponseBadRequest("Invalid language")
             include_defaults = scope == "all"
-            languages = [language] if language else None
+            languages: list[LanguageCode] | None = [language] if language else None
             queryset = models.TranslationEntry.objects.qs.all()
 
             if fmt == "po":
                 if language:
-                    po_content = importexport.export_po(queryset, language=language)
+                    po_content = importexport.export_po(language=language)
                     response = django.http.HttpResponse(po_content, content_type="text/x-gettext-translation")
                     response["Content-Disposition"] = f'attachment; filename="{language}.po"'
                     return response
-                zip_content = importexport.export_po_zip(queryset, languages=None)
+                zip_content = importexport.export_po_zip(languages=None)
                 response = django.http.HttpResponse(zip_content, content_type="application/zip")
                 response["Content-Disposition"] = 'attachment; filename="translations.zip"'
                 return response
@@ -266,7 +272,7 @@ class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
         request: django.http.HttpRequest,
     ) -> django.http.HttpResponse:
         settings = conf.get_settings()
-        result = None
+        result: importexport.ImportResult | None = None
 
         if request.method == "POST":
             uploaded = request.FILES.get("file")
@@ -277,11 +283,11 @@ class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
                     content = uploaded.read().decode("utf-8")
                     result = importexport.import_csv(content, dry_run=dry_run)
                 elif name.endswith(".zip"):
-                    data = uploaded.read()
+                    data: bytes = uploaded.read()
                     result = importexport.import_po_zip(data, dry_run=dry_run)
                 elif name.endswith(".po"):
                     content = uploaded.read().decode("utf-8")
-                    language = request.POST.get("language", "")
+                    language: LanguageCode = request.POST.get("language", "")
                     result = importexport.import_po(content, language=language, dry_run=dry_run)
                 else:
                     result = importexport.ImportResult(

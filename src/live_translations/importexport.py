@@ -1,12 +1,9 @@
-"""Import/export logic for translation overrides."""
-
 import csv
 import io
 import logging
 import typing as t
 import zipfile
 
-import django.db.models
 import django.db.transaction
 import django.utils.timezone
 import polib
@@ -50,7 +47,7 @@ class ImportResult(t.TypedDict):
 
 
 class PreviewEntry(t.NamedTuple):
-    action: str  # "create" or "update"
+    action: t.Literal["create", "update"]
     language: LanguageCode
     msgid: str
     context: str
@@ -87,25 +84,16 @@ def _rows_from_queryset(
 
 def _collect_all_translations(languages: list[LanguageCode]) -> list[ExportRow]:
     """Merge PO defaults with DB overrides. DB wins when both exist."""
-    settings = conf.get_settings()
     rows_by_key: dict[tuple[LanguageCode, str, str], ExportRow] = {}
 
     # 1. Read PO files
     for lang in languages:
-        po_path = settings.locale_dir / lang / "LC_MESSAGES" / f"{settings.gettext_domain}.po"
-        try:
-            po = polib.pofile(str(po_path))
-        except (OSError, ValueError):
-            continue
-        for entry in po:
-            if not entry.msgid:
-                continue  # skip metadata entry
-            ctx = entry.msgctxt or ""
-            rows_by_key[(lang, entry.msgid, ctx)] = ExportRow(
+        for key, msgstr in _read_po_defaults(lang).items():
+            rows_by_key[(lang, key.msgid, key.context)] = ExportRow(
                 language=lang,
-                msgid=entry.msgid,
-                context=ctx,
-                msgstr=entry.msgstr,
+                msgid=key.msgid,
+                context=key.context,
+                msgstr=msgstr,
                 is_active=True,
             )
 
@@ -160,7 +148,6 @@ def _read_po_defaults(language: LanguageCode) -> dict[MsgKey, str]:
 
 
 def export_po(
-    queryset: models.TranslationEntryQuerySet,
     *,
     language: LanguageCode,
 ) -> str:
@@ -208,7 +195,6 @@ def export_po(
 
 
 def export_po_zip(
-    queryset: models.TranslationEntryQuerySet,
     *,
     languages: list[LanguageCode] | None,
 ) -> bytes:
@@ -217,7 +203,7 @@ def export_po_zip(
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for lang in langs:
-            po_content = export_po(queryset, language=lang)
+            po_content = export_po(language=lang)
             zf.writestr(f"{lang}.po", po_content)
     return buf.getvalue()
 
@@ -231,15 +217,16 @@ def _snapshot_existing(
     valid_rows: list[ExportRow],
 ) -> dict[tuple[LanguageCode, str, str], tuple[str, bool]]:
     """Snapshot existing DB entries for the given rows."""
-    lookup_q = django.db.models.Q()
-    for row in valid_rows:
-        lookup_q |= django.db.models.Q(language=row.language, msgid=row.msgid, context=row.context)
+    lookup = {(r.language, r.msgid, r.context) for r in valid_rows}
+    languages = list({r.language for r in valid_rows})
 
     existing: dict[tuple[LanguageCode, str, str], tuple[str, bool]] = {}
-    for lang, mid, ctx, msgstr, is_active in models.TranslationEntry.objects.qs.filter(lookup_q).values_list(
+    for lang, mid, ctx, msgstr, is_active in models.TranslationEntry.objects.qs.for_languages(languages).values_list(
         "language", "msgid", "context", "msgstr", "is_active"
     ):
-        existing[(lang, mid, ctx)] = (msgstr, is_active)
+        key = (lang, mid, ctx)
+        if key in lookup:
+            existing[key] = (msgstr, is_active)
     return existing
 
 
@@ -261,7 +248,6 @@ def _build_preview(
                 PreviewEntry("create", row.language, row.msgid, row.context, row.msgstr, row.is_active, "", None)
             )
         elif old == (row.msgstr, row.is_active):
-            updated += 1
             unchanged += 1
         else:
             updated += 1
@@ -301,8 +287,15 @@ def _bulk_import(rows: list[ExportRow], *, dry_run: bool = False) -> ImportResul
             created=created, updated=updated, errors=errors, dry_run=True, unchanged=unchanged, preview=preview
         )
 
+    # Only upsert rows that actually changed (skip unchanged)
+    changed_keys = {(p.language, p.msgid, p.context) for p in preview}
+    changed_rows = [r for r in valid_rows if (r.language, r.msgid, r.context) in changed_keys]
+
+    if not changed_rows:
+        return ImportResult(created=created, updated=updated, errors=errors)
+
     now = django.utils.timezone.now()
-    entries_to_create = [
+    entries_to_upsert = [
         models.TranslationEntry(
             language=row.language,
             msgid=row.msgid,
@@ -311,18 +304,18 @@ def _bulk_import(rows: list[ExportRow], *, dry_run: bool = False) -> ImportResul
             is_active=row.is_active,
             updated_at=now,
         )
-        for row in valid_rows
+        for row in changed_rows
     ]
 
     with django.db.transaction.atomic():
         models.TranslationEntry.objects.bulk_create(
-            entries_to_create,
+            entries_to_upsert,
             update_conflicts=True,
             update_fields=["msgstr", "is_active", "updated_at"],
             unique_fields=["language", "msgid", "context"],
         )
 
-        history_entries = [(row.language, MsgKey(row.msgid, row.context)) for row in valid_rows]
+        history_entries = [(row.language, MsgKey(row.msgid, row.context)) for row in changed_rows]
 
         if history_entries:
             history.record_bulk_action(
@@ -349,7 +342,7 @@ def import_csv(content: str, *, dry_run: bool = False) -> ImportResult:
             return ImportResult(created=0, updated=0, errors=[msg], dry_run=dry_run)
 
         rows: list[ExportRow] = []
-        for _i, line in enumerate(reader, 2):  # row 2 = first data row after header
+        for line in reader:
             is_active_raw = line.get("is_active", "true").strip().lower()
             is_active = is_active_raw not in ("false", "0", "no")
             rows.append(
@@ -390,29 +383,16 @@ def import_po(content: str, language: LanguageCode, *, dry_run: bool = False) ->
         if not entry.msgid:
             continue
 
-        # Check ltpending first (preserves exact DB state from our exports),
-        # then fall back to fuzzy flag (standard PO convention).
+        # ltpending preserves exact DB state from our exports;
+        # fall back to fuzzy flag (standard PO convention).
         pending = _get_pending(entry)
         if pending is not None:
-            rows.append(
-                ExportRow(
-                    language=lang,
-                    msgid=entry.msgid,
-                    context=entry.msgctxt or "",
-                    msgstr=pending,
-                    is_active=False,
-                )
-            )
+            msgstr, is_active = pending, False
         else:
-            rows.append(
-                ExportRow(
-                    language=lang,
-                    msgid=entry.msgid,
-                    context=entry.msgctxt or "",
-                    msgstr=entry.msgstr,
-                    is_active="fuzzy" not in entry.flags,
-                )
-            )
+            msgstr, is_active = entry.msgstr, "fuzzy" not in entry.flags
+        rows.append(
+            ExportRow(language=lang, msgid=entry.msgid, context=entry.msgctxt or "", msgstr=msgstr, is_active=is_active)
+        )
 
     return _bulk_import(rows, dry_run=dry_run)
 

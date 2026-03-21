@@ -49,6 +49,15 @@ def _parse_csv(content: str) -> list[dict[str, str]]:
     return list(csv.DictReader(io.StringIO(content)))
 
 
+def _make_csv(rows: list[dict[str, str]]) -> str:
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=["language", "msgid", "context", "msgstr", "is_active"])
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(row)
+    return buf.getvalue()
+
+
 def _setup_po_files(tmp_path: pathlib.Path, translations: dict[str, dict[str, str]]) -> pathlib.Path:
     locale_dir = tmp_path / "locale"
     for lang, entries in translations.items():
@@ -186,8 +195,7 @@ class TestExportPO:
 
         models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Cau", is_active=True)
 
-        qs = models.TranslationEntry.objects.qs.all()
-        result = importexport.export_po(qs, language="cs")
+        result = importexport.export_po(language="cs")
         po = polib.pofile(result)
 
         entry = po.find("hello")
@@ -203,8 +211,7 @@ class TestExportPO:
 
         models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Cau", is_active=False)
 
-        qs = models.TranslationEntry.objects.qs.all()
-        result = importexport.export_po(qs, language="cs")
+        result = importexport.export_po(language="cs")
         po = polib.pofile(result)
 
         entry = po.find("hello")
@@ -226,8 +233,7 @@ class TestExportPO:
             language="cs", msgid="new_key", context="", msgstr="Novy", is_active=False
         )
 
-        qs = models.TranslationEntry.objects.qs.all()
-        result = importexport.export_po(qs, language="cs")
+        result = importexport.export_po(language="cs")
         po = polib.pofile(result)
 
         entry = po.find("new_key")
@@ -240,8 +246,7 @@ class TestExportPO:
         locale_dir = _setup_po_files(tmp_path, {"cs": {"hello": "Ahoj"}})
         _configure_db_backend(settings, locale_dir, ["cs"])
 
-        qs = models.TranslationEntry.objects.qs.all()
-        result = importexport.export_po(qs, language="cs")
+        result = importexport.export_po(language="cs")
         po = polib.pofile(result)
 
         entry = po.find("hello")
@@ -253,8 +258,7 @@ class TestExportPO:
         locale_dir = _setup_po_files(tmp_path, {"cs": {}})
         _configure_db_backend(settings, locale_dir, ["cs"])
 
-        qs = models.TranslationEntry.objects.qs.none()
-        result = importexport.export_po(qs, language="cs")
+        result = importexport.export_po(language="cs")
         po = polib.pofile(result)
         assert po.metadata["Language"] == "cs"
 
@@ -262,8 +266,7 @@ class TestExportPO:
         locale_dir = _setup_po_files(tmp_path, {"cs": {}})
         _configure_db_backend(settings, locale_dir, ["cs"])
 
-        qs = models.TranslationEntry.objects.qs.none()
-        result = importexport.export_po(qs, language="cs")
+        result = importexport.export_po(language="cs")
         po = polib.pofile(result)
         assert len(po) == 0
 
@@ -275,8 +278,7 @@ class TestExportPO:
             language="cs", msgid="hello", context="greeting", msgstr="Ahoj", is_active=True
         )
 
-        qs = models.TranslationEntry.objects.qs.all()
-        result = importexport.export_po(qs, language="cs")
+        result = importexport.export_po(language="cs")
         po = polib.pofile(result)
 
         entry = po.find("hello", msgctxt="greeting")
@@ -299,8 +301,7 @@ class TestExportPOZip:
         models.TranslationEntry.objects.create(
             language="en", msgid="hello", context="", msgstr="Hello!", is_active=True
         )
-        qs = models.TranslationEntry.objects.qs.all()
-        data = importexport.export_po_zip(qs, languages=None)
+        data = importexport.export_po_zip(languages=None)
         zf = zipfile.ZipFile(io.BytesIO(data))
         names = sorted(zf.namelist())
         assert names == ["cs.po", "en.po"]
@@ -317,8 +318,7 @@ class TestExportPOZip:
         models.TranslationEntry.objects.create(
             language="en", msgid="hello", context="", msgstr="Hello!", is_active=True
         )
-        qs = models.TranslationEntry.objects.qs.all()
-        data = importexport.export_po_zip(qs, languages=["cs"])
+        data = importexport.export_po_zip(languages=["cs"])
         zf = zipfile.ZipFile(io.BytesIO(data))
         assert zf.namelist() == ["cs.po"]
 
@@ -330,18 +330,10 @@ class TestExportPOZip:
 
 @pytest.mark.django_db
 class TestImportCSV:
-    def _make_csv(self, rows: list[dict[str, str]]) -> str:
-        buf = io.StringIO()
-        writer = csv.DictWriter(buf, fieldnames=["language", "msgid", "context", "msgstr", "is_active"])
-        writer.writeheader()
-        for row in rows:
-            writer.writerow(row)
-        return buf.getvalue()
-
     @unittest.mock.patch("live_translations.importexport.conf.get_backend_instance")
     def test_basic_import(self, mock_backend: unittest.mock.MagicMock) -> None:
         mock_backend.return_value.bump_catalog_version = unittest.mock.MagicMock()
-        content = self._make_csv(
+        content = _make_csv(
             [
                 {"language": "cs", "msgid": "hello", "context": "", "msgstr": "Ahoj", "is_active": "true"},
                 {"language": "en", "msgid": "hello", "context": "", "msgstr": "Hi", "is_active": "false"},
@@ -363,7 +355,7 @@ class TestImportCSV:
     def test_update_existing(self, mock_backend: unittest.mock.MagicMock) -> None:
         mock_backend.return_value.bump_catalog_version = unittest.mock.MagicMock()
         models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
-        content = self._make_csv(
+        content = _make_csv(
             [
                 {"language": "cs", "msgid": "hello", "context": "", "msgstr": "Cau", "is_active": "true"},
             ]
@@ -389,7 +381,7 @@ class TestImportCSV:
     @unittest.mock.patch("live_translations.importexport.conf.get_backend_instance")
     def test_empty_msgid_skipped(self, mock_backend: unittest.mock.MagicMock) -> None:
         mock_backend.return_value.bump_catalog_version = unittest.mock.MagicMock()
-        content = self._make_csv(
+        content = _make_csv(
             [
                 {"language": "cs", "msgid": "", "context": "", "msgstr": "Ahoj", "is_active": "true"},
                 {"language": "cs", "msgid": "hello", "context": "", "msgstr": "Ahoj", "is_active": "true"},
@@ -619,8 +611,7 @@ class TestRoundTrip:
         models.TranslationEntry.objects.create(language="cs", msgid="bye", context="", msgstr="Sbohem", is_active=False)
 
         # Export
-        qs = models.TranslationEntry.objects.qs.all()
-        po_content = importexport.export_po(qs, language="cs")
+        po_content = importexport.export_po(language="cs")
 
         # Clear DB
         models.TranslationEntry.objects.qs.all().delete()
@@ -655,8 +646,7 @@ class TestRoundTrip:
         models.TranslationEntry.objects.create(language="en", msgid="hello", context="", msgstr="Hi", is_active=True)
 
         # Export
-        qs = models.TranslationEntry.objects.qs.all()
-        zip_data = importexport.export_po_zip(qs, languages=None)
+        zip_data = importexport.export_po_zip(languages=None)
 
         # Clear DB
         models.TranslationEntry.objects.qs.all().delete()
@@ -862,16 +852,8 @@ class TestImportView:
 
 @pytest.mark.django_db
 class TestDryRun:
-    def _make_csv(self, rows: list[dict[str, str]]) -> str:
-        buf = io.StringIO()
-        writer = csv.DictWriter(buf, fieldnames=["language", "msgid", "context", "msgstr", "is_active"])
-        writer.writeheader()
-        for row in rows:
-            writer.writerow(row)
-        return buf.getvalue()
-
     def test_csv_dry_run_creates(self) -> None:
-        content = self._make_csv(
+        content = _make_csv(
             [{"language": "cs", "msgid": "hello", "context": "", "msgstr": "Ahoj", "is_active": "true"}]
         )
         result = importexport.import_csv(content, dry_run=True)
@@ -894,7 +876,7 @@ class TestDryRun:
 
     def test_csv_dry_run_updates(self) -> None:
         models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
-        content = self._make_csv(
+        content = _make_csv(
             [{"language": "cs", "msgid": "hello", "context": "", "msgstr": "Cau", "is_active": "false"}]
         )
         result = importexport.import_csv(content, dry_run=True)
@@ -917,18 +899,18 @@ class TestDryRun:
 
     def test_csv_dry_run_unchanged(self) -> None:
         models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
-        content = self._make_csv(
+        content = _make_csv(
             [{"language": "cs", "msgid": "hello", "context": "", "msgstr": "Ahoj", "is_active": "true"}]
         )
         result = importexport.import_csv(content, dry_run=True)
         assert result["created"] == 0
-        assert result["updated"] == 1
+        assert result["updated"] == 0
         assert result["unchanged"] == 1
         assert len(result["preview"]) == 0  # type: ignore[arg-type]
 
     def test_csv_dry_run_mixed(self) -> None:
         models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
-        content = self._make_csv(
+        content = _make_csv(
             [
                 {"language": "cs", "msgid": "hello", "context": "", "msgstr": "Cau", "is_active": "true"},
                 {"language": "cs", "msgid": "bye", "context": "", "msgstr": "Nashle", "is_active": "true"},
