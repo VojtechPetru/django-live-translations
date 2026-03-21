@@ -5,10 +5,11 @@ an 18-character ZWC end marker (encoding a per-request string-table ID) to each
 translated string.  Both markers survive Django's autoescaping because ZWC
 characters are not HTML-special.
 
-The start flag (a single ``\\uFEFF``) is inserted at **position 1** of the
-translated string (safe from ``capfirst``).  When the translation starts with an
-HTML tag (``result[0] == '<'``), the flag is inserted at position 0 instead to
-avoid breaking the tag name.
+Two distinct start-flag characters are used: ``\\u2060`` (WORD JOINER) at
+**position 1** for normal text (safe from ``capfirst``), and ``\\uFEFF`` at
+**position 0** when the translation starts with an HTML tag (to avoid breaking
+the tag name).  The distinct characters let the JS apply the correct wrapping
+strategy for multi-node inline-HTML translations.
 
 The middleware injects the string table as ``window.__LT_STRINGS__`` and the
 client-side JS uses the start flag to locate the beginning of a translation span
@@ -29,6 +30,7 @@ if t.TYPE_CHECKING:
 from live_translations.types import MsgKey, OverrideMap, StringId
 
 __all__ = [
+    "WJ",
     "ZWC_BOUNDARY",
     "encode_zwc",
     "get_string_registry",
@@ -50,7 +52,8 @@ logger = logging.getLogger("live_translations")
 
 ZWC_0: t.Final[str] = "\u200b"  # ZERO WIDTH SPACE  → bit 0
 ZWC_1: t.Final[str] = "\u200c"  # ZERO WIDTH NON-JOINER → bit 1
-ZWC_BOUNDARY: t.Final[str] = "\ufeff"  # BOM / ZWNBSP → marker boundary
+ZWC_BOUNDARY: t.Final[str] = "\ufeff"  # BOM / ZWNBSP → marker boundary + position-0 start flag
+WJ: t.Final[str] = "\u2060"  # WORD JOINER → position-1 start flag
 
 _ZWC_BITS: t.Final[int] = 16
 _ZWC_MAX_ID: t.Final[int] = (1 << _ZWC_BITS) - 1
@@ -135,11 +138,19 @@ type _PgettextFn = t.Callable[[str, str], str]
 def _insert_markers(result: str, key: MsgKey) -> str:
     """Insert a ZWC start flag and append a ZWC end marker to a translated string.
 
-    The start flag (a single ``\\uFEFF``) is placed at position 1 so that
-    ``capfirst`` (which does ``x[0].upper() + x[1:]``) operates on the first
-    visible character.  When the translation starts with an HTML tag
-    (``result[0] == '<'``), the flag goes at position 0 instead — inserting
-    inside a tag name would break HTML, and ``capfirst`` on ``<`` is a no-op.
+    Two distinct start-flag characters are used so the client-side JS can apply
+    the correct wrapping strategy for inline-HTML translations:
+
+    * **Position-0 flag** (``\\uFEFF``): used when the translation starts with
+      an HTML tag (``result[0] == '<'``).  The flag goes before the ``<`` to
+      avoid breaking tag names.  ``capfirst`` on ``<`` is a no-op anyway.
+      The JS splits at ``flagIdx`` — everything before is non-translation text.
+
+    * **Position-1 flag** (``\\u2060`` WORD JOINER): used for normal text.  The
+      flag is placed at position 1 (after the first visible character) so that
+      ``capfirst`` (``x[0].upper() + x[1:]``) still operates on the first
+      visible character.  The JS splits at ``flagIdx - 1`` to include that
+      character inside the ``<lt-t>`` wrapper.
 
     **SafeString preservation**: Django's ``{% trans %}`` passes template
     literals as ``SafeString`` through ``gettext``.  Slicing and concatenating
@@ -163,15 +174,12 @@ def _insert_markers(result: str, key: MsgKey) -> str:
 
     if len(result) == 0:
         output = end_marker
-    elif len(result) == 1:
-        output = result + ZWC_BOUNDARY + end_marker
     elif result[0] == "<":
-        # HTML at position 0: flag before the tag to avoid breaking tag names.
-        # capfirst on "<..." is a no-op anyway.
+        # HTML at position 0: FEFF flag before the tag to avoid breaking tag names.
         output = ZWC_BOUNDARY + result + end_marker
     else:
-        # Normal case: flag at position 1 (after first char, safe from capfirst).
-        output = result[0] + ZWC_BOUNDARY + result[1:] + end_marker
+        # Normal case: WJ flag at position 1 (after first char, safe from capfirst).
+        output = result[0] + WJ + result[1:] + end_marker
 
     return django.utils.safestring.mark_safe(output) if was_safe else output  # noqa: S308
 

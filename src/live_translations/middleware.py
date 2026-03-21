@@ -178,7 +178,8 @@ class LiveTranslationsMiddleware:
         if strings.ZWC_BOUNDARY not in content:
             return
         content = _ZWC_RE.sub("", content)
-        content = content.replace(strings.ZWC_BOUNDARY, "")  # strip start flags
+        content = content.replace(strings.ZWC_BOUNDARY, "")  # strip position-0 start flags
+        content = content.replace(strings.WJ, "")  # strip position-1 start flags
         response.content = content.encode(response.charset)
         if "Content-Length" in response:
             response["Content-Length"] = len(response.content)
