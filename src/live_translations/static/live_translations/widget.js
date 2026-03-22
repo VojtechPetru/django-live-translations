@@ -1844,13 +1844,13 @@
     toggleWrap.appendChild(toggleLabelEl);
 
     // Show/hide toggle based on whether any form differs from default
-    (function (toggle, defaults, cb, defaultActive, hadOverride, draft, langCode) {
+    (function (toggle, defaults, cb, defaultActive, hadOverride, draft, langCode, parent) {
       function syncToggle() {
         if (draft) return; // Draft languages are always active — keep toggle hidden
         var nf = _isPlural() ? _getNplurals(langCode) : 1;
         var differs = false;
         for (var fi2 = 0; fi2 < nf; fi2++) {
-          var ta2 = dialog.querySelector("#lt-input-" + langCode + "-" + fi2);
+          var ta2 = parent.querySelector("#lt-input-" + langCode + "-" + fi2);
           var defVal = (defaults || {})[String(fi2)] || "";
           if (ta2 && ta2.value !== defVal) { differs = true; break; }
         }
@@ -1862,12 +1862,12 @@
       // Attach input listeners to all textareas
       var nf = _isPlural() ? _getNplurals(langCode) : 1;
       for (var fi2 = 0; fi2 < nf; fi2++) {
-        var ta2 = dialog.querySelector("#lt-input-" + langCode + "-" + fi2);
+        var ta2 = parent.querySelector("#lt-input-" + langCode + "-" + fi2);
         if (ta2) {
           ta2.addEventListener("input", syncToggle);
         }
       }
-    })(toggleWrap, poDefault, checkbox, ACTIVE_BY_DEFAULT, hasOverride, isDraftLang, lang);
+    })(toggleWrap, poDefault, checkbox, ACTIVE_BY_DEFAULT, hasOverride, isDraftLang, lang, container);
 
     container.appendChild(toggleWrap);
   }

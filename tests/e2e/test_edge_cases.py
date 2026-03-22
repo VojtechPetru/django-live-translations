@@ -28,7 +28,7 @@ class TestEdgeCases:
                 {
                     "msgid": "demo.title",
                     "context": "",
-                    "translations": {"xx": "Invalid lang"},
+                    "translations": {"xx": {"0": "Invalid lang"}},
                     "active_flags": {"xx": True},
                     "page_language": "en",
                 }
@@ -97,14 +97,14 @@ class TestEdgeCases:
     def test_concurrent_save_handles_gracefully(self, page_as_superuser: Page, base_url: str) -> None:
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
-        page_as_superuser.locator("#lt-input-en").fill("First Concurrent")
+        page_as_superuser.locator("#lt-input-en-0").fill("First Concurrent")
         check_active_toggle(page_as_superuser)
         page_as_superuser.locator(".lt-btn--save").click()
         expect(page_as_superuser.locator("dialog.lt-dialog[open]")).to_be_hidden(timeout=5000)
         # Immediately reopen and save again
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
-        page_as_superuser.locator("#lt-input-en").fill("Second Concurrent")
+        page_as_superuser.locator("#lt-input-en-0").fill("Second Concurrent")
         check_active_toggle(page_as_superuser)
         page_as_superuser.locator(".lt-btn--save").click()
         expect(page_as_superuser.locator("dialog.lt-dialog[open]")).to_be_hidden(timeout=5000)
@@ -170,7 +170,7 @@ class TestEdgeCases:
     def test_saving_empty_string_is_valid(self, page_as_superuser: Page, base_url: str) -> None:
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
-        page_as_superuser.locator("#lt-input-en").fill("")
+        page_as_superuser.locator("#lt-input-en-0").fill("")
         check_active_toggle(page_as_superuser)
         page_as_superuser.locator(".lt-btn--save").click()
         # Save succeeds — modal closes without error
@@ -182,7 +182,7 @@ class TestEdgeCases:
         long_text = "A" * 1500
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
-        page_as_superuser.locator("#lt-input-en").fill(long_text)
+        page_as_superuser.locator("#lt-input-en-0").fill(long_text)
         check_active_toggle(page_as_superuser)
         page_as_superuser.locator(".lt-btn--save").click()
         expect(page_as_superuser.locator("dialog.lt-dialog[open]")).to_be_hidden(timeout=5000)

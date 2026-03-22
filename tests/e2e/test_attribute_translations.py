@@ -30,7 +30,7 @@ class TestAttributeTranslations:
     def test_attr_translation_save_updates_attribute(self, page_as_superuser: Page, base_url: str) -> None:
         open_modal(page_as_superuser, "attrs.tooltip_trans", attr=True)
         wait_for_fields_loaded(page_as_superuser)
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         textarea.fill("Updated tooltip via test")
         check_active_toggle(page_as_superuser)
         page_as_superuser.locator(".lt-btn--save").click()

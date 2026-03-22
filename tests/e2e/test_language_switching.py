@@ -42,18 +42,18 @@ class TestLanguageSwitching:
         expect(cs_tab).to_have_class(re.compile(r"--active"))
         en_tab = page_as_superuser.locator('.lt-editor__tab[data-lang="en"]')
         expect(en_tab).not_to_have_class(re.compile(r"--active"))
-        cs_textarea = page_as_superuser.locator("#lt-input-cs")
+        cs_textarea = page_as_superuser.locator("#lt-input-cs-0")
         expect(cs_textarea).to_be_visible()
         expect(cs_textarea).to_have_value("Demo živých překladů")
 
     def test_edits_preserved_when_switching_tabs(self, page_as_superuser: Page) -> None:
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
-        en_textarea = page_as_superuser.locator("#lt-input-en")
+        en_textarea = page_as_superuser.locator("#lt-input-en-0")
         en_textarea.fill("Modified EN Title")
         # Switch to CS
         page_as_superuser.locator('.lt-editor__tab[data-lang="cs"]').click()
-        expect(page_as_superuser.locator("#lt-input-cs")).to_be_visible()
+        expect(page_as_superuser.locator("#lt-input-cs-0")).to_be_visible()
         # Switch back to EN
         page_as_superuser.locator('.lt-editor__tab[data-lang="en"]').click()
         expect(en_textarea).to_have_value("Modified EN Title")
@@ -61,7 +61,7 @@ class TestLanguageSwitching:
     def test_dirty_dot_appears_on_modified_tab(self, page_as_superuser: Page) -> None:
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
-        en_textarea = page_as_superuser.locator("#lt-input-en")
+        en_textarea = page_as_superuser.locator("#lt-input-en-0")
         en_textarea.fill("Dirty change")
         en_tab = page_as_superuser.locator('.lt-editor__tab[data-lang="en"]')
         dirty_dot = en_tab.locator('[data-role="dirty"]')
@@ -70,7 +70,7 @@ class TestLanguageSwitching:
     def test_dirty_dot_disappears_when_reverted(self, page_as_superuser: Page) -> None:
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
-        en_textarea = page_as_superuser.locator("#lt-input-en")
+        en_textarea = page_as_superuser.locator("#lt-input-en-0")
         original_value = en_textarea.input_value()
         en_textarea.fill("Temporary change")
         en_tab = page_as_superuser.locator('.lt-editor__tab[data-lang="en"]')
@@ -132,7 +132,7 @@ class TestLanguageSwitching:
         wait_for_fields_loaded(page_as_superuser)
         cs_tab = page_as_superuser.locator('.lt-editor__tab[data-lang="cs"]')
         expect(cs_tab).to_have_class(re.compile(r"--active"))
-        cs_textarea = page_as_superuser.locator("#lt-input-cs")
+        cs_textarea = page_as_superuser.locator("#lt-input-cs-0")
         expect(cs_textarea).to_have_value("Demo živých překladů")
         # Navigate back to EN for other tests
         close_modal(page_as_superuser)
