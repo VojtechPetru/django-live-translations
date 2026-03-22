@@ -1,0 +1,22 @@
+{% load i18n %}
+<div id="plurals-card" class="card">
+    <h2>{% trans "plurals.heading" %} {% verbatim %}<span class="via">{% blocktranslate count %}</span>{% endverbatim %}</h2>
+    <div class="n-pills">
+        <span class="via" style="display: flex; align-items: center; margin-left: 0;">n =</span>
+        {% for n in plural_choices %}
+            <button class="n-pill{% if n == plural_count %} active{% endif %}"
+                    hx-get="{% url 'plurals_partial' %}?n={{ n }}"
+                    hx-target="#plurals-card"
+                    hx-swap="outerHTML">{{ n }}</button>
+        {% endfor %}
+    </div>
+    <p>{% verbatim %}<span class="via">{% blocktranslate count %}</span>{% endverbatim %}
+        {% blocktranslate count count=plural_count %}plurals.notification_one {{ count }}{% plural %}plurals.notification_other {{ count }}{% endblocktranslate %}
+    </p>
+    <p>{% verbatim %}<span class="via">{% blocktranslate count %}</span>{% endverbatim %}
+        {% blocktranslate count count=plural_count %}plurals.message_one {{ count }}{% plural %}plurals.message_other {{ count }}{% endblocktranslate %}
+    </p>
+    <p><span class="via">ngettext()</span>
+        {{ litre_message }}
+    </p>
+</div>

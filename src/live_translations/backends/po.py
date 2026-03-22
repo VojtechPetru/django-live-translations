@@ -1,6 +1,7 @@
 """PO file backend — reads/writes .po files on disk using polib."""
 
 import base64
+import json
 import logging
 import pathlib
 import typing as t
@@ -10,7 +11,7 @@ import polib
 
 from live_translations import conf, history
 from live_translations.backends import base
-from live_translations.types import LanguageCode, MsgKey, OverrideMap
+from live_translations.types import LanguageCode, MsgKey, OverrideMap, PluralForms
 
 __all__ = ["LT_PENDING_PREFIX", "POFileBackend"]
 
@@ -19,40 +20,43 @@ logger = logging.getLogger(__name__)
 LT_PENDING_PREFIX = "ltpending:"
 
 
-def _get_pending(entry: polib.POEntry) -> str | None:
-    """Extract the pending msgstr from the translator comment, or None."""
+def _get_pending(entry: polib.POEntry) -> PluralForms | None:
+    """Extract the pending PluralForms from the translator comment, or None."""
     if not entry.comment:
         return None
     lines = entry.comment.split("\n")
     for i, line in enumerate(lines):
         if line.startswith(LT_PENDING_PREFIX):
-            # Collect this line + all continuation lines (polib may wrap long base64)
             raw = line[len(LT_PENDING_PREFIX) :]
             for cont in lines[i + 1 :]:
                 raw += cont
             try:
-                return base64.b64decode(raw).decode()
+                decoded = base64.b64decode(raw).decode()
             except (ValueError, UnicodeDecodeError):
-                return raw
+                return {0: raw}
+            # New format: JSON-encoded PluralForms dict
+            try:
+                parsed = json.loads(decoded)
+                if isinstance(parsed, dict):
+                    return {int(k): v for k, v in parsed.items()}
+            except (json.JSONDecodeError, ValueError):
+                pass
+            # Legacy format: plain string (pre-plural migration)
+            return {0: decoded}
     return None
 
 
-def _set_pending(entry: polib.POEntry, value: str) -> None:
-    """Store a pending msgstr as base64 in the translator comment.
-
-    Uses ``ltpending:`` prefix (no hyphen) because polib wraps long comment
-    lines via textwrap which breaks at hyphens. A hyphenated prefix like
-    ``lt-pending:`` gets split into ``lt-`` / ``pending:`` on separate lines.
-    Base64 encoding avoids spaces/hyphens in the value itself.
-    """
+def _set_pending(entry: polib.POEntry, forms: PluralForms) -> None:
+    """Store pending PluralForms as JSON+base64 in the translator comment."""
     _clear_pending(entry)
-    encoded = base64.b64encode(value.encode()).decode()
+    json_str = json.dumps({str(k): v for k, v in forms.items()}, separators=(",", ":"))
+    encoded = base64.b64encode(json_str.encode()).decode()
     pending_line = f"{LT_PENDING_PREFIX}{encoded}"
     entry.comment = f"{entry.comment}\n{pending_line}" if entry.comment else pending_line
 
 
 def _clear_pending(entry: polib.POEntry) -> None:
-    """Remove the pending msgstr (and any continuation lines) from the comment."""
+    """Remove the pending data (and any continuation lines) from the comment."""
     if not entry.comment:
         return
     lines = entry.comment.split("\n")
@@ -69,6 +73,13 @@ def _clean_comment(comment: str) -> str:
         if line.startswith(LT_PENDING_PREFIX):
             return "\n".join(lines[:i]).strip()
     return comment.strip()
+
+
+def _read_msgstr_forms(entry: polib.POEntry) -> PluralForms:
+    """Read PluralForms from a polib entry (handles both singular and plural)."""
+    if entry.msgid_plural:
+        return dict(entry.msgstr_plural)
+    return {0: entry.msgstr}
 
 
 class POFileBackend(base.TranslationBackend):
@@ -144,8 +155,9 @@ class POFileBackend(base.TranslationBackend):
                     result[lang] = base.TranslationEntry(
                         language=lang,
                         msgid=key.msgid,
-                        msgstr="",
+                        msgstr_forms={0: ""},
                         context=key.context,
+                        msgid_plural=key.msgid_plural,
                     )
                     continue
                 pending = _get_pending(entry)
@@ -153,8 +165,9 @@ class POFileBackend(base.TranslationBackend):
                 result[lang] = base.TranslationEntry(
                     language=lang,
                     msgid=key.msgid,
-                    msgstr=pending if pending is not None else entry.msgstr,
+                    msgstr_forms=pending if pending is not None else _read_msgstr_forms(entry),
                     context=key.context,
+                    msgid_plural=entry.msgid_plural or key.msgid_plural,
                     fuzzy="fuzzy" in entry.flags,
                     is_active=is_active,
                 )
@@ -163,8 +176,9 @@ class POFileBackend(base.TranslationBackend):
                 result[lang] = base.TranslationEntry(
                     language=lang,
                     msgid=key.msgid,
-                    msgstr="",
+                    msgstr_forms={0: ""},
                     context=key.context,
+                    msgid_plural=key.msgid_plural,
                 )
         return result
 
@@ -178,23 +192,56 @@ class POFileBackend(base.TranslationBackend):
         for entry in po:
             pending = _get_pending(entry)
             if pending:
-                overrides[MsgKey(entry.msgid, entry.msgctxt or "")] = pending
+                overrides[MsgKey(entry.msgid, entry.msgctxt or "", entry.msgid_plural or "")] = pending
         return overrides
+
+    def _create_po_entry(self, key: MsgKey, forms: PluralForms, *, is_active: bool) -> polib.POEntry:
+        """Create a new POEntry for a translation that doesn't exist yet."""
+        new_entry = polib.POEntry(
+            msgid=key.msgid,
+            msgstr="" if not is_active else forms.get(0, ""),
+            msgctxt=key.context or None,
+        )
+        if key.msgid_plural:
+            new_entry.msgid_plural = key.msgid_plural
+            new_entry.msgstr_plural = dict(forms) if is_active else dict.fromkeys(forms, "")
+        if not is_active:
+            _set_pending(new_entry, forms)
+        return new_entry
+
+    def _update_po_entry(self, entry: polib.POEntry, key: MsgKey, forms: PluralForms, *, is_active: bool) -> bool:
+        """Update an existing POEntry. Returns the resolved is_active state."""
+        if is_active:
+            if key.msgid_plural:
+                entry.msgstr_plural = dict(forms)
+            else:
+                entry.msgstr = forms.get(0, "")
+            _clear_pending(entry)
+        else:
+            current_forms = _read_msgstr_forms(entry)
+            if forms == current_forms:
+                _clear_pending(entry)
+                is_active = True
+            else:
+                _set_pending(entry, forms)
+        if "fuzzy" in entry.flags:
+            entry.flags.remove("fuzzy")
+        return is_active
 
     @t.override
     def save_translations(
         self,
         key: MsgKey,
-        translations: dict[LanguageCode, str],
+        translations: dict[LanguageCode, PluralForms],
         active_flags: dict[LanguageCode, bool] | None = None,
     ) -> None:
         fallback_active = conf.get_settings().translation_active_by_default
 
         mo_path: pathlib.Path | None = None
-        old_entries: dict[str, str] = {}
+        old_entries: dict[str, PluralForms] = {}
         old_active_states: dict[str, bool] = {}
         new_active_states: dict[str, bool] = {}
-        for lang, msgstr in translations.items():
+        for lang, forms in translations.items():
             po = self._ensure_po(lang)
             entry = self._find_entry(po, key)
 
@@ -203,39 +250,18 @@ class POFileBackend(base.TranslationBackend):
 
             if entry is not None:
                 pending = _get_pending(entry)
-                old_entries[lang] = pending if pending is not None else entry.msgstr
+                old_entries[lang] = pending if pending is not None else _read_msgstr_forms(entry)
                 old_active_states[lang] = pending is None
 
             if entry is None:
-                entry = polib.POEntry(
-                    msgid=key.msgid,
-                    msgstr="" if not is_active else msgstr,
-                    msgctxt=key.context or None,
-                )
-                if not is_active:
-                    _set_pending(entry, msgstr)
-                po.append(entry)
-            elif is_active:
-                entry.msgstr = msgstr
-                _clear_pending(entry)
-                if "fuzzy" in entry.flags:
-                    entry.flags.remove("fuzzy")
+                po.append(self._create_po_entry(key, forms, is_active=is_active))
             else:
-                # Inactive: keep current msgstr in .po/.mo, store new value as pending.
-                # If the pending value matches the active value, just clear pending.
-                if msgstr == entry.msgstr:
-                    _clear_pending(entry)
-                    is_active = True
-                    new_active_states[lang] = True
-                else:
-                    _set_pending(entry, msgstr)
-                if "fuzzy" in entry.flags:
-                    entry.flags.remove("fuzzy")
+                is_active = self._update_po_entry(entry, key, forms, is_active=is_active)
+                new_active_states[lang] = is_active
 
             po.save()
             mo_path = self._mo_path(lang)
             po.save_as_mofile(str(mo_path))
-            # Invalidate mtime cache — file was just written
             self._po_cache.pop(self._po_path(lang), None)
 
         history.record_text_changes(
@@ -271,7 +297,11 @@ class POFileBackend(base.TranslationBackend):
             pending = _get_pending(entry)
             if pending is None:
                 continue
-            entry.msgstr = pending
+            # Apply pending forms to the PO entry
+            if key.msgid_plural or entry.msgid_plural:
+                entry.msgstr_plural = dict(pending)
+            else:
+                entry.msgstr = pending.get(0, "")
             _clear_pending(entry)
             if "fuzzy" in entry.flags:
                 entry.flags.remove("fuzzy")
@@ -291,14 +321,14 @@ class POFileBackend(base.TranslationBackend):
         self,
         key: MsgKey,
         languages: list[LanguageCode],
-    ) -> dict[LanguageCode, str]:
-        result: dict[LanguageCode, str] = {}
+    ) -> dict[LanguageCode, PluralForms]:
+        result: dict[LanguageCode, PluralForms] = {}
         for lang in languages:
             try:
                 po = self._load_po(lang)
                 entry = self._find_entry(po, key)
                 if entry:
-                    result[lang] = entry.msgstr
+                    result[lang] = _read_msgstr_forms(entry)
             except FileNotFoundError:
                 pass
         return result

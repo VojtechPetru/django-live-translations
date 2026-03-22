@@ -29,6 +29,7 @@
    * @property {string}   [currentLanguage]  - Server-resolved current language code.
    * @property {boolean}  [preview]          - Whether preview mode is active.
    * @property {Array<{m:string, c:string}>} [previewEntries] - Inactive override entries for preview.
+   * @property {Object<string, number>} [nplurals] - Map of language code to number of plural forms.
    */
 
   /**
@@ -48,7 +49,7 @@
   /**
    * Single language entry returned by the translations API.
    * @typedef {Object} TranslationEntry
-   * @property {string}  msgstr       - Current translated string.
+   * @property {Object<string, string>} msgstr_forms - Plural form index to translated string.
    * @property {boolean} fuzzy        - Whether the .po entry is marked fuzzy.
    * @property {boolean} is_active    - Whether the DB override is active.
    * @property {boolean} has_override - Whether a DB override exists.
@@ -58,8 +59,9 @@
    * Response payload from `GET /translations/`.
    * @typedef {Object} TranslationData
    * @property {Object<string, TranslationEntry>} translations - Keyed by language code.
-   * @property {Object<string, string>|null}       defaults     - .po file defaults keyed by language code.
+   * @property {Object<string, Object<string, string>>|null} defaults - .po file defaults keyed by language code, each is form-index-to-string.
    * @property {string|null}                        hint         - Optional translator hint from the .po file.
+   * @property {string}                             msgid_plural - The msgid_plural string (empty for singular).
    */
 
   /**
@@ -80,13 +82,14 @@
    * @property {string|null}    old_value  - Previous msgstr (null for creates).
    * @property {string|null}    new_value  - New msgstr (null for deletes).
    * @property {DiffSegment[]}  diff       - Token-level diff between old and new values.
+   * @property {number}         form_index - Plural form index (0 for singular).
    */
 
   /**
    * Response payload from `POST /translations/save/`.
    * @typedef {Object} SaveResponse
    * @property {boolean} ok
-   * @property {{text: string, is_preview_entry: boolean}} [display] - Updated display info.
+   * @property {{text: string, is_preview_entry: boolean, reload_required: boolean}} [display] - Updated display info.
    */
 
   /**
@@ -151,6 +154,8 @@
   const CURRENT_LANGUAGE = CONFIG.currentLanguage || "";
   /** @type {string[]|null} */
   const EDITABLE_LANGUAGES = CONFIG.editableLanguages || null;
+  /** @type {Object<string, number>} */
+  const NPLURALS = CONFIG.nplurals || {};
 
   /**
    * Check whether a language is editable by the current user.
@@ -162,16 +167,25 @@
     return EDITABLE_LANGUAGES === null || EDITABLE_LANGUAGES.indexOf(lang) !== -1;
   }
 
+  /**
+   * Get the number of plural forms for a language. Defaults to 2.
+   * @param {string} lang - Language code.
+   * @returns {number}
+   */
+  function _getNplurals(lang) {
+    return NPLURALS[lang] || 2;
+  }
+
   // ─── String Table & ZWC Marker Resolution ───────────
 
   /**
-   * @typedef {{m: string, c: string}} StringTableEntry
+   * @typedef {{m: string, c: string, p?: string}} StringTableEntry
    * Mirrors Python's StringTableEntry TypedDict.
    */
 
   /**
    * @typedef {Object<number, StringTableEntry>} StringTable
-   * Maps string ID to {msgid, context}. Injected as window.__LT_STRINGS__.
+   * Maps string ID to {msgid, context[, msgid_plural]}. Injected as window.__LT_STRINGS__.
    */
 
   /**
@@ -180,6 +194,7 @@
    * @property {string}            msgid   - The gettext message ID.
    * @property {string}            context - The gettext context (empty string if none).
    * @property {HTMLElement|null}  span    - Wrapping <lt-t> element (null only for OPTION/TITLE/SCRIPT/STYLE parents).
+   * @property {string}            [msgid_plural] - The msgid_plural if this is a plural entry.
    */
 
   /** @type {RegExp} */
@@ -353,13 +368,14 @@
                     var ltEl = document.createElement("lt-t");
                     ltEl.dataset.ltMsgid = meta.m;
                     ltEl.dataset.ltContext = meta.c;
+                    if (meta.p) ltEl.dataset.ltPlural = meta.p;
                     wrapParent.insertBefore(ltEl, nodesToWrap[0]);
                     for (var ni = 0; ni < nodesToWrap.length; ni++) {
                       ltEl.appendChild(nodesToWrap[ni]);
                     }
                     // Find the first text node inside for registration
                     var firstText = _firstTextNode(ltEl);
-                    registeredNodes.push({ node: firstText || nodeToWrap, msgid: meta.m, context: meta.c, span: ltEl });
+                    registeredNodes.push({ node: firstText || nodeToWrap, msgid: meta.m, context: meta.c, span: ltEl, msgid_plural: meta.p || "" });
                     didMultiWrap = true;
                   }
                   break;
@@ -378,11 +394,12 @@
               var ltEl2 = document.createElement("lt-t");
               ltEl2.dataset.ltMsgid = meta.m;
               ltEl2.dataset.ltContext = meta.c;
+              if (meta.p) ltEl2.dataset.ltPlural = meta.p;
               wrapParent.insertBefore(ltEl2, nodeToWrap);
               ltEl2.appendChild(nodeToWrap);
-              registeredNodes.push({ node: nodeToWrap, msgid: meta.m, context: meta.c, span: ltEl2 });
+              registeredNodes.push({ node: nodeToWrap, msgid: meta.m, context: meta.c, span: ltEl2, msgid_plural: meta.p || "" });
             } else {
-              registeredNodes.push({ node: nodeToWrap, msgid: meta.m, context: meta.c, span: null });
+              registeredNodes.push({ node: nodeToWrap, msgid: meta.m, context: meta.c, span: null, msgid_plural: meta.p || "" });
             }
           }
         }
@@ -589,6 +606,14 @@
     let errData;
     try { errData = await resp.json(); } catch { errData = {}; }
     throw new Error(/** @type {string} */ (errData.error) || "Request failed: " + resp.status);
+  }
+
+  /**
+   * Check whether the current edit session is for a plural entry.
+   * @returns {boolean}
+   */
+  function _isPlural() {
+    return !!_editMsgidPlural;
   }
 
   // ─── Shortcut Parsing ────────────────────────────────
@@ -981,11 +1006,11 @@
   let _editData = null;
   /** @type {string} - Currently selected language tab for editing. */
   let _editLang = "";
-  /** @type {Object<string, string>} - Accumulated edited text values keyed by language. */
+  /** @type {Object<string, Object<string, string>>} - Accumulated edited text values keyed by language, each is {formIndex: value}. */
   let _editedValues = {};
   /** @type {Object<string, boolean>} - Accumulated active flags keyed by language. */
   let _editedActiveFlags = {};
-  /** @type {Object<string, string>} - Snapshot of initial text values from API (for dirty detection). */
+  /** @type {Object<string, Object<string, string>>} - Snapshot of initial text values from API (for dirty detection). */
   let _originalValues = {};
   /** @type {Object<string, boolean>} - Snapshot of initial active flags from API (for dirty detection). */
   let _originalActiveFlags = {};
@@ -993,6 +1018,8 @@
   let _deletionsMarked = {};
   /** @type {boolean} - When true, the next Save click bypasses HTML validation (user acknowledged warnings). */
   let _htmlWarningAcked = false;
+  /** @type {string} - The msgid_plural for the current edit session (empty for singular). */
+  let _editMsgidPlural = "";
 
   // ─── API Client ──────────────────────────────────────
 
@@ -1001,10 +1028,13 @@
      * Fetch all language translations for a single msgid.
      * @param {string} msgid  - The gettext message identifier.
      * @param {string} context - The gettext context (empty string if none).
+     * @param {string} [msgidPlural] - The msgid_plural (empty for singular).
      * @returns {Promise<TranslationData>}
      */
-    getTranslations: async function (msgid, context) {
-      const params = new URLSearchParams({ msgid: msgid, context: context });
+    getTranslations: async function (msgid, context, msgidPlural) {
+      const paramObj = { msgid: msgid, context: context };
+      if (msgidPlural) paramObj.msgid_plural = msgidPlural;
+      const params = new URLSearchParams(paramObj);
       const resp = await fetch(API_BASE + "/translations/?" + params, {
         credentials: "same-origin",
         cache: "no-store",
@@ -1015,13 +1045,22 @@
 
     /**
      * Persist translation overrides to the database.
-     * @param {string}                msgid        - The gettext message identifier.
-     * @param {string}                context      - The gettext context.
-     * @param {Object<string,string>} translations - Map of language code to msgstr value.
-     * @param {Object<string,boolean>} activeFlags - Map of language code to active/inactive flag.
+     * @param {string}                          msgid        - The gettext message identifier.
+     * @param {string}                          context      - The gettext context.
+     * @param {Object<string, Object<string, string>>} translations - Map of language code to {formIndex: value}.
+     * @param {Object<string, boolean>}         activeFlags  - Map of language code to active/inactive flag.
+     * @param {string}                          [msgidPlural] - The msgid_plural (empty for singular).
      * @returns {Promise<SaveResponse>}
      */
-    saveTranslations: async function (msgid, context, translations, activeFlags) {
+    saveTranslations: async function (msgid, context, translations, activeFlags, msgidPlural) {
+      const payload = {
+        msgid: msgid,
+        context: context,
+        translations: translations,
+        active_flags: activeFlags || {},
+        page_language: _pageLang(),
+      };
+      if (msgidPlural) payload.msgid_plural = msgidPlural;
       const resp = await fetch(API_BASE + "/translations/save/", {
         method: "POST",
         credentials: "same-origin",
@@ -1029,13 +1068,7 @@
           "Content-Type": "application/json",
           "X-CSRFToken": CSRF_TOKEN,
         },
-        body: JSON.stringify({
-          msgid: msgid,
-          context: context,
-          translations: translations,
-          active_flags: activeFlags || {},
-          page_language: _pageLang(),
-        }),
+        body: JSON.stringify(payload),
       });
       if (!resp.ok) {
         /** @type {Record<string, unknown>} */
@@ -1055,10 +1088,13 @@
      * Fetch the edit history for a msgid/context pair.
      * @param {string} msgid   - The gettext message identifier.
      * @param {string} context - The gettext context.
+     * @param {string} [msgidPlural] - The msgid_plural (empty for singular).
      * @returns {Promise<{history: HistoryEntry[]}>}
      */
-    getHistory: async function (msgid, context) {
-      const params = new URLSearchParams({ msgid: msgid, context: context });
+    getHistory: async function (msgid, context, msgidPlural) {
+      const paramObj = { msgid: msgid, context: context };
+      if (msgidPlural) paramObj.msgid_plural = msgidPlural;
+      const params = new URLSearchParams(paramObj);
       const resp = await fetch(API_BASE + "/translations/history/?" + params, {
         credentials: "same-origin",
       });
@@ -1071,14 +1107,16 @@
      * @param {string}   msgid     - The gettext message identifier.
      * @param {string}   context   - The gettext context.
      * @param {string[]} languages - Language codes to delete.
+     * @param {string}   [msgidPlural] - The msgid_plural (empty for singular).
      * @returns {Promise<DeleteResponse>}
      */
-    deleteTranslation: async function (msgid, context, languages) {
+    deleteTranslation: async function (msgid, context, languages, msgidPlural) {
       const payload = {
         msgid: msgid,
         context: context,
         page_language: _pageLang(),
       };
+      if (msgidPlural) payload.msgid_plural = msgidPlural;
       if (languages && languages.length) payload.languages = languages;
       const resp = await fetch(API_BASE + "/translations/delete/", {
         method: "POST",
@@ -1256,6 +1294,19 @@
     const msgid = attrInfo ? attrInfo.m : element.dataset.ltMsgid;
     const context = attrInfo ? attrInfo.c : (element.dataset.ltContext || "");
 
+    // Resolve msgid_plural from the element's data attribute (set during marker resolution)
+    var msgidPlural = element.dataset.ltPlural || "";
+    // Also look up in the string table for a matching entry
+    if (!msgidPlural) {
+      for (var stId in STRING_TABLE) {
+        var stEntry = STRING_TABLE[stId];
+        if (stEntry.m === msgid && stEntry.c === (context || "") && stEntry.p) {
+          msgidPlural = stEntry.p;
+          break;
+        }
+      }
+    }
+
     // Show loading state
     dialog.querySelector(".lt-dialog__fields").innerHTML = "";
     dialog.querySelector(".lt-dialog__loading").style.display = "block";
@@ -1265,7 +1316,7 @@
 
     const msgidLabel = document.createElement("span");
     msgidLabel.className = "lt-dialog__msgid-label";
-    msgidLabel.textContent = currentAttrName ? "msgid · " + currentAttrName : "msgid";
+    msgidLabel.textContent = currentAttrName ? "msgid \u00b7 " + currentAttrName : "msgid";
 
     const msgidText = document.createElement("span");
     msgidText.className = "lt-dialog__msgid-text";
@@ -1292,7 +1343,7 @@
     dialog.showModal();
 
     try {
-      const data = await api.getTranslations(msgid, context);
+      const data = await api.getTranslations(msgid, context, msgidPlural);
       renderFields(data);
     } catch (err) {
       showToast("Failed to load translations: " + err.message, "error");
@@ -1326,17 +1377,27 @@
     _editedActiveFlags = {};
     _originalValues = {};
     _originalActiveFlags = {};
+    _editMsgidPlural = data.msgid_plural || "";
 
     const poDefaults = data.defaults || {};
 
     // Initialize values from API data
     for (let i = 0; i < LANGUAGES.length; i++) {
       const lang = LANGUAGES[i];
-      const entry = data.translations[lang] || { msgstr: "", fuzzy: false };
-      _editedValues[lang] = entry.msgstr;
+      const entry = data.translations[lang] || { msgstr_forms: {}, fuzzy: false };
+      // msgstr_forms is {formIndex: value} — use it directly as our edit state
+      var forms = entry.msgstr_forms || {};
+      // Ensure we have entries for all expected forms
+      var nForms = _isPlural() ? _getNplurals(lang) : 1;
+      var editForms = {};
+      for (var fi = 0; fi < nForms; fi++) {
+        editForms[String(fi)] = forms[String(fi)] !== undefined ? forms[String(fi)] : "";
+      }
+      _editedValues[lang] = editForms;
       const hasOverride = !!entry.has_override;
       _editedActiveFlags[lang] = hasOverride ? entry.is_active !== false : ACTIVE_BY_DEFAULT;
-      _originalValues[lang] = entry.msgstr;
+      // Deep copy for original comparison
+      _originalValues[lang] = JSON.parse(JSON.stringify(editForms));
       _originalActiveFlags[lang] = _editedActiveFlags[lang];
     }
 
@@ -1438,16 +1499,24 @@
   }
 
   /**
-   * Save current textarea value and toggle state to the accumulated edit stores.
+   * Save current textarea value(s) and toggle state to the accumulated edit stores.
    * Called before tab switches and before save.
    * @returns {void}
    */
   function _persistCurrentEdit() {
     if (!_editLang || !dialog) return;
-    const textarea = dialog.querySelector("#lt-input-" + _editLang);
-    if (textarea) {
-      _editedValues[_editLang] = textarea.value;
+
+    // Persist all form textareas for this language
+    var nForms = _isPlural() ? _getNplurals(_editLang) : 1;
+    var forms = _editedValues[_editLang] || {};
+    for (var fi = 0; fi < nForms; fi++) {
+      var ta = dialog.querySelector("#lt-input-" + _editLang + "-" + fi);
+      if (ta) {
+        forms[String(fi)] = ta.value;
+      }
     }
+    _editedValues[_editLang] = forms;
+
     const toggle = dialog.querySelector("#lt-active-" + _editLang);
     if (toggle) {
       _editedActiveFlags[_editLang] = toggle.checked;
@@ -1461,7 +1530,15 @@
    */
   function _isLangDirty(lang) {
     if (_deletionsMarked[lang]) return true;
-    if (_editedValues[lang] !== _originalValues[lang]) return true;
+    // Compare per-form values
+    var edited = _editedValues[lang] || {};
+    var original = _originalValues[lang] || {};
+    for (var key in edited) {
+      if (edited[key] !== original[key]) return true;
+    }
+    for (var key2 in original) {
+      if (original[key2] !== edited[key2]) return true;
+    }
     if (_editedActiveFlags[lang] !== _originalActiveFlags[lang]) return true;
     return false;
   }
@@ -1481,11 +1558,18 @@
       let activeNow;
       if (lang === _editLang) {
         // Read live from DOM for the active tab
-        const ta = dialog.querySelector("#lt-input-" + lang);
+        var nForms = _isPlural() ? _getNplurals(lang) : 1;
+        var formsDirty = false;
+        for (var fi = 0; fi < nForms; fi++) {
+          var ta = dialog.querySelector("#lt-input-" + lang + "-" + fi);
+          var origVal = (_originalValues[lang] || {})[String(fi)] || "";
+          if (ta && ta.value !== origVal) {
+            formsDirty = true;
+            break;
+          }
+        }
         const cb = dialog.querySelector("#lt-active-" + lang);
-        dirty = markedForDelete ||
-                (ta && ta.value !== _originalValues[lang]) ||
-                (cb && cb.checked !== _originalActiveFlags[lang]);
+        dirty = markedForDelete || formsDirty || (cb && cb.checked !== _originalActiveFlags[lang]);
         activeNow = cb ? cb.checked : _editedActiveFlags[lang];
       } else {
         dirty = _isLangDirty(lang);
@@ -1540,7 +1624,7 @@
     _renderEditPanel(wrapper);
     container.appendChild(wrapper);
 
-    // Focus and auto-resize textarea
+    // Focus and auto-resize first textarea
     const ta = container.querySelector("textarea");
     if (ta) {
       ta.focus();
@@ -1552,87 +1636,173 @@
 
   /**
    * Render the edit panel for the currently selected language.
-   * Contains .po default hint, textarea, and active toggle.
-   * Textarea is disabled when the language is marked for deletion.
+   * Contains .po default hint, textarea(s), and active toggle.
+   * For plural entries, renders N textareas (one per form).
    * @param {HTMLElement} container - Parent element to render into.
    * @returns {void}
    */
   function _renderEditPanel(container) {
     container.innerHTML = "";
     const lang = _editLang;
-    const entry = (_editData.translations[lang]) || { msgstr: "", fuzzy: false };
+    const entry = (_editData.translations[lang]) || { msgstr_forms: {}, fuzzy: false };
     const poDefaults = _editData.defaults || {};
-    const poDefault = poDefaults[lang] || "";
+    const poDefault = poDefaults[lang] || {};
     const hasOverride = !!entry.has_override;
     const markedForDelete = !!_deletionsMarked[lang];
+    var plural = _isPlural();
+    var nForms = plural ? _getNplurals(lang) : 1;
 
     // Show language label in single-language mode (no tabs to indicate it)
     if (LANGUAGES.length <= 1) {
       const langLabelEl = document.createElement("label");
       langLabelEl.className = "lt-field__label";
       langLabelEl.textContent = langLabel(lang);
-      langLabelEl.setAttribute("for", "lt-input-" + lang);
+      langLabelEl.setAttribute("for", "lt-input-" + lang + "-0");
       container.appendChild(langLabelEl);
     }
 
     // .po default hint (click to copy)
-    if (poDefault) {
-      const poWrap = document.createElement("div");
+    // For singular: show single default. For plural: show per-form defaults.
+    var hasAnyDefault = false;
+    for (var dk in poDefault) {
+      if (poDefault[dk]) { hasAnyDefault = true; break; }
+    }
+
+    if (hasAnyDefault) {
+      var poWrap = document.createElement("div");
       poWrap.className = "lt-field__po-wrap";
 
-      const poHeader = document.createElement("div");
-      poHeader.className = "lt-field__po-header";
+      if (plural) {
+        // Show per-form defaults for plural entries
+        for (var dfi = 0; dfi < nForms; dfi++) {
+          var formDefault = poDefault[String(dfi)] || "";
+          if (!formDefault) continue;
 
-      const poLabel = document.createElement("span");
-      poLabel.className = "lt-field__po-label";
-      poLabel.textContent = "Default";
+          var poFormWrap = document.createElement("div");
+          poFormWrap.className = "lt-field__po-form";
 
-      const poCopyIcon = document.createElement("span");
-      poCopyIcon.className = "lt-field__po-copy";
-      poCopyIcon.title = "Copy default";
+          var poHeader = document.createElement("div");
+          poHeader.className = "lt-field__po-header";
 
-      poHeader.appendChild(poLabel);
-      poHeader.appendChild(poCopyIcon);
+          var poLabel = document.createElement("span");
+          poLabel.className = "lt-field__po-label";
+          poLabel.textContent = "Form " + dfi + " default";
 
-      const poText = document.createElement("div");
-      poText.className = "lt-field__po-default";
-      poText.textContent = poDefault;
+          var poCopyIcon = document.createElement("span");
+          poCopyIcon.className = "lt-field__po-copy";
+          poCopyIcon.title = "Copy default";
 
-      poWrap.appendChild(poHeader);
-      poWrap.appendChild(poText);
+          poHeader.appendChild(poLabel);
+          poHeader.appendChild(poCopyIcon);
+
+          var poText = document.createElement("div");
+          poText.className = "lt-field__po-default";
+          poText.textContent = formDefault;
+
+          poFormWrap.appendChild(poHeader);
+          poFormWrap.appendChild(poText);
+          poWrap.appendChild(poFormWrap);
+
+          _makeCopyable(
+            poFormWrap,
+            poCopyIcon,
+            (function (val) { return function () { return val; }; })(formDefault),
+            "lt-field__po-wrap--copied"
+          );
+        }
+      } else {
+        // Singular: single default (form 0)
+        var singleDefault = poDefault["0"] || "";
+        if (singleDefault) {
+          var poHeader2 = document.createElement("div");
+          poHeader2.className = "lt-field__po-header";
+
+          var poLabel2 = document.createElement("span");
+          poLabel2.className = "lt-field__po-label";
+          poLabel2.textContent = "Default";
+
+          var poCopyIcon2 = document.createElement("span");
+          poCopyIcon2.className = "lt-field__po-copy";
+          poCopyIcon2.title = "Copy default";
+
+          poHeader2.appendChild(poLabel2);
+          poHeader2.appendChild(poCopyIcon2);
+
+          var poText2 = document.createElement("div");
+          poText2.className = "lt-field__po-default";
+          poText2.textContent = singleDefault;
+
+          poWrap.appendChild(poHeader2);
+          poWrap.appendChild(poText2);
+
+          _makeCopyable(
+            poWrap,
+            poCopyIcon2,
+            function () { return singleDefault; },
+            "lt-field__po-wrap--copied"
+          );
+        }
+      }
+
       container.appendChild(poWrap);
-
-      _makeCopyable(
-        poWrap,
-        poCopyIcon,
-        function () { return poDefault; },
-        "lt-field__po-wrap--copied"
-      );
     }
 
-    // Textarea
-    const textarea = document.createElement("textarea");
-    textarea.className = "lt-field__input";
-    textarea.id = "lt-input-" + lang;
-    textarea.name = lang;
-    textarea.value = _editedValues[lang] || "";
-    textarea.rows = 3;
-    if (entry.fuzzy) {
-      textarea.classList.add("lt-field__input--fuzzy");
-    }
-    if (markedForDelete) {
-      textarea.disabled = true;
-      textarea.classList.add("lt-field__input--marked-delete");
-    }
-    var langEditable = _isEditable(lang);
-    if (!langEditable) {
-      textarea.disabled = true;
-      textarea.classList.add("lt-field__input--readonly");
+    // Get the primary default for toggle visibility logic
+    var primaryDefault = poDefault["0"] || "";
+
+    // Render textarea(s) — one per form for plural, single for singular
+    for (var formIdx = 0; formIdx < nForms; formIdx++) {
+      // Form label for plural entries
+      if (plural) {
+        var formLabel = document.createElement("label");
+        formLabel.className = "lt-field__form-label";
+        formLabel.textContent = "Form " + formIdx;
+        formLabel.setAttribute("for", "lt-input-" + lang + "-" + formIdx);
+        container.appendChild(formLabel);
+      }
+
+      var textarea = document.createElement("textarea");
+      textarea.className = "lt-field__input";
+      textarea.id = "lt-input-" + lang + "-" + formIdx;
+      textarea.name = lang + "-" + formIdx;
+      var currentForms = _editedValues[lang] || {};
+      textarea.value = currentForms[String(formIdx)] || "";
+      textarea.rows = 3;
+      if (entry.fuzzy) {
+        textarea.classList.add("lt-field__input--fuzzy");
+      }
+      if (markedForDelete) {
+        textarea.disabled = true;
+        textarea.classList.add("lt-field__input--marked-delete");
+      }
+      var langEditable = _isEditable(lang);
+      if (!langEditable) {
+        textarea.disabled = true;
+        textarea.classList.add("lt-field__input--readonly");
+      }
+
+      // Auto-resize on input
+      (function (ta) {
+        ta.addEventListener("input", function () {
+          this.style.height = "auto";
+          this.style.height = this.scrollHeight + "px";
+          _updateTabDirtyDots();
+          // Reset HTML warning override so the next Save re-validates
+          if (_htmlWarningAcked) {
+            _htmlWarningAcked = false;
+            showDialogError(null);
+            var saveBtn = dialog.querySelector(".lt-btn--save");
+            if (saveBtn) saveBtn.textContent = "Save";
+          }
+        });
+      })(textarea);
+
+      container.appendChild(textarea);
     }
 
     // Active toggle
     const isActive = _editedActiveFlags[lang];
-    const currentVal = _editedValues[lang] || "";
+    var currentVal = (_editedValues[lang] || {})["0"] || "";
 
     var isDraftLang = DRAFT_LANGUAGES.indexOf(lang) !== -1;
 
@@ -1646,7 +1816,7 @@
       toggleWrap.style.display = "none";
     } else if (markedForDelete) {
       toggleWrap.style.visibility = "hidden";
-    } else if (!hasOverride && currentVal === poDefault) {
+    } else if (!hasOverride && currentVal === primaryDefault) {
       toggleWrap.style.display = "none";
     }
 
@@ -1673,32 +1843,32 @@
     toggleWrap.appendChild(slider);
     toggleWrap.appendChild(toggleLabelEl);
 
-    // Show/hide toggle + auto-resize on input
-    (function (ta, toggle, defaultVal, cb, defaultActive, hadOverride, draft) {
+    // Show/hide toggle based on whether any form differs from default
+    (function (toggle, defaults, cb, defaultActive, hadOverride, draft, langCode) {
       function syncToggle() {
         if (draft) return; // Draft languages are always active — keep toggle hidden
-        const differs = ta.value !== defaultVal;
+        var nf = _isPlural() ? _getNplurals(langCode) : 1;
+        var differs = false;
+        for (var fi2 = 0; fi2 < nf; fi2++) {
+          var ta2 = dialog.querySelector("#lt-input-" + langCode + "-" + fi2);
+          var defVal = (defaults || {})[String(fi2)] || "";
+          if (ta2 && ta2.value !== defVal) { differs = true; break; }
+        }
         toggle.style.display = (differs || hadOverride) ? "" : "none";
         if (!differs && !hadOverride) {
           cb.checked = defaultActive;
         }
       }
-      ta.addEventListener("input", function () {
-        this.style.height = "auto";
-        this.style.height = this.scrollHeight + "px";
-        syncToggle();
-        _updateTabDirtyDots();
-        // Reset HTML warning override so the next Save re-validates
-        if (_htmlWarningAcked) {
-          _htmlWarningAcked = false;
-          showDialogError(null);
-          var saveBtn = dialog.querySelector(".lt-btn--save");
-          if (saveBtn) saveBtn.textContent = "Save";
+      // Attach input listeners to all textareas
+      var nf = _isPlural() ? _getNplurals(langCode) : 1;
+      for (var fi2 = 0; fi2 < nf; fi2++) {
+        var ta2 = dialog.querySelector("#lt-input-" + langCode + "-" + fi2);
+        if (ta2) {
+          ta2.addEventListener("input", syncToggle);
         }
-      });
-    })(textarea, toggleWrap, poDefault, checkbox, ACTIVE_BY_DEFAULT, hasOverride, isDraftLang);
+      }
+    })(toggleWrap, poDefault, checkbox, ACTIVE_BY_DEFAULT, hasOverride, isDraftLang, lang);
 
-    container.appendChild(textarea);
     container.appendChild(toggleWrap);
   }
 
@@ -1812,7 +1982,8 @@
         continue;
       }
       if (!_isLangDirty(lang)) continue;
-      translations[lang] = _editedValues[lang] !== undefined ? _editedValues[lang] : "";
+      // Always send as {formIndex: value} dict
+      translations[lang] = _editedValues[lang] || {"0": ""};
       activeFlags[lang] = _editedActiveFlags[lang] !== undefined ? _editedActiveFlags[lang] : ACTIVE_BY_DEFAULT;
     }
 
@@ -1832,8 +2003,14 @@
     if (!_htmlWarningAcked && hasSave) {
       var htmlErrors = {};
       for (var hlang in translations) {
-        var errs = _validateHtmlStructure(translations[hlang]);
-        if (errs.length) htmlErrors[hlang] = errs;
+        var langForms = translations[hlang];
+        for (var hfi in langForms) {
+          var errs = _validateHtmlStructure(langForms[hfi]);
+          if (errs.length) {
+            var errKey = _isPlural() ? hlang + " (form " + hfi + ")" : hlang;
+            htmlErrors[errKey] = errs;
+          }
+        }
       }
       if (Object.keys(htmlErrors).length > 0) {
         showDialogError("Invalid HTML structure", htmlErrors);
@@ -1847,15 +2024,20 @@
     try {
       var display = null;
       if (hasSave) {
-        var saveResult = await api.saveTranslations(msgid, context, translations, activeFlags);
+        var saveResult = await api.saveTranslations(msgid, context, translations, activeFlags, _editMsgidPlural);
         if (saveResult && saveResult.display) display = saveResult.display;
       }
       if (hasDelete) {
-        var deleteResult = await api.deleteTranslation(msgid, context, langsToDelete);
+        var deleteResult = await api.deleteTranslation(msgid, context, langsToDelete, _editMsgidPlural);
         if (deleteResult && deleteResult.display) display = deleteResult.display;
       }
       if (display) {
-        _updateDomInPlace(msgid, context, display.text, display.is_preview_entry);
+        if (display.reload_required) {
+          // Plural entries: can't update DOM in-place (we don't know which form is displayed)
+          showToast("Saved. Reload to see changes.", "success");
+        } else {
+          _updateDomInPlace(msgid, context, display.text, display.is_preview_entry);
+        }
       }
       saveBtn.disabled = false;
       saveBtn.textContent = "Save";
@@ -1970,7 +2152,7 @@
 
     const info = _getMsgidAndContext();
     try {
-      const data = await api.getHistory(info.msgid, info.context);
+      const data = await api.getHistory(info.msgid, info.context, _editMsgidPlural);
       _historyData = data.history || [];
       _renderHistoryPanel(historyEl);
     } catch {
@@ -2113,6 +2295,21 @@
           header.appendChild(flag);
           hasFlag = true;
         }
+      }
+
+      // Form index label for plural entries (show when form_index > 0)
+      if (entry.form_index > 0) {
+        if (hasFlag) {
+          var sepForm = document.createElement("span");
+          sepForm.className = "lt-history__sep";
+          sepForm.textContent = "\u00b7";
+          header.appendChild(sepForm);
+        }
+        var formTag = document.createElement("span");
+        formTag.className = "lt-history__form-tag";
+        formTag.textContent = "Form " + entry.form_index;
+        header.appendChild(formTag);
+        hasFlag = true; // treat as flag for separator logic
       }
 
       // Separator between flag and time (only when flag is visible)
@@ -2320,11 +2517,11 @@
     });
 
     activateBtn.addEventListener("click", function () {
-      _executeRestore(entry.language, restoreValue, true, confirm);
+      _executeRestore(entry.language, restoreValue, true, confirm, entry.form_index);
     });
 
     inactiveBtn.addEventListener("click", function () {
-      _executeRestore(entry.language, restoreValue, false, confirm);
+      _executeRestore(entry.language, restoreValue, false, confirm, entry.form_index);
     });
   }
 
@@ -2334,23 +2531,31 @@
    * @param {string}      value     - The msgstr value to restore.
    * @param {boolean}     activate  - Whether the restored value should be active.
    * @param {HTMLElement} confirmEl - The confirmation panel (buttons are disabled during request).
+   * @param {number}      [formIndex] - The plural form index (default 0).
    * @returns {Promise<void>}
    */
-  async function _executeRestore(language, value, activate, confirmEl) {
+  async function _executeRestore(language, value, activate, confirmEl, formIndex) {
     // Disable buttons during request
     const buttons = confirmEl.querySelectorAll("button");
     for (let b = 0; b < buttons.length; b++) buttons[b].disabled = true;
 
     const info = _getMsgidAndContext();
-    const translations = {};
-    translations[language] = value;
+    var fi = formIndex || 0;
+    var translations = {};
+    var forms = {};
+    forms[String(fi)] = value;
+    translations[language] = forms;
     const activeFlags = {};
     activeFlags[language] = activate;
 
     try {
-      const data = await api.saveTranslations(info.msgid, info.context, translations, activeFlags);
+      const data = await api.saveTranslations(info.msgid, info.context, translations, activeFlags, _editMsgidPlural);
       if (data && data.display) {
-        _updateDomInPlace(info.msgid, info.context, data.display.text, data.display.is_preview_entry);
+        if (data.display.reload_required) {
+          showToast("Saved. Reload to see changes.", "success");
+        } else {
+          _updateDomInPlace(info.msgid, info.context, data.display.text, data.display.is_preview_entry);
+        }
       }
       closeModal();
     } catch (err) {
@@ -2430,6 +2635,7 @@
     _originalActiveFlags = {};
     _deletionsMarked = {};
     _htmlWarningAcked = false;
+    _editMsgidPlural = "";
     if (dialog) {
       const delBtn = dialog.querySelector(".lt-btn--delete-override");
       if (delBtn) {

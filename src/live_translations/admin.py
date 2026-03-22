@@ -11,6 +11,7 @@ import django.urls
 import django.utils.html
 
 from live_translations import conf, importexport, models, services
+from live_translations.types import PluralForms, plural_forms_from_json
 
 if t.TYPE_CHECKING:
     from live_translations.types import LanguageCode
@@ -85,7 +86,7 @@ class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
         "updated_at",
     ]
     list_filter = ["language", "context", "is_active", ModifiedByFilter]
-    search_fields = ["msgid", "msgstr", "context"]
+    search_fields = ["msgid", "context"]
     readonly_fields = ["po_default_display"]
     ordering = ["msgid", "language"]
 
@@ -93,13 +94,13 @@ class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
         (
             "Translation",
             {
-                "fields": ["po_default_display", "msgstr", "is_active"],
+                "fields": ["po_default_display", "msgstr_forms", "is_active"],
             },
         ),
         (
             "Identification",
             {
-                "fields": ["language", "msgid", "context"],
+                "fields": ["language", "msgid", "context", "msgid_plural"],
             },
         ),
     ]
@@ -110,7 +111,10 @@ class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
 
     @django.contrib.admin.display(description="Translation")
     def msgstr_short(self, obj: models.TranslationEntry) -> str:
-        return _truncate(obj.msgstr, _MSGSTR_MAX_LEN)
+        forms = obj.msgstr_forms or {}
+        # Show form 0 as the short representation
+        text = forms.get("0", "")
+        return _truncate(text, _MSGSTR_MAX_LEN)
 
     @django.contrib.admin.display(description="Default (read-only)")
     def po_default_display(
@@ -122,11 +126,19 @@ class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
         po_default = services.get_default(key=obj.key, language=obj.language)
         if not po_default:
             return django.utils.html.format_html('<span style="color: #999;">{}</span>', "No .po translation found")
+
+        # Display all forms
+        parts: list[str] = []
+        for form_idx in sorted(po_default.keys()):
+            label = f"Form {form_idx}: " if len(po_default) > 1 else ""
+            parts.append(f"{label}{po_default[form_idx]}")
+
+        display_text = "\n".join(parts)
         return django.utils.html.format_html(
             '<div style="padding: 8px 12px; background: #f5f5f5; border: 1px solid #e0e0e0; '
             "border-radius: 6px; font-family: monospace; font-size: 13px; color: #666; "
             'white-space: pre-wrap;">{}</div>',
-            po_default,
+            display_text,
         )
 
     def save_model(
@@ -136,9 +148,13 @@ class TranslationEntryAdmin(BaseModelAdmin):  # type: ignore[misc]
         form: t.Any,
         change: bool,  # noqa: FBT001
     ) -> None:
+        # Convert JSONField data to PluralForms
+        raw_forms = obj.msgstr_forms or {}
+        forms: PluralForms = plural_forms_from_json(raw_forms) if isinstance(raw_forms, dict) else {0: ""}
+
         services.save_translations(
             key=obj.key,
-            translations={obj.language: obj.msgstr},
+            translations={obj.language: forms},
             active_flags={obj.language: obj.is_active},
         )
         # Refresh obj so admin has the correct pk for redirects
@@ -322,6 +338,7 @@ class TranslationHistoryAdmin(BaseModelAdmin):  # type: ignore[misc]
         "language",
         "msgid_short",
         "context",
+        "form_index",
         "user",
     ]
     list_filter = ["action", "language", "user"]
@@ -330,9 +347,11 @@ class TranslationHistoryAdmin(BaseModelAdmin):  # type: ignore[misc]
         "language",
         "msgid",
         "context",
+        "msgid_plural",
         "action",
         "old_value",
         "new_value",
+        "form_index",
         "user",
         "created_at",
     ]

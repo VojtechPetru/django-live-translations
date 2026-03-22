@@ -20,7 +20,7 @@ import django.utils.translation.trans_real
 
 from live_translations import conf, history, models
 from live_translations.backends import base, po
-from live_translations.types import DbOverride, LanguageCode, MsgKey, OverrideMap
+from live_translations.types import DbOverride, LanguageCode, MsgKey, OverrideMap, PluralForms, plural_forms_from_json
 
 __all__ = ["CATALOG_VERSION_KEY", "CATALOG_VERSION_TIMEOUT", "DatabaseBackend"]
 
@@ -126,11 +126,14 @@ class DatabaseBackend(base.TranslationBackend):
 
         q = django.db.models.Q()
         for key in msgids:
-            q |= django.db.models.Q(msgid=key.msgid, context=key.context)
+            q |= django.db.models.Q(msgid=key.msgid, context=key.context, msgid_plural=key.msgid_plural)
 
         qs = models.TranslationEntry.objects.qs.for_languages([language]).active(active=False).filter(q)
 
-        activated = [MsgKey(msgid, ctx) for msgid, ctx in qs.values_list("msgid", "context")]
+        activated = [
+            MsgKey(msgid, ctx, msgid_plural)
+            for msgid, ctx, msgid_plural in qs.values_list("msgid", "context", "msgid_plural")
+        ]
         qs.update(is_active=True)
 
         if activated:
@@ -142,13 +145,14 @@ class DatabaseBackend(base.TranslationBackend):
     def get_inactive_overrides(self, language: LanguageCode) -> OverrideMap:
         overrides: OverrideMap = {}
         try:
-            for msgid, ctx, msgstr in (
+            for msgid, ctx, msgid_plural, msgstr_forms in (
                 models.TranslationEntry.objects.qs.for_languages([language])
                 .active(active=False)
-                .exclude(msgstr="")
-                .values_list("msgid", "context", "msgstr")
+                .values_list("msgid", "context", "msgid_plural", "msgstr_forms")
             ):
-                overrides[MsgKey(msgid, ctx)] = msgstr
+                forms = plural_forms_from_json(msgstr_forms) if msgstr_forms else {0: ""}
+                if any(v for v in forms.values()):
+                    overrides[MsgKey(msgid, ctx, msgid_plural)] = forms
         except (django.db.utils.OperationalError, django.db.utils.ProgrammingError):
             pass
         return overrides
@@ -157,19 +161,20 @@ class DatabaseBackend(base.TranslationBackend):
     def inject_overrides(self) -> None:
         """Query all DB overrides and inject into Django's translation catalogs."""
         try:
-            rows = models.TranslationEntry.objects.qs.active().values_list("language", "msgid", "context", "msgstr")
+            rows = models.TranslationEntry.objects.qs.active().values_list(
+                "language", "msgid", "context", "msgid_plural", "msgstr_forms"
+            )
         except (django.db.utils.OperationalError, django.db.utils.ProgrammingError):
             # Table doesn't exist yet (before migrations).
             return
 
-        by_lang: dict[LanguageCode, list[MsgKey]] = {}
-        msgstr_map: dict[tuple[LanguageCode, MsgKey], str] = {}
-        for language, msgid, context, msgstr in rows:
-            msg_key = MsgKey(msgid, context)
-            by_lang.setdefault(language, []).append(msg_key)
-            msgstr_map[(language, msg_key)] = msgstr
+        by_lang: dict[LanguageCode, list[tuple[MsgKey, PluralForms]]] = {}
+        for language, msgid, context, msgid_plural, msgstr_forms_json in rows:
+            msg_key = MsgKey(msgid, context, msgid_plural)
+            forms = plural_forms_from_json(msgstr_forms_json) if msgstr_forms_json else {0: ""}
+            by_lang.setdefault(language, []).append((msg_key, forms))
 
-        for lang, keys in by_lang.items():
+        for lang, entries in by_lang.items():
             try:
                 trans_obj: django.utils.translation.trans_real.DjangoTranslation = (
                     django.utils.translation.trans_real.translation(lang)
@@ -187,9 +192,16 @@ class DatabaseBackend(base.TranslationBackend):
                 return
             if catalog is None:
                 continue
-            for msg_key in keys:
+            for msg_key, forms in entries:
                 catalog_key = f"{msg_key.context}\x04{msg_key.msgid}" if msg_key.context else msg_key.msgid
-                catalog[catalog_key] = msgstr_map[(lang, msg_key)]
+                if msg_key.msgid_plural:
+                    # Plural entries: catalog uses (msgid, form_index) tuple keys
+                    for form_idx, form_str in forms.items():
+                        plural_key = (catalog_key, form_idx)
+                        catalog[plural_key] = form_str  # type: ignore[index]
+                else:
+                    # Singular entries: catalog uses plain string key
+                    catalog[catalog_key] = forms.get(0, "")
 
     @t.override
     def get_translations(
@@ -207,16 +219,17 @@ class DatabaseBackend(base.TranslationBackend):
             for row in (
                 models.TranslationEntry.objects.qs.for_key(key)
                 .for_languages(languages)
-                .values_list("language", "msgstr", "is_active")
+                .values_list("language", "msgstr_forms", "is_active")
             ):
-                db_overrides[row[0]] = DbOverride(row[1], row[2])
+                forms = plural_forms_from_json(row[1]) if row[1] else {0: ""}
+                db_overrides[row[0]] = DbOverride(forms, row[2])
         except (django.db.utils.OperationalError, django.db.utils.ProgrammingError):
             pass
 
         result: dict[LanguageCode, base.TranslationEntry] = {}
         for lang in languages:
             po_entry = po_entries.get(lang)
-            po_msgstr = po_entry.msgstr if po_entry else ""
+            po_forms = po_entry.msgstr_forms if po_entry else {0: ""}
             po_fuzzy = po_entry.fuzzy if po_entry else False
 
             db_entry = db_overrides.get(lang)
@@ -224,8 +237,9 @@ class DatabaseBackend(base.TranslationBackend):
             result[lang] = base.TranslationEntry(
                 language=lang,
                 msgid=key.msgid,
-                msgstr=db_entry.msgstr if db_entry is not None else po_msgstr,
+                msgstr_forms=db_entry.msgstr_forms if db_entry is not None else po_forms,
                 context=key.context,
+                msgid_plural=key.msgid_plural,
                 fuzzy=po_fuzzy if db_entry is None else False,
                 is_active=db_entry.is_active if db_entry is not None else True,
                 has_override=db_entry is not None,
@@ -238,20 +252,22 @@ class DatabaseBackend(base.TranslationBackend):
         self,
         key: MsgKey,
         languages: list[LanguageCode],
-    ) -> dict[LanguageCode, str]:
+    ) -> dict[LanguageCode, PluralForms]:
         """Get .po file translations (read-only) for display as defaults."""
         po_backend = self._get_po_backend()
         po_entries = po_backend.get_translations(key, languages)
-        return {lang: entry.msgstr for lang, entry in po_entries.items()}
+        return {lang: entry.msgstr_forms for lang, entry in po_entries.items()}
 
     @t.override
     def save_translations(
         self,
         key: MsgKey,
-        translations: dict[LanguageCode, str],
+        translations: dict[LanguageCode, PluralForms],
         active_flags: dict[LanguageCode, bool] | None = None,
     ) -> None:
         """Save translation overrides to the database."""
+        from live_translations.types import plural_forms_to_json
+
         fallback_active = conf.get_settings().translation_active_by_default
         po_defaults = self.get_defaults(key, list(translations.keys()))
 
@@ -260,24 +276,24 @@ class DatabaseBackend(base.TranslationBackend):
         for row in (
             models.TranslationEntry.objects.qs.for_key(key)
             .filter(language__in=translations.keys())
-            .values_list("language", "msgstr", "is_active")
+            .values_list("language", "msgstr_forms", "is_active")
         ):
-            row: tuple[LanguageCode, str, bool]
-            existing[row[0]] = DbOverride(row[1], row[2])
+            row: tuple[LanguageCode, dict[str, str], bool]
+            forms = plural_forms_from_json(row[1]) if row[1] else {0: ""}
+            existing[row[0]] = DbOverride(forms, row[2])
 
-        old_text_values: dict[LanguageCode, str] = {}
+        old_text_values: dict[LanguageCode, PluralForms] = {}
         old_active_states: dict[LanguageCode, bool] = {}
         new_active_states: dict[LanguageCode, bool] = {}
-        for lang, msgstr in translations.items():
+        for lang, forms in translations.items():
             old_entry = existing.get(lang)
             is_active = active_flags.get(lang, fallback_active) if active_flags else fallback_active
 
             # Skip creating a new DB row when nothing changed from the .po default.
-            # This prevents phantom entries for languages the caller didn't intend to edit.
-            if old_entry is None and msgstr == po_defaults.get(lang, "") and is_active == fallback_active:
+            if old_entry is None and forms == po_defaults.get(lang, {0: ""}) and is_active == fallback_active:
                 continue
 
-            old_text_values[lang] = old_entry.msgstr if old_entry else ""
+            old_text_values[lang] = old_entry.msgstr_forms if old_entry else {}
             new_active_states[lang] = is_active
             if old_entry is not None:
                 old_active_states[lang] = old_entry.is_active
@@ -286,7 +302,8 @@ class DatabaseBackend(base.TranslationBackend):
                 language=lang,
                 msgid=key.msgid,
                 context=key.context,
-                defaults={"msgstr": msgstr, "is_active": is_active},
+                msgid_plural=key.msgid_plural,
+                defaults={"msgstr_forms": plural_forms_to_json(forms), "is_active": is_active},
             )
 
         history.record_text_changes(

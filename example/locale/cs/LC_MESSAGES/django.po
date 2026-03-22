@@ -162,6 +162,31 @@ msgstr ""
 "živé překlady je umí upravit stejně jako ručně vykreslená pole."
 
 #. Auth bar
+#. Plural forms
+msgid "plurals.heading"
+msgstr "Množná čísla"
+
+msgid "plurals.notification_one %(count)s"
+msgid_plural "plurals.notification_other %(count)s"
+msgstr[0] "Máte %(count)s nové oznámení."
+msgstr[1] "Máte %(count)s nová oznámení."
+msgstr[2] "Máte %(count)s nových oznámení."
+msgstr[3] "Máte %(count)s nových oznámení."
+
+msgid "plurals.message_one %(count)s"
+msgid_plural "plurals.message_other %(count)s"
+msgstr[0] "Je %(count)s nepřečtená zpráva."
+msgstr[1] "Jsou %(count)s nepřečtené zprávy."
+msgstr[2] "Je %(count)s nepřečtených zpráv."
+msgstr[3] "Je %(count)s nepřečtených zpráv."
+
+msgid "plurals.litre_one %(count)s"
+msgid_plural "plurals.litre_other %(count)s"
+msgstr[0] "Zbývá %(count)s litr."
+msgstr[1] "Zbývají %(count)s litry."
+msgstr[2] "Zbývá %(count)s litru."
+msgstr[3] "Zbývá %(count)s litrů."
+
 msgid "auth.logged_in %(username)s"
 msgstr "Přihlášen jako %(username)s (překladatel)"
 

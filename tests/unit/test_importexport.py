@@ -3,6 +3,7 @@
 import base64
 import csv
 import io
+import json
 import pathlib
 import typing as t
 import unittest.mock
@@ -59,7 +60,9 @@ def _parse_csv(content: str) -> list[dict[str, str]]:
 
 def _make_csv(rows: list[dict[str, str]]) -> str:
     buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=["language", "msgid", "context", "msgstr", "is_active"])
+    writer = csv.DictWriter(
+        buf, fieldnames=["language", "msgid", "context", "msgid_plural", "msgstr_forms", "is_active"]
+    )
     writer.writeheader()
     for row in rows:
         writer.writerow(row)
@@ -100,18 +103,26 @@ def _configure_settings(
 
 class TestExportRow:
     def test_named_tuple_fields(self) -> None:
-        row = ExportRow(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
+        row = ExportRow(
+            language="cs", msgid="hello", context="", msgid_plural="", msgstr_forms='{"0": "Ahoj"}', is_active=True
+        )
         assert row.language == "cs"
         assert row.msgid == "hello"
         assert row.context == ""
-        assert row.msgstr == "Ahoj"
+        assert row.msgstr_forms == '{"0": "Ahoj"}'
         assert row.is_active is True
 
     def test_sorting(self) -> None:
         rows = [
-            ExportRow(language="en", msgid="hello", context="", msgstr="Hello", is_active=True),
-            ExportRow(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True),
-            ExportRow(language="cs", msgid="bye", context="", msgstr="Nashle", is_active=True),
+            ExportRow(
+                language="en", msgid="hello", context="", msgid_plural="", msgstr_forms='{"0": "Hello"}', is_active=True
+            ),
+            ExportRow(
+                language="cs", msgid="hello", context="", msgid_plural="", msgstr_forms='{"0": "Ahoj"}', is_active=True
+            ),
+            ExportRow(
+                language="cs", msgid="bye", context="", msgid_plural="", msgstr_forms='{"0": "Nashle"}', is_active=True
+            ),
         ]
         sorted_rows = sorted(rows)
         assert sorted_rows[0].language == "cs"
@@ -133,12 +144,14 @@ class TestExportCSV:
         result = importexport.export_csv(qs, include_defaults=False, languages=None)
         rows = _parse_csv(result)
         assert rows == []
-        assert "language,msgid,context,msgstr,is_active" in result
+        assert "language,msgid,context,msgid_plural,msgstr_forms,is_active" in result
 
     def test_overrides_only(self) -> None:
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
         models.TranslationEntry.objects.create(
-            language="en", msgid="hello", context="", msgstr="Hello!", is_active=False
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Ahoj"}, is_active=True
+        )
+        models.TranslationEntry.objects.create(
+            language="en", msgid="hello", context="", msgstr_forms={"0": "Hello!"}, is_active=False
         )
         qs = models.TranslationEntry.objects.qs.all()
         result = importexport.export_csv(qs, include_defaults=False, languages=None)
@@ -146,15 +159,17 @@ class TestExportCSV:
         assert len(rows) == 2
         assert rows[0]["language"] == "cs"
         assert rows[0]["msgid"] == "hello"
-        assert rows[0]["msgstr"] == "Ahoj"
+        assert json.loads(rows[0]["msgstr_forms"]) == {"0": "Ahoj"}
         assert rows[0]["is_active"] == "true"
         assert rows[1]["language"] == "en"
         assert rows[1]["is_active"] == "false"
 
     def test_language_filter(self) -> None:
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
         models.TranslationEntry.objects.create(
-            language="en", msgid="hello", context="", msgstr="Hello!", is_active=True
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Ahoj"}, is_active=True
+        )
+        models.TranslationEntry.objects.create(
+            language="en", msgid="hello", context="", msgstr_forms={"0": "Hello!"}, is_active=True
         )
         qs = models.TranslationEntry.objects.qs.all()
         result = importexport.export_csv(qs, include_defaults=False, languages=["cs"])
@@ -167,25 +182,29 @@ class TestExportCSV:
         _configure_settings(settings, locale_dir, ["cs"])
 
         # DB override for "hello"
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Cau", is_active=True)
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Cau"}, is_active=True
+        )
 
         qs = models.TranslationEntry.objects.qs.all()
         result = importexport.export_csv(qs, include_defaults=True, languages=["cs"])
         rows = _parse_csv(result)
         assert len(rows) == 2
         by_msgid = {r["msgid"]: r for r in rows}
-        assert by_msgid["hello"]["msgstr"] == "Cau", "DB override should win over PO default"
-        assert by_msgid["bye"]["msgstr"] == "Nashle", "PO default preserved when no DB override"
+        assert json.loads(by_msgid["hello"]["msgstr_forms"]) == {"0": "Cau"}, "DB override should win over PO default"
+        assert json.loads(by_msgid["bye"]["msgstr_forms"]) == {"0": "Nashle"}, (
+            "PO default preserved when no DB override"
+        )
 
     def test_csv_handles_commas_and_newlines(self) -> None:
         models.TranslationEntry.objects.create(
-            language="cs", msgid="complex", context="", msgstr="Hello, world\nnew line", is_active=True
+            language="cs", msgid="complex", context="", msgstr_forms={"0": "Hello, world\nnew line"}, is_active=True
         )
         qs = models.TranslationEntry.objects.qs.all()
         result = importexport.export_csv(qs, include_defaults=False, languages=None)
         rows = _parse_csv(result)
         assert len(rows) == 1
-        assert rows[0]["msgstr"] == "Hello, world\nnew line"
+        assert json.loads(rows[0]["msgstr_forms"]) == {"0": "Hello, world\nnew line"}
 
 
 # ---------------------------------------------------------------------------
@@ -199,7 +218,9 @@ class TestExportPO:
         locale_dir = _setup_po_files(tmp_path, {"cs": {"hello": "Ahoj"}})
         _configure_settings(settings, locale_dir, ["cs"])
 
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Cau", is_active=True)
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Cau"}, is_active=True
+        )
 
         result = importexport.export_po(language="cs")
         po = polib.pofile(result)
@@ -215,7 +236,9 @@ class TestExportPO:
         locale_dir = _setup_po_files(tmp_path, {"cs": {"hello": "Ahoj"}})
         _configure_settings(settings, locale_dir, ["cs"])
 
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Cau", is_active=False)
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Cau"}, is_active=False
+        )
 
         result = importexport.export_po(language="cs")
         po = polib.pofile(result)
@@ -227,14 +250,14 @@ class TestExportPO:
         assert entry.comment is not None
         assert LT_PENDING_PREFIX in entry.comment
         decoded = base64.b64decode(entry.comment.split(LT_PENDING_PREFIX)[1]).decode()
-        assert decoded == "Cau", "ltpending comment should contain the override value"
+        assert json.loads(decoded) == {"0": "Cau"}, "ltpending comment should contain the override value as JSON"
 
     def test_inactive_override_without_po_default(self, tmp_path: pathlib.Path, settings: "SettingsWrapper") -> None:
         locale_dir = _setup_po_files(tmp_path, {"cs": {}})
         _configure_settings(settings, locale_dir, ["cs"])
 
         models.TranslationEntry.objects.create(
-            language="cs", msgid="new_key", context="", msgstr="Novy", is_active=False
+            language="cs", msgid="new_key", context="", msgstr_forms={"0": "Novy"}, is_active=False
         )
 
         result = importexport.export_po(language="cs")
@@ -279,7 +302,7 @@ class TestExportPO:
         _configure_settings(settings, locale_dir, ["cs"])
 
         models.TranslationEntry.objects.create(
-            language="cs", msgid="hello", context="greeting", msgstr="Ahoj", is_active=True
+            language="cs", msgid="hello", context="greeting", msgstr_forms={"0": "Ahoj"}, is_active=True
         )
 
         result = importexport.export_po(language="cs")
@@ -301,9 +324,11 @@ class TestExportPOZip:
         locale_dir = _setup_po_files(tmp_path, {"cs": {}, "en": {}})
         _configure_settings(settings, locale_dir, ["cs", "en"])
 
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
         models.TranslationEntry.objects.create(
-            language="en", msgid="hello", context="", msgstr="Hello!", is_active=True
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Ahoj"}, is_active=True
+        )
+        models.TranslationEntry.objects.create(
+            language="en", msgid="hello", context="", msgstr_forms={"0": "Hello!"}, is_active=True
         )
         data = importexport.export_po_zip(languages=None)
         zf = zipfile.ZipFile(io.BytesIO(data))
@@ -318,9 +343,11 @@ class TestExportPOZip:
         locale_dir = _setup_po_files(tmp_path, {"cs": {}, "en": {}})
         _configure_settings(settings, locale_dir, ["cs", "en"])
 
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
         models.TranslationEntry.objects.create(
-            language="en", msgid="hello", context="", msgstr="Hello!", is_active=True
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Ahoj"}, is_active=True
+        )
+        models.TranslationEntry.objects.create(
+            language="en", msgid="hello", context="", msgstr_forms={"0": "Hello!"}, is_active=True
         )
         data = importexport.export_po_zip(languages=["cs"])
         zf = zipfile.ZipFile(io.BytesIO(data))
@@ -343,8 +370,22 @@ class TestImportCSV:
     def test_basic_import(self) -> None:
         content = _make_csv(
             [
-                {"language": "cs", "msgid": "hello", "context": "", "msgstr": "Ahoj", "is_active": "true"},
-                {"language": "en", "msgid": "hello", "context": "", "msgstr": "Hi", "is_active": "false"},
+                {
+                    "language": "cs",
+                    "msgid": "hello",
+                    "context": "",
+                    "msgstr_forms": '{"0": "Ahoj"}',
+                    "msgid_plural": "",
+                    "is_active": "true",
+                },
+                {
+                    "language": "en",
+                    "msgid": "hello",
+                    "context": "",
+                    "msgstr_forms": '{"0": "Hi"}',
+                    "msgid_plural": "",
+                    "is_active": "false",
+                },
             ]
         )
         result = importexport.import_csv(content)
@@ -353,17 +394,26 @@ class TestImportCSV:
         assert result["errors"] == []
 
         entry = models.TranslationEntry.objects.qs.get(language="cs", msgid="hello")
-        assert entry.msgstr == "Ahoj"
+        assert entry.msgstr_forms == {"0": "Ahoj"}
         assert entry.is_active is True
 
         entry_en = models.TranslationEntry.objects.qs.get(language="en", msgid="hello")
         assert entry_en.is_active is False
 
     def test_update_existing(self) -> None:
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Ahoj"}, is_active=True
+        )
         content = _make_csv(
             [
-                {"language": "cs", "msgid": "hello", "context": "", "msgstr": "Cau", "is_active": "true"},
+                {
+                    "language": "cs",
+                    "msgid": "hello",
+                    "context": "",
+                    "msgstr_forms": '{"0": "Cau"}',
+                    "msgid_plural": "",
+                    "is_active": "true",
+                },
             ]
         )
         result = importexport.import_csv(content)
@@ -371,10 +421,10 @@ class TestImportCSV:
         assert result["updated"] == 1
 
         entry = models.TranslationEntry.objects.qs.get(language="cs", msgid="hello")
-        assert entry.msgstr == "Cau"
+        assert entry.msgstr_forms == {"0": "Cau"}
 
     def test_missing_columns(self) -> None:
-        content = "language,msgid\ncs,hello\n"
+        content = "foo,bar\ncs,hello\n"
         result = importexport.import_csv(content)
         assert result["created"] == 0
         assert result["updated"] == 0
@@ -387,8 +437,22 @@ class TestImportCSV:
     def test_empty_msgid_skipped(self) -> None:
         content = _make_csv(
             [
-                {"language": "cs", "msgid": "", "context": "", "msgstr": "Ahoj", "is_active": "true"},
-                {"language": "cs", "msgid": "hello", "context": "", "msgstr": "Ahoj", "is_active": "true"},
+                {
+                    "language": "cs",
+                    "msgid": "",
+                    "context": "",
+                    "msgstr_forms": '{"0": "Ahoj"}',
+                    "msgid_plural": "",
+                    "is_active": "true",
+                },
+                {
+                    "language": "cs",
+                    "msgid": "hello",
+                    "context": "",
+                    "msgstr_forms": '{"0": "Ahoj"}',
+                    "msgid_plural": "",
+                    "is_active": "true",
+                },
             ]
         )
         result = importexport.import_csv(content)
@@ -414,8 +478,22 @@ class TestImportCSV:
     def test_empty_language_skipped(self) -> None:
         content = _make_csv(
             [
-                {"language": "", "msgid": "hello", "context": "", "msgstr": "Ahoj", "is_active": "true"},
-                {"language": "cs", "msgid": "bye", "context": "", "msgstr": "Nashle", "is_active": "true"},
+                {
+                    "language": "",
+                    "msgid": "hello",
+                    "context": "",
+                    "msgstr_forms": '{"0": "Ahoj"}',
+                    "msgid_plural": "",
+                    "is_active": "true",
+                },
+                {
+                    "language": "cs",
+                    "msgid": "bye",
+                    "context": "",
+                    "msgstr_forms": '{"0": "Nashle"}',
+                    "msgid_plural": "",
+                    "is_active": "true",
+                },
             ]
         )
         result = importexport.import_csv(content)
@@ -424,9 +502,20 @@ class TestImportCSV:
         assert "empty language" in result["errors"][0]
 
     def test_all_unchanged_skips_upsert(self) -> None:
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Ahoj"}, is_active=True
+        )
         content = _make_csv(
-            [{"language": "cs", "msgid": "hello", "context": "", "msgstr": "Ahoj", "is_active": "true"}]
+            [
+                {
+                    "language": "cs",
+                    "msgid": "hello",
+                    "context": "",
+                    "msgstr_forms": '{"0": "Ahoj"}',
+                    "msgid_plural": "",
+                    "is_active": "true",
+                }
+            ]
         )
         result = importexport.import_csv(content)
         assert result["created"] == 0
@@ -483,7 +572,7 @@ class TestImportPO:
         assert result["errors"] == []
 
         entry = models.TranslationEntry.objects.qs.get(language="cs", msgid="hello")
-        assert entry.msgstr == "Ahoj"
+        assert entry.msgstr_forms == {"0": "Ahoj"}
         assert entry.is_active is True
 
         entry_bye = models.TranslationEntry.objects.qs.get(language="cs", msgid="bye")
@@ -499,7 +588,7 @@ class TestImportPO:
         assert result["created"] == 1
 
         entry = models.TranslationEntry.objects.qs.get(language="cs", msgid="hello", context="greeting")
-        assert entry.msgstr == "Ahoj"
+        assert entry.msgstr_forms == {"0": "Ahoj"}
 
     def test_language_from_metadata(self) -> None:
         content = self._make_po([{"msgid": "hello", "msgstr": "Ahoj"}], language="cs")
@@ -530,7 +619,7 @@ class TestImportPO:
         assert result["created"] == 1
 
         db_entry = models.TranslationEntry.objects.qs.get(language="cs", msgid="hello")
-        assert db_entry.msgstr == "Cau", "Should use the ltpending value, not msgstr"
+        assert db_entry.msgstr_forms == {"0": "Cau"}, "Should use the ltpending value, not msgstr"
         assert db_entry.is_active is False
 
     def test_fuzzy_without_ltpending(self) -> None:
@@ -545,7 +634,7 @@ class TestImportPO:
         assert result["created"] == 1
 
         db_entry = models.TranslationEntry.objects.qs.get(language="cs", msgid="hello")
-        assert db_entry.msgstr == "Ahoj"
+        assert db_entry.msgstr_forms == {"0": "Ahoj"}
         assert db_entry.is_active is False
 
     @unittest.mock.patch("live_translations.importexport.polib.pofile", side_effect=ValueError("bad PO"))
@@ -585,8 +674,8 @@ class TestImportPOZip:
         assert result["created"] == 2
         assert result["errors"] == []
 
-        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="hello").msgstr == "Ahoj"
-        assert models.TranslationEntry.objects.qs.get(language="en", msgid="hello").msgstr == "Hi"
+        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="hello").msgstr_forms == {"0": "Ahoj"}
+        assert models.TranslationEntry.objects.qs.get(language="en", msgid="hello").msgstr_forms == {"0": "Hi"}
 
     def test_invalid_zip(self) -> None:
         result = importexport.import_po_zip(b"not a zip")
@@ -620,9 +709,11 @@ class TestRoundTrip:
         conf.get_backend_instance.cache_clear()
 
     def test_csv_round_trip(self) -> None:
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
         models.TranslationEntry.objects.create(
-            language="cs", msgid="bye", context="farewell", msgstr="Nashle", is_active=False
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Ahoj"}, is_active=True
+        )
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="bye", context="farewell", msgstr_forms={"0": "Nashle"}, is_active=False
         )
 
         # Export
@@ -639,12 +730,12 @@ class TestRoundTrip:
         assert result["errors"] == []
 
         entry = models.TranslationEntry.objects.qs.get(language="cs", msgid="hello")
-        assert entry.msgstr == "Ahoj"
+        assert entry.msgstr_forms == {"0": "Ahoj"}
         assert entry.is_active is True
         assert entry.context == ""
 
         entry_bye = models.TranslationEntry.objects.qs.get(language="cs", msgid="bye", context="farewell")
-        assert entry_bye.msgstr == "Nashle"
+        assert entry_bye.msgstr_forms == {"0": "Nashle"}
         assert entry_bye.is_active is False
 
     def test_po_round_trip_with_ltpending(
@@ -656,8 +747,12 @@ class TestRoundTrip:
         locale_dir = _setup_po_files(tmp_path, {"cs": {"hello": "Ahoj", "bye": "Nashle"}})
         _configure_settings(settings, locale_dir, ["cs"])
 
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Cau", is_active=True)
-        models.TranslationEntry.objects.create(language="cs", msgid="bye", context="", msgstr="Sbohem", is_active=False)
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Cau"}, is_active=True
+        )
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="bye", context="", msgstr_forms={"0": "Sbohem"}, is_active=False
+        )
 
         # Export
         po_content = importexport.export_po(language="cs")
@@ -672,12 +767,12 @@ class TestRoundTrip:
 
         # Active override round-trips as the override value
         entry = models.TranslationEntry.objects.qs.get(language="cs", msgid="hello")
-        assert entry.msgstr == "Cau"
+        assert entry.msgstr_forms == {"0": "Cau"}
         assert entry.is_active is True
 
         # Inactive override round-trips via ltpending
         entry_bye = models.TranslationEntry.objects.qs.get(language="cs", msgid="bye")
-        assert entry_bye.msgstr == "Sbohem"
+        assert entry_bye.msgstr_forms == {"0": "Sbohem"}
         assert entry_bye.is_active is False
 
     def test_po_zip_round_trip(
@@ -688,8 +783,12 @@ class TestRoundTrip:
         locale_dir = _setup_po_files(tmp_path, {"cs": {}, "en": {}})
         _configure_settings(settings, locale_dir, ["cs", "en"])
 
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
-        models.TranslationEntry.objects.create(language="en", msgid="hello", context="", msgstr="Hi", is_active=True)
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Ahoj"}, is_active=True
+        )
+        models.TranslationEntry.objects.create(
+            language="en", msgid="hello", context="", msgstr_forms={"0": "Hi"}, is_active=True
+        )
 
         # Export
         zip_data = importexport.export_po_zip(languages=None)
@@ -702,8 +801,8 @@ class TestRoundTrip:
         assert result["created"] == 2
         assert result["errors"] == []
 
-        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="hello").msgstr == "Ahoj"
-        assert models.TranslationEntry.objects.qs.get(language="en", msgid="hello").msgstr == "Hi"
+        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="hello").msgstr_forms == {"0": "Ahoj"}
+        assert models.TranslationEntry.objects.qs.get(language="en", msgid="hello").msgstr_forms == {"0": "Hi"}
 
 
 # ---------------------------------------------------------------------------
@@ -729,8 +828,12 @@ class TestCrossBackendRoundTrip:
         # Source environment: PO files + one DB override
         locale_dir = _setup_po_files(tmp_path, {"cs": {"hello": "Ahoj", "bye": "Nashle", "thanks": "Diky"}})
         _configure_settings(settings, locale_dir, ["cs"])
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Cau", is_active=True)
-        models.TranslationEntry.objects.create(language="cs", msgid="bye", context="", msgstr="Sbohem", is_active=False)
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Cau"}, is_active=True
+        )
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="bye", context="", msgstr_forms={"0": "Sbohem"}, is_active=False
+        )
 
         # Export all (PO defaults + DB overrides merged)
         qs = models.TranslationEntry.objects.qs.all()
@@ -744,11 +847,11 @@ class TestCrossBackendRoundTrip:
         assert result["errors"] == []
         assert result["created"] == 3
 
-        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="hello").msgstr == "Cau"
+        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="hello").msgstr_forms == {"0": "Cau"}
         assert models.TranslationEntry.objects.qs.get(language="cs", msgid="hello").is_active is True
-        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="bye").msgstr == "Sbohem"
+        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="bye").msgstr_forms == {"0": "Sbohem"}
         assert models.TranslationEntry.objects.qs.get(language="cs", msgid="bye").is_active is False
-        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="thanks").msgstr == "Diky"
+        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="thanks").msgstr_forms == {"0": "Diky"}
 
     def test_po_export_from_db_env_import_to_clean_env(
         self,
@@ -759,8 +862,12 @@ class TestCrossBackendRoundTrip:
         # Source: PO defaults + DB overrides (active + inactive)
         locale_dir = _setup_po_files(tmp_path, {"cs": {"hello": "Ahoj", "bye": "Nashle"}})
         _configure_settings(settings, locale_dir, ["cs"])
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Cau", is_active=True)
-        models.TranslationEntry.objects.create(language="cs", msgid="bye", context="", msgstr="Sbohem", is_active=False)
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Cau"}, is_active=True
+        )
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="bye", context="", msgstr_forms={"0": "Sbohem"}, is_active=False
+        )
 
         po_content = importexport.export_po(language="cs")
 
@@ -774,11 +881,11 @@ class TestCrossBackendRoundTrip:
         assert result["created"] == 2
 
         hello = models.TranslationEntry.objects.qs.get(language="cs", msgid="hello")
-        assert hello.msgstr == "Cau"
+        assert hello.msgstr_forms == {"0": "Cau"}
         assert hello.is_active is True
 
         bye = models.TranslationEntry.objects.qs.get(language="cs", msgid="bye")
-        assert bye.msgstr == "Sbohem"
+        assert bye.msgstr_forms == {"0": "Sbohem"}
         assert bye.is_active is False
 
     def test_po_zip_multi_language_migration(
@@ -789,8 +896,12 @@ class TestCrossBackendRoundTrip:
         """Export PO zip with multiple languages, import into clean environment."""
         locale_dir = _setup_po_files(tmp_path, {"cs": {"hello": "Ahoj"}, "en": {"hello": "Hello"}})
         _configure_settings(settings, locale_dir, ["cs", "en"])
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Cau", is_active=True)
-        models.TranslationEntry.objects.create(language="en", msgid="hello", context="", msgstr="Hi!", is_active=False)
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Cau"}, is_active=True
+        )
+        models.TranslationEntry.objects.create(
+            language="en", msgid="hello", context="", msgstr_forms={"0": "Hi!"}, is_active=False
+        )
 
         zip_data = importexport.export_po_zip(languages=None)
 
@@ -803,15 +914,19 @@ class TestCrossBackendRoundTrip:
         assert result["errors"] == []
         assert result["created"] == 2
 
-        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="hello").msgstr == "Cau"
+        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="hello").msgstr_forms == {"0": "Cau"}
         assert models.TranslationEntry.objects.qs.get(language="cs", msgid="hello").is_active is True
-        assert models.TranslationEntry.objects.qs.get(language="en", msgid="hello").msgstr == "Hi!"
+        assert models.TranslationEntry.objects.qs.get(language="en", msgid="hello").msgstr_forms == {"0": "Hi!"}
         assert models.TranslationEntry.objects.qs.get(language="en", msgid="hello").is_active is False
 
     def test_export_modify_reimport(self) -> None:
         """Export CSV, modify translations externally, reimport -- updates applied."""
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
-        models.TranslationEntry.objects.create(language="cs", msgid="bye", context="", msgstr="Nashle", is_active=True)
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Ahoj"}, is_active=True
+        )
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="bye", context="", msgstr_forms={"0": "Nashle"}, is_active=True
+        )
 
         # Export
         qs = models.TranslationEntry.objects.qs.all()
@@ -821,8 +936,17 @@ class TestCrossBackendRoundTrip:
         rows = _parse_csv(csv_content)
         for row in rows:
             if row["msgid"] == "hello":
-                row["msgstr"] = "Cau"
-        rows.append({"language": "cs", "msgid": "thanks", "context": "", "msgstr": "Diky", "is_active": "true"})
+                row["msgstr_forms"] = '{"0": "Cau"}'
+        rows.append(
+            {
+                "language": "cs",
+                "msgid": "thanks",
+                "context": "",
+                "msgstr_forms": '{"0": "Diky"}',
+                "msgid_plural": "",
+                "is_active": "true",
+            }
+        )
         modified_csv = _make_csv(rows)
 
         result = importexport.import_csv(modified_csv)
@@ -830,9 +954,9 @@ class TestCrossBackendRoundTrip:
         assert result["created"] == 1, "Only 'thanks' is new"
         assert result["updated"] == 1, "Only 'hello' changed"
 
-        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="hello").msgstr == "Cau"
-        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="bye").msgstr == "Nashle"
-        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="thanks").msgstr == "Diky"
+        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="hello").msgstr_forms == {"0": "Cau"}
+        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="bye").msgstr_forms == {"0": "Nashle"}
+        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="thanks").msgstr_forms == {"0": "Diky"}
 
     def test_csv_to_po_format_conversion(
         self,
@@ -843,8 +967,12 @@ class TestCrossBackendRoundTrip:
         locale_dir = _setup_po_files(tmp_path, {"cs": {}})
         _configure_settings(settings, locale_dir, ["cs"])
 
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
-        models.TranslationEntry.objects.create(language="cs", msgid="bye", context="", msgstr="Nashle", is_active=False)
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Ahoj"}, is_active=True
+        )
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="bye", context="", msgstr_forms={"0": "Nashle"}, is_active=False
+        )
 
         # Export as CSV
         qs = models.TranslationEntry.objects.qs.all()
@@ -878,7 +1006,9 @@ class TestCrossBackendRoundTrip:
 @pytest.mark.django_db
 class TestExportAdminActions:
     def test_export_selected_csv_action(self) -> None:
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Ahoj"}, is_active=True
+        )
         ma = _get_admin_instance()
         request = _make_admin_request()
         qs = models.TranslationEntry.objects.qs.all()
@@ -894,7 +1024,9 @@ class TestExportAdminActions:
         locale_dir = _setup_po_files(tmp_path, {"cs": {}})
         _configure_settings(settings, locale_dir, ["cs"])
 
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Ahoj"}, is_active=True
+        )
         ma = _get_admin_instance()
         request = _make_admin_request()
         qs = models.TranslationEntry.objects.qs.all()
@@ -946,7 +1078,9 @@ class TestExportView:
     def test_post_csv_overrides(self, settings: "SettingsWrapper") -> None:
         settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["cs", "en"], "LOCALE_DIR": "/tmp"}
         conf.get_settings.cache_clear()
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Ahoj"}, is_active=True
+        )
 
         ma = _get_admin_instance()
         request = _make_admin_request("post", data={"format": "csv", "scope": "overrides", "language": ""})
@@ -956,7 +1090,9 @@ class TestExportView:
     def test_post_po_single_language(self, tmp_path: pathlib.Path, settings: "SettingsWrapper") -> None:
         locale_dir = _setup_po_files(tmp_path, {"cs": {}})
         _configure_settings(settings, locale_dir, ["cs", "en"])
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Ahoj"}, is_active=True
+        )
 
         ma = _get_admin_instance()
         request = _make_admin_request("post", data={"format": "po", "scope": "overrides", "language": "cs"})
@@ -967,7 +1103,9 @@ class TestExportView:
     def test_post_po_all_languages_returns_zip(self, settings: "SettingsWrapper") -> None:
         settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["cs", "en"], "LOCALE_DIR": "/tmp"}
         conf.get_settings.cache_clear()
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Ahoj"}, is_active=True
+        )
 
         ma = _get_admin_instance()
         request = _make_admin_request("post", data={"format": "po", "scope": "overrides", "language": ""})
@@ -1115,7 +1253,16 @@ class TestImportView:
 class TestDryRun:
     def test_csv_dry_run_creates(self) -> None:
         content = _make_csv(
-            [{"language": "cs", "msgid": "hello", "context": "", "msgstr": "Ahoj", "is_active": "true"}]
+            [
+                {
+                    "language": "cs",
+                    "msgid": "hello",
+                    "context": "",
+                    "msgstr_forms": '{"0": "Ahoj"}',
+                    "msgid_plural": "",
+                    "is_active": "true",
+                }
+            ]
         )
         result = importexport.import_csv(content, dry_run=True)
         assert result["dry_run"] is True
@@ -1128,17 +1275,28 @@ class TestDryRun:
         assert preview.action == "create"
         assert preview.language == "cs"
         assert preview.msgid == "hello"
-        assert preview.msgstr == "Ahoj"
-        assert preview.old_msgstr == ""
+        assert json.loads(preview.msgstr_forms) == {"0": "Ahoj"}
+        assert preview.old_msgstr_forms == ""
         assert preview.old_is_active is None
 
         # No DB write
         assert models.TranslationEntry.objects.qs.count() == 0
 
     def test_csv_dry_run_updates(self) -> None:
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Ahoj"}, is_active=True
+        )
         content = _make_csv(
-            [{"language": "cs", "msgid": "hello", "context": "", "msgstr": "Cau", "is_active": "false"}]
+            [
+                {
+                    "language": "cs",
+                    "msgid": "hello",
+                    "context": "",
+                    "msgstr_forms": '{"0": "Cau"}',
+                    "msgid_plural": "",
+                    "is_active": "false",
+                }
+            ]
         )
         result = importexport.import_csv(content, dry_run=True)
         assert result["dry_run"] is True
@@ -1149,19 +1307,30 @@ class TestDryRun:
 
         preview = result["preview"][0]  # type: ignore[index]
         assert preview.action == "update"
-        assert preview.msgstr == "Cau"
-        assert preview.old_msgstr == "Ahoj"
+        assert json.loads(preview.msgstr_forms) == {"0": "Cau"}
+        assert json.loads(preview.old_msgstr_forms) == {"0": "Ahoj"}
         assert preview.is_active is False
         assert preview.old_is_active is True
 
         # DB unchanged
         entry = models.TranslationEntry.objects.qs.get(language="cs", msgid="hello")
-        assert entry.msgstr == "Ahoj"
+        assert entry.msgstr_forms == {"0": "Ahoj"}
 
     def test_csv_dry_run_unchanged(self) -> None:
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Ahoj"}, is_active=True
+        )
         content = _make_csv(
-            [{"language": "cs", "msgid": "hello", "context": "", "msgstr": "Ahoj", "is_active": "true"}]
+            [
+                {
+                    "language": "cs",
+                    "msgid": "hello",
+                    "context": "",
+                    "msgstr_forms": '{"0": "Ahoj"}',
+                    "msgid_plural": "",
+                    "is_active": "true",
+                }
+            ]
         )
         result = importexport.import_csv(content, dry_run=True)
         assert result["created"] == 0
@@ -1170,11 +1339,27 @@ class TestDryRun:
         assert len(result["preview"]) == 0  # type: ignore[arg-type]
 
     def test_csv_dry_run_mixed(self) -> None:
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=True)
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Ahoj"}, is_active=True
+        )
         content = _make_csv(
             [
-                {"language": "cs", "msgid": "hello", "context": "", "msgstr": "Cau", "is_active": "true"},
-                {"language": "cs", "msgid": "bye", "context": "", "msgstr": "Nashle", "is_active": "true"},
+                {
+                    "language": "cs",
+                    "msgid": "hello",
+                    "context": "",
+                    "msgstr_forms": '{"0": "Cau"}',
+                    "msgid_plural": "",
+                    "is_active": "true",
+                },
+                {
+                    "language": "cs",
+                    "msgid": "bye",
+                    "context": "",
+                    "msgstr_forms": '{"0": "Nashle"}',
+                    "msgid_plural": "",
+                    "is_active": "true",
+                },
             ]
         )
         result = importexport.import_csv(content, dry_run=True)

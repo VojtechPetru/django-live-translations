@@ -86,33 +86,33 @@ class TestExtractPlaceholders:
 
 class TestValidatePlaceholders:
     def test_no_placeholders_returns_none(self):
-        result = services.validate_placeholders("Hello", {"en": "Hi", "cs": "Ahoj"})
+        result = services.validate_placeholders(MsgKey("Hello", ""), {"en": {0: "Hi"}, "cs": {0: "Ahoj"}})
         assert result is None
 
     def test_matching_placeholders_returns_none(self):
-        result = services.validate_placeholders("Hello %s", {"en": "Hi %s", "cs": "Ahoj %s"})
+        result = services.validate_placeholders(MsgKey("Hello %s", ""), {"en": {0: "Hi %s"}, "cs": {0: "Ahoj %s"}})
         assert result is None
 
     def test_missing_placeholder(self):
-        result = services.validate_placeholders("Hello %s", {"en": "Hi"})
+        result = services.validate_placeholders(MsgKey("Hello %s", ""), {"en": {0: "Hi"}})
         assert result is not None
         assert "en" in result
         assert any("missing" in part for part in result["en"])
         assert any("%s" in part for part in result["en"])
 
     def test_extra_placeholder(self):
-        result = services.validate_placeholders("Hello", {"en": "Hi %s"})
+        result = services.validate_placeholders(MsgKey("Hello", ""), {"en": {0: "Hi %s"}})
         # No placeholders in msgid => returns None (early return)
         assert result is None
 
     def test_extra_placeholder_when_expected_exist(self):
-        result = services.validate_placeholders("Hello %s", {"en": "Hi %s %d"})
+        result = services.validate_placeholders(MsgKey("Hello %s", ""), {"en": {0: "Hi %s %d"}})
         assert result is not None
         assert "en" in result
         assert any("unexpected" in part for part in result["en"])
 
     def test_missing_and_extra(self):
-        result = services.validate_placeholders("Hello %(name)s", {"en": "Hi {user}"})
+        result = services.validate_placeholders(MsgKey("Hello %(name)s", ""), {"en": {0: "Hi {user}"}})
         assert result is not None
         assert "en" in result
         parts = result["en"]
@@ -120,32 +120,32 @@ class TestValidatePlaceholders:
         assert any("unexpected" in p for p in parts)
 
     def test_empty_translation_skipped(self):
-        result = services.validate_placeholders("Hello %s", {"en": ""})
+        result = services.validate_placeholders(MsgKey("Hello %s", ""), {"en": {0: ""}})
         assert result is None
 
     def test_none_msgstr_skipped(self):
         # Empty string is falsy, should be skipped
-        result = services.validate_placeholders("Hello %s", {"en": "", "cs": "Ahoj %s"})
+        result = services.validate_placeholders(MsgKey("Hello %s", ""), {"en": {0: ""}, "cs": {0: "Ahoj %s"}})
         assert result is None
 
     def test_multiple_languages_errors(self):
-        result = services.validate_placeholders("Hello %s", {"en": "Hi", "cs": "Ahoj"})
+        result = services.validate_placeholders(MsgKey("Hello %s", ""), {"en": {0: "Hi"}, "cs": {0: "Ahoj"}})
         assert result is not None
         assert "en" in result
         assert "cs" in result
 
     def test_only_bad_languages_reported(self):
-        result = services.validate_placeholders("Hello %s", {"en": "Hi %s", "cs": "Ahoj"})
+        result = services.validate_placeholders(MsgKey("Hello %s", ""), {"en": {0: "Hi %s"}, "cs": {0: "Ahoj"}})
         assert result is not None
         assert "en" not in result
         assert "cs" in result
 
     def test_brace_placeholders_validated(self):
-        result = services.validate_placeholders("Hello {name}", {"en": "Hi {name}"})
+        result = services.validate_placeholders(MsgKey("Hello {name}", ""), {"en": {0: "Hi {name}"}})
         assert result is None
 
     def test_brace_placeholder_missing(self):
-        result = services.validate_placeholders("Hello {name}", {"en": "Hi"})
+        result = services.validate_placeholders(MsgKey("Hello {name}", ""), {"en": {0: "Hi"}})
         assert result is not None
         assert "en" in result
 
@@ -261,7 +261,9 @@ class TestGetTranslations:
         test_backend.seed_hint("hello", "A greeting")
 
         # Create a DB override for "en" (explicitly active)
-        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hello", context="", is_active=True)
+        models.TranslationEntry.objects.create(
+            language="en", msgid="hello", msgstr_forms={"0": "Hello"}, context="", is_active=True
+        )
 
         result = services.get_translations(key=MsgKey("hello", ""))
 
@@ -269,9 +271,9 @@ class TestGetTranslations:
         assert result["context"] == ""
         assert result["hint"] == "A greeting"
         assert "en" in result["translations"]
-        assert result["translations"]["en"]["msgstr"] == "Hello"
+        assert result["translations"]["en"]["msgstr_forms"] == {0: "Hello"}
         assert result["translations"]["en"]["is_active"] is True
-        assert result["defaults"] == {"en": "Hello", "cs": ""}
+        assert result["defaults"] == {"en": {0: "Hello"}, "cs": {0: ""}}
 
     def test_passes_all_languages_to_backend(self, test_backend: "TestBackend", settings):
         settings.LIVE_TRANSLATIONS["LANGUAGES"] = ["en", "cs", "de"]
@@ -300,7 +302,7 @@ class TestGetTranslations:
 class TestSaveTranslations:
     def test_empty_msgid_raises(self):
         with pytest.raises(ValueError, match="msgid is required"):
-            services.save_translations(key=MsgKey("", ""), translations={"en": "Hi"})
+            services.save_translations(key=MsgKey("", ""), translations={"en": {0: "Hi"}})
 
     def test_empty_translations_raises(self):
         with pytest.raises(ValueError, match="translations dict is required"):
@@ -308,20 +310,20 @@ class TestSaveTranslations:
 
     def test_invalid_language_raises(self, test_backend: "TestBackend"):
         with pytest.raises(ValueError, match="Invalid language codes: xx"):
-            services.save_translations(key=MsgKey("hello", ""), translations={"xx": "Nope"})
+            services.save_translations(key=MsgKey("hello", ""), translations={"xx": {0: "Nope"}})
 
     def test_multiple_invalid_languages(self, test_backend: "TestBackend"):
         with pytest.raises(ValueError, match="Invalid language codes:"):
-            services.save_translations(key=MsgKey("hello", ""), translations={"xx": "A", "yy": "B"})
+            services.save_translations(key=MsgKey("hello", ""), translations={"xx": {0: "A"}, "yy": {0: "B"}})
 
     def test_placeholder_mismatch_raises(self, test_backend: "TestBackend"):
         with pytest.raises(services.PlaceholderValidationError) as exc_info:
-            services.save_translations(key=MsgKey("Hello %s", ""), translations={"en": "Hi"})
+            services.save_translations(key=MsgKey("Hello %s", ""), translations={"en": {0: "Hi"}})
 
         assert "en" in exc_info.value.details
 
     def test_successful_save(self, test_backend: "TestBackend"):
-        result = services.save_translations(key=MsgKey("hello", ""), translations={"en": "Hi"})
+        result = services.save_translations(key=MsgKey("hello", ""), translations={"en": {0: "Hi"}})
 
         assert result["ok"] is True
         assert "display" in result
@@ -332,7 +334,7 @@ class TestSaveTranslations:
     def test_passes_active_flags(self, test_backend: "TestBackend"):
         services.save_translations(
             key=MsgKey("hello", ""),
-            translations={"en": "Hi"},
+            translations={"en": {0: "Hi"}},
             active_flags={"en": True},
         )
 
@@ -342,7 +344,7 @@ class TestSaveTranslations:
         assert kwargs["active_flags"]["en"] is True
 
     def test_none_active_flags_passes_empty_dict(self, test_backend: "TestBackend"):
-        services.save_translations(key=MsgKey("hello", ""), translations={"en": "Hi"})
+        services.save_translations(key=MsgKey("hello", ""), translations={"en": {0: "Hi"}})
 
         calls = test_backend.get_calls("save_translations")
         assert len(calls) == 1
@@ -359,7 +361,7 @@ class TestSaveTranslations:
 
         services.save_translations(
             key=MsgKey("hello", ""),
-            translations={"cs": "Ahoj"},
+            translations={"cs": {0: "Ahoj"}},
             active_flags={"cs": False},
         )
 
@@ -377,7 +379,7 @@ class TestSaveTranslations:
 
         services.save_translations(
             key=MsgKey("hello", ""),
-            translations={"en": "Hi", "cs": "Ahoj"},
+            translations={"en": {0: "Hi"}, "cs": {0: "Ahoj"}},
             active_flags={"en": False, "cs": False},
         )
 
@@ -397,7 +399,7 @@ class TestSaveTranslations:
 
         services.save_translations(
             key=MsgKey("hello", ""),
-            translations={"cs": "Ahoj"},
+            translations={"cs": {0: "Ahoj"}},
         )
 
         calls = test_backend.get_calls("save_translations")
@@ -419,7 +421,7 @@ class TestSaveTranslations:
 
         services.save_translations(
             key=MsgKey("hello", ""),
-            translations={"ja": "Konnichiwa", "ko": "Annyeong"},
+            translations={"ja": {0: "Konnichiwa"}, "ko": {0: "Annyeong"}},
             active_flags={"ja": False, "ko": False},
         )
 
@@ -438,8 +440,8 @@ class TestSaveTranslations:
 @pytest.mark.django_db
 class TestDeleteTranslations:
     def test_deletes_all_languages(self, test_backend: "TestBackend"):
-        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="")
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", msgstr="Ahoj", context="")
+        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr_forms={"0": "Hi"}, context="")
+        models.TranslationEntry.objects.create(language="cs", msgid="hello", msgstr_forms={"0": "Ahoj"}, context="")
 
         result = services.delete_translations(key=MsgKey("hello", ""))
 
@@ -448,8 +450,8 @@ class TestDeleteTranslations:
         assert models.TranslationEntry.objects.qs.count() == 0
 
     def test_deletes_specific_languages(self, test_backend: "TestBackend"):
-        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="")
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", msgstr="Ahoj", context="")
+        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr_forms={"0": "Hi"}, context="")
+        models.TranslationEntry.objects.create(language="cs", msgid="hello", msgstr_forms={"0": "Ahoj"}, context="")
 
         result = services.delete_translations(key=MsgKey("hello", ""), languages=["cs"])
 
@@ -460,7 +462,7 @@ class TestDeleteTranslations:
         assert remaining.language == "en"
 
     def test_records_history(self, test_backend: "TestBackend"):
-        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="")
+        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr_forms={"0": "Hi"}, context="")
 
         services.delete_translations(key=MsgKey("hello", ""))
 
@@ -470,7 +472,7 @@ class TestDeleteTranslations:
         assert h.new_value == ""
 
     def test_bumps_catalog_version(self, test_backend: "TestBackend"):
-        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="")
+        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr_forms={"0": "Hi"}, context="")
 
         initial_version = test_backend._version
         services.delete_translations(key=MsgKey("hello", ""))
@@ -502,8 +504,8 @@ class TestDeleteTranslations:
 @pytest.mark.django_db
 class TestDeleteEntries:
     def test_deletes_entries(self, test_backend: "TestBackend"):
-        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="")
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", msgstr="Ahoj", context="")
+        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr_forms={"0": "Hi"}, context="")
+        models.TranslationEntry.objects.create(language="cs", msgid="hello", msgstr_forms={"0": "Ahoj"}, context="")
 
         qs = models.TranslationEntry.objects.qs.all()
         count = services.delete_entries(queryset=qs)
@@ -512,8 +514,8 @@ class TestDeleteEntries:
         assert models.TranslationEntry.objects.qs.count() == 0
 
     def test_records_history_per_entry(self, test_backend: "TestBackend"):
-        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="")
-        models.TranslationEntry.objects.create(language="cs", msgid="world", msgstr="Svet", context="ctx")
+        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr_forms={"0": "Hi"}, context="")
+        models.TranslationEntry.objects.create(language="cs", msgid="world", msgstr_forms={"0": "Svet"}, context="ctx")
 
         qs = models.TranslationEntry.objects.qs.all()
         services.delete_entries(queryset=qs)
@@ -523,18 +525,18 @@ class TestDeleteEntries:
         assert actions == {"delete"}
 
     def test_history_includes_old_value(self, test_backend: "TestBackend"):
-        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="")
+        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr_forms={"0": "Hi"}, context="")
 
         qs = models.TranslationEntry.objects.qs.all()
         services.delete_entries(queryset=qs)
 
         h = models.TranslationHistory.objects.get()
-        assert h.old_value == "Hi"
+        assert h.old_value == '{"0": "Hi"}'
         assert h.new_value == ""
         assert h.msgid == "hello"
 
     def test_bumps_catalog_version(self, test_backend: "TestBackend"):
-        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="")
+        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr_forms={"0": "Hi"}, context="")
 
         initial_version = test_backend._version
         qs = models.TranslationEntry.objects.qs.all()
@@ -553,7 +555,9 @@ class TestDeleteEntries:
         assert test_backend._version == initial_version
 
     def test_preserves_context_in_history(self, test_backend: "TestBackend"):
-        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="greeting")
+        models.TranslationEntry.objects.create(
+            language="en", msgid="hello", msgstr_forms={"0": "Hi"}, context="greeting"
+        )
 
         qs = models.TranslationEntry.objects.qs.all()
         services.delete_entries(queryset=qs)
@@ -673,9 +677,11 @@ class TestGetHistory:
 class TestBulkActivate:
     def test_delegates_to_backend(self, test_backend: "TestBackend"):
         # Create inactive entries so bulk_activate has something to activate
-        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="", is_active=False)
         models.TranslationEntry.objects.create(
-            language="en", msgid="world", msgstr="World", context="", is_active=False
+            language="en", msgid="hello", msgstr_forms={"0": "Hi"}, context="", is_active=False
+        )
+        models.TranslationEntry.objects.create(
+            language="en", msgid="world", msgstr_forms={"0": "World"}, context="", is_active=False
         )
 
         keys = [MsgKey("hello", ""), MsgKey("world", "")]
@@ -690,7 +696,9 @@ class TestBulkActivate:
         assert args == ("en", keys)
 
     def test_records_history_when_activated(self, test_backend: "TestBackend"):
-        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="", is_active=False)
+        models.TranslationEntry.objects.create(
+            language="en", msgid="hello", msgstr_forms={"0": "Hi"}, context="", is_active=False
+        )
 
         activated = [MsgKey("hello", "")]
         services.bulk_activate(language="en", keys=activated)
@@ -718,8 +726,12 @@ class TestBulkActivate:
 @pytest.mark.django_db
 class TestActivateEntries:
     def test_activates_inactive_entries(self, test_backend: "TestBackend"):
-        e1 = models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=False)
-        e2 = models.TranslationEntry.objects.create(language="en", msgid="msg2", msgstr="M2", is_active=False)
+        e1 = models.TranslationEntry.objects.create(
+            language="en", msgid="msg1", msgstr_forms={"0": "M1"}, is_active=False
+        )
+        e2 = models.TranslationEntry.objects.create(
+            language="en", msgid="msg2", msgstr_forms={"0": "M2"}, is_active=False
+        )
 
         qs = models.TranslationEntry.objects.qs.all()
         count = services.activate_entries(queryset=qs)
@@ -731,7 +743,7 @@ class TestActivateEntries:
         assert e2.is_active is True
 
     def test_skips_already_active(self, test_backend: "TestBackend"):
-        models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=True)
+        models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr_forms={"0": "M1"}, is_active=True)
 
         qs = models.TranslationEntry.objects.qs.all()
         count = services.activate_entries(queryset=qs)
@@ -739,7 +751,9 @@ class TestActivateEntries:
         assert count == 0
 
     def test_records_history(self, test_backend: "TestBackend"):
-        models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", context="", is_active=False)
+        models.TranslationEntry.objects.create(
+            language="en", msgid="msg1", msgstr_forms={"0": "M1"}, context="", is_active=False
+        )
 
         qs = models.TranslationEntry.objects.qs.all()
         services.activate_entries(queryset=qs)
@@ -750,7 +764,7 @@ class TestActivateEntries:
         assert h.new_value == "active"
 
     def test_bumps_catalog_version(self, test_backend: "TestBackend"):
-        models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=False)
+        models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr_forms={"0": "M1"}, is_active=False)
 
         initial_version = test_backend._version
         qs = models.TranslationEntry.objects.qs.all()
@@ -759,7 +773,7 @@ class TestActivateEntries:
         assert test_backend._version == initial_version + 1
 
     def test_no_bump_when_nothing_updated(self, test_backend: "TestBackend"):
-        models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=True)
+        models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr_forms={"0": "M1"}, is_active=True)
 
         initial_version = test_backend._version
         qs = models.TranslationEntry.objects.qs.all()
@@ -768,8 +782,10 @@ class TestActivateEntries:
         assert test_backend._version == initial_version
 
     def test_mixed_active_inactive(self, test_backend: "TestBackend"):
-        models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=True)
-        e2 = models.TranslationEntry.objects.create(language="en", msgid="msg2", msgstr="M2", is_active=False)
+        models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr_forms={"0": "M1"}, is_active=True)
+        e2 = models.TranslationEntry.objects.create(
+            language="en", msgid="msg2", msgstr_forms={"0": "M2"}, is_active=False
+        )
 
         qs = models.TranslationEntry.objects.qs.all()
         count = services.activate_entries(queryset=qs)
@@ -782,8 +798,12 @@ class TestActivateEntries:
 @pytest.mark.django_db
 class TestDeactivateEntries:
     def test_deactivates_active_entries(self, test_backend: "TestBackend"):
-        e1 = models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=True)
-        e2 = models.TranslationEntry.objects.create(language="en", msgid="msg2", msgstr="M2", is_active=True)
+        e1 = models.TranslationEntry.objects.create(
+            language="en", msgid="msg1", msgstr_forms={"0": "M1"}, is_active=True
+        )
+        e2 = models.TranslationEntry.objects.create(
+            language="en", msgid="msg2", msgstr_forms={"0": "M2"}, is_active=True
+        )
 
         qs = models.TranslationEntry.objects.qs.all()
         count = services.deactivate_entries(queryset=qs)
@@ -795,7 +815,7 @@ class TestDeactivateEntries:
         assert e2.is_active is False
 
     def test_skips_already_inactive(self, test_backend: "TestBackend"):
-        models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=False)
+        models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr_forms={"0": "M1"}, is_active=False)
 
         qs = models.TranslationEntry.objects.qs.all()
         count = services.deactivate_entries(queryset=qs)
@@ -803,7 +823,9 @@ class TestDeactivateEntries:
         assert count == 0
 
     def test_records_history(self, test_backend: "TestBackend"):
-        models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", context="", is_active=True)
+        models.TranslationEntry.objects.create(
+            language="en", msgid="msg1", msgstr_forms={"0": "M1"}, context="", is_active=True
+        )
 
         qs = models.TranslationEntry.objects.qs.all()
         services.deactivate_entries(queryset=qs)
@@ -814,7 +836,7 @@ class TestDeactivateEntries:
         assert h.new_value == "inactive"
 
     def test_bumps_catalog_version(self, test_backend: "TestBackend"):
-        models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=True)
+        models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr_forms={"0": "M1"}, is_active=True)
 
         initial_version = test_backend._version
         qs = models.TranslationEntry.objects.qs.all()
@@ -823,7 +845,7 @@ class TestDeactivateEntries:
         assert test_backend._version == initial_version + 1
 
     def test_no_bump_when_nothing_updated(self, test_backend: "TestBackend"):
-        models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=False)
+        models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr_forms={"0": "M1"}, is_active=False)
 
         initial_version = test_backend._version
         qs = models.TranslationEntry.objects.qs.all()
@@ -840,7 +862,9 @@ class TestDeactivateEntries:
 @pytest.mark.django_db
 class TestComputeDisplay:
     def test_active_entry_returns_msgstr(self, test_backend: "TestBackend"):
-        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="", is_active=True)
+        models.TranslationEntry.objects.create(
+            language="en", msgid="hello", msgstr_forms={"0": "Hi"}, context="", is_active=True
+        )
 
         result = services.compute_display(key=MsgKey("hello", ""), page_language="en")
 
@@ -848,7 +872,9 @@ class TestComputeDisplay:
         assert result["is_preview_entry"] is False
 
     def test_inactive_entry_returns_default(self, test_backend: "TestBackend"):
-        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="", is_active=False)
+        models.TranslationEntry.objects.create(
+            language="en", msgid="hello", msgstr_forms={"0": "Hi"}, context="", is_active=False
+        )
         test_backend.seed_default("en", "hello", "Default Hello")
 
         result = services.compute_display(key=MsgKey("hello", ""), page_language="en")
@@ -858,7 +884,7 @@ class TestComputeDisplay:
 
     def test_preview_shows_inactive_entry(self, test_backend: "TestBackend"):
         models.TranslationEntry.objects.create(
-            language="en", msgid="hello", msgstr="Preview Text", context="", is_active=False
+            language="en", msgid="hello", msgstr_forms={"0": "Preview Text"}, context="", is_active=False
         )
 
         result = services.compute_display(key=MsgKey("hello", ""), page_language="en", is_preview=True)
@@ -868,7 +894,7 @@ class TestComputeDisplay:
 
     def test_preview_active_entry_not_marked_as_preview(self, test_backend: "TestBackend"):
         models.TranslationEntry.objects.create(
-            language="en", msgid="hello", msgstr="Active Text", context="", is_active=True
+            language="en", msgid="hello", msgstr_forms={"0": "Active Text"}, context="", is_active=True
         )
 
         result = services.compute_display(key=MsgKey("hello", ""), page_language="en", is_preview=True)
@@ -890,7 +916,9 @@ class TestComputeDisplay:
         assert result["text"] == ""
 
     def test_uses_page_language(self, test_backend: "TestBackend"):
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", msgstr="Ahoj", context="", is_active=True)
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", msgstr_forms={"0": "Ahoj"}, context="", is_active=True
+        )
 
         result = services.compute_display(key=MsgKey("hello", ""), page_language="cs")
 
@@ -947,7 +975,7 @@ class TestGetDefault:
 
         result = services.get_default(key=MsgKey("hello", ""), language="en")
 
-        assert result == "Default Hello"
+        assert result == {0: "Default Hello"}
 
         calls = test_backend.get_calls("get_defaults")
         assert len(calls) >= 1
@@ -957,7 +985,7 @@ class TestGetDefault:
     def test_returns_empty_when_no_default(self, test_backend: "TestBackend"):
         result = services.get_default(key=MsgKey("hello", ""), language="en")
 
-        assert result == ""
+        assert result == {0: ""}
 
 
 # ---------------------------------------------------------------------------
@@ -982,15 +1010,15 @@ class TestHtmlContentPreservation:
     @pytest.mark.parametrize("html_value", HTML_STRINGS)
     def test_save_and_retrieve_preserves_html(self, test_backend: "TestBackend", html_value: str):
         key = MsgKey("html.test", "")
-        services.save_translations(key=key, translations={"en": html_value}, active_flags={"en": True})
+        services.save_translations(key=key, translations={"en": {0: html_value}}, active_flags={"en": True})
 
         result = services.get_translations(key=key)
-        assert result["translations"]["en"]["msgstr"] == html_value
+        assert result["translations"]["en"]["msgstr_forms"] == {0: html_value}
 
     @pytest.mark.parametrize("html_value", HTML_STRINGS)
     def test_compute_display_preserves_html(self, test_backend: "TestBackend", html_value: str):
         key = MsgKey("html.test", "")
-        services.save_translations(key=key, translations={"en": html_value}, active_flags={"en": True})
+        services.save_translations(key=key, translations={"en": {0: html_value}}, active_flags={"en": True})
 
         display = services.compute_display(key=key, page_language="en")
         assert display["text"] == html_value
@@ -1000,12 +1028,14 @@ class TestHtmlContentPreservation:
         test_backend.seed_default("en", "html.default", "Default with <strong>bold</strong> text")
 
         result = services.get_translations(key=key)
-        assert result["translations"]["en"]["msgstr"] == "Default with <strong>bold</strong> text"
+        assert result["translations"]["en"]["msgstr_forms"] == {0: "Default with <strong>bold</strong> text"}
 
     def test_html_override_replaces_html_default(self, test_backend: "TestBackend"):
         key = MsgKey("html.override", "")
         test_backend.seed_default("en", "html.override", "Old <em>emphasis</em>")
-        services.save_translations(key=key, translations={"en": "New <strong>bold</strong>"}, active_flags={"en": True})
+        services.save_translations(
+            key=key, translations={"en": {0: "New <strong>bold</strong>"}}, active_flags={"en": True}
+        )
 
         display = services.compute_display(key=key, page_language="en")
         assert display["text"] == "New <strong>bold</strong>"

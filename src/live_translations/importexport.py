@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 import logging
 import typing as t
 import zipfile
@@ -10,7 +11,7 @@ import polib
 
 from live_translations import conf, history, models
 from live_translations.backends.po import _get_pending, _set_pending
-from live_translations.types import DbOverride, LanguageCode, MsgKey
+from live_translations.types import DbOverride, LanguageCode, MsgKey, PluralForms, plural_forms_from_json
 
 __all__ = [
     "ExportRow",
@@ -26,14 +27,15 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-_CSV_COLUMNS = ["language", "msgid", "context", "msgstr", "is_active"]
+_CSV_COLUMNS = ["language", "msgid", "context", "msgid_plural", "msgstr_forms", "is_active"]
 
 
 class ExportRow(t.NamedTuple):
     language: LanguageCode
     msgid: str
     context: str
-    msgstr: str
+    msgid_plural: str
+    msgstr_forms: str  # JSON-encoded PluralForms
     is_active: bool
 
 
@@ -51,9 +53,10 @@ class PreviewEntry(t.NamedTuple):
     language: LanguageCode
     msgid: str
     context: str
-    msgstr: str
+    msgid_plural: str
+    msgstr_forms: str  # JSON-encoded PluralForms
     is_active: bool
-    old_msgstr: str
+    old_msgstr_forms: str
     old_is_active: bool | None
 
 
@@ -75,7 +78,8 @@ def _rows_from_queryset(
             language=e.language,
             msgid=e.msgid,
             context=e.context,
-            msgstr=e.msgstr,
+            msgid_plural=e.msgid_plural,
+            msgstr_forms=json.dumps(e.msgstr_forms, ensure_ascii=False),
             is_active=e.is_active,
         )
         for e in qs.order_by("language", "msgid", "context")
@@ -84,27 +88,30 @@ def _rows_from_queryset(
 
 def _collect_all_translations(languages: list[LanguageCode]) -> list[ExportRow]:
     """Merge PO defaults with DB overrides. DB wins when both exist."""
-    rows_by_key: dict[tuple[LanguageCode, str, str], ExportRow] = {}
+    rows_by_key: dict[tuple[LanguageCode, str, str, str], ExportRow] = {}
 
     # 1. Read PO files
     for lang in languages:
-        for key, msgstr in _read_po_defaults(lang).items():
-            rows_by_key[(lang, key.msgid, key.context)] = ExportRow(
+        for key, forms in _read_po_defaults(lang).items():
+            forms_json = json.dumps(forms, ensure_ascii=False)
+            rows_by_key[(lang, key.msgid, key.context, key.msgid_plural)] = ExportRow(
                 language=lang,
                 msgid=key.msgid,
                 context=key.context,
-                msgstr=msgstr,
+                msgid_plural=key.msgid_plural,
+                msgstr_forms=forms_json,
                 is_active=True,
             )
 
     # 2. Overlay DB overrides
     db_entries = models.TranslationEntry.objects.qs.for_languages(languages).order_by("language", "msgid", "context")
     for e in db_entries:
-        rows_by_key[(e.language, e.msgid, e.context)] = ExportRow(
+        rows_by_key[(e.language, e.msgid, e.context, e.msgid_plural)] = ExportRow(
             language=e.language,
             msgid=e.msgid,
             context=e.context,
-            msgstr=e.msgstr,
+            msgid_plural=e.msgid_plural,
+            msgstr_forms=json.dumps(e.msgstr_forms, ensure_ascii=False),
             is_active=e.is_active,
         )
 
@@ -127,14 +134,23 @@ def export_csv(
     writer = csv.writer(buf)
     writer.writerow(_CSV_COLUMNS)
     for row in rows:
-        writer.writerow([row.language, row.msgid, row.context, row.msgstr, str(row.is_active).lower()])
+        writer.writerow(
+            [
+                row.language,
+                row.msgid,
+                row.context,
+                row.msgid_plural,
+                row.msgstr_forms,
+                str(row.is_active).lower(),
+            ]
+        )
     return buf.getvalue()
 
 
-def _read_po_defaults(language: LanguageCode) -> dict[MsgKey, str]:
-    """Read PO file defaults for a language. Returns {MsgKey: msgstr}."""
+def _read_po_defaults(language: LanguageCode) -> dict[MsgKey, PluralForms]:
+    """Read PO file defaults for a language. Returns {MsgKey: PluralForms}."""
     settings = conf.get_settings()
-    defaults: dict[MsgKey, str] = {}
+    defaults: dict[MsgKey, PluralForms] = {}
     po_path = settings.locale_dir / language / "LC_MESSAGES" / f"{settings.gettext_domain}.po"
     try:
         po = polib.pofile(str(po_path))
@@ -143,7 +159,11 @@ def _read_po_defaults(language: LanguageCode) -> dict[MsgKey, str]:
     for entry in po:
         if not entry.msgid:
             continue
-        defaults[MsgKey(entry.msgid, entry.msgctxt or "")] = entry.msgstr
+        key = MsgKey(entry.msgid, entry.msgctxt or "", entry.msgid_plural or "")
+        if entry.msgid_plural:
+            defaults[key] = dict(entry.msgstr_plural)
+        else:
+            defaults[key] = {0: entry.msgstr}
     return defaults
 
 
@@ -155,15 +175,14 @@ def export_po(
 
     Active DB overrides replace the PO default in msgstr.
     Inactive DB overrides use the PO default as msgstr and store the
-    override in an ``ltpending:`` comment + ``fuzzy`` flag, making the
-    file usable for both DB import (fuzzy → inactive) and PO backend
-    migration (ltpending preserves exact state).
+    override in an ``ltpending:`` comment + ``fuzzy`` flag.
     """
     po_defaults = _read_po_defaults(language)
 
     db_overrides: dict[MsgKey, DbOverride] = {}
     for e in models.TranslationEntry.objects.qs.for_language(language).order_by("msgid", "context"):
-        db_overrides[MsgKey(e.msgid, e.context)] = DbOverride(e.msgstr, e.is_active)
+        forms = plural_forms_from_json(e.msgstr_forms) if e.msgstr_forms else {0: ""}
+        db_overrides[MsgKey(e.msgid, e.context, e.msgid_plural)] = DbOverride(forms, e.is_active)
 
     all_keys: list[MsgKey] = sorted(set(po_defaults.keys()) | set(db_overrides.keys()))
 
@@ -175,19 +194,36 @@ def export_po(
     }
 
     for key in all_keys:
-        po_default = po_defaults.get(key, "")
+        po_default = po_defaults.get(key, {0: ""})
         db = db_overrides.get(key)
 
-        if db is not None:
-            if db.is_active:
-                entry = polib.POEntry(msgid=key.msgid, msgstr=db.msgstr, msgctxt=key.context or None)
-            else:
-                # Inactive: msgstr = PO default, ltpending = DB override, fuzzy flag
-                entry = polib.POEntry(msgid=key.msgid, msgstr=po_default, msgctxt=key.context or None)
+        if key.msgid_plural:
+            # Plural entry
+            if db is not None and db.is_active:
+                entry = polib.POEntry(
+                    msgid=key.msgid, msgstr="", msgctxt=key.context or None, msgid_plural=key.msgid_plural
+                )
+                entry.msgstr_plural = dict(db.msgstr_forms)
+            elif db is not None:
+                entry = polib.POEntry(
+                    msgid=key.msgid, msgstr="", msgctxt=key.context or None, msgid_plural=key.msgid_plural
+                )
+                entry.msgstr_plural = dict(po_default)
                 entry.flags.append("fuzzy")
-                _set_pending(entry, db.msgstr)
+                _set_pending(entry, db.msgstr_forms)
+            else:
+                entry = polib.POEntry(
+                    msgid=key.msgid, msgstr="", msgctxt=key.context or None, msgid_plural=key.msgid_plural
+                )
+                entry.msgstr_plural = dict(po_default)
+        elif db is not None and db.is_active:
+            entry = polib.POEntry(msgid=key.msgid, msgstr=db.msgstr_forms.get(0, ""), msgctxt=key.context or None)
+        elif db is not None:
+            entry = polib.POEntry(msgid=key.msgid, msgstr=po_default.get(0, ""), msgctxt=key.context or None)
+            entry.flags.append("fuzzy")
+            _set_pending(entry, db.msgstr_forms)
         else:
-            entry = polib.POEntry(msgid=key.msgid, msgstr=po_default, msgctxt=key.context or None)
+            entry = polib.POEntry(msgid=key.msgid, msgstr=po_default.get(0, ""), msgctxt=key.context or None)
 
         po.append(entry)
 
@@ -215,24 +251,24 @@ def export_po_zip(
 
 def _snapshot_existing(
     valid_rows: list[ExportRow],
-) -> dict[tuple[LanguageCode, str, str], tuple[str, bool]]:
+) -> dict[tuple[LanguageCode, str, str, str], tuple[str, bool]]:
     """Snapshot existing DB entries for the given rows."""
-    lookup = {(r.language, r.msgid, r.context) for r in valid_rows}
+    lookup = {(r.language, r.msgid, r.context, r.msgid_plural) for r in valid_rows}
     languages = list({r.language for r in valid_rows})
 
-    existing: dict[tuple[LanguageCode, str, str], tuple[str, bool]] = {}
-    for lang, mid, ctx, msgstr, is_active in models.TranslationEntry.objects.qs.for_languages(languages).values_list(
-        "language", "msgid", "context", "msgstr", "is_active"
-    ):
-        key = (lang, mid, ctx)
+    existing: dict[tuple[LanguageCode, str, str, str], tuple[str, bool]] = {}
+    for lang, mid, ctx, mid_plural, forms, is_active in models.TranslationEntry.objects.qs.for_languages(
+        languages
+    ).values_list("language", "msgid", "context", "msgid_plural", "msgstr_forms", "is_active"):
+        key = (lang, mid, ctx, mid_plural)
         if key in lookup:
-            existing[key] = (msgstr, is_active)
+            existing[key] = (json.dumps(forms, ensure_ascii=False) if forms else '{"0": ""}', is_active)
     return existing
 
 
 def _build_preview(
     valid_rows: list[ExportRow],
-    existing: dict[tuple[LanguageCode, str, str], tuple[str, bool]],
+    existing: dict[tuple[LanguageCode, str, str, str], tuple[str, bool]],
 ) -> tuple[int, int, int, list[PreviewEntry]]:
     """Classify rows as create/update/unchanged and build preview entries."""
     preview: list[PreviewEntry] = []
@@ -240,19 +276,39 @@ def _build_preview(
     updated = 0
     unchanged = 0
     for row in valid_rows:
-        key = (row.language, row.msgid, row.context)
+        key = (row.language, row.msgid, row.context, row.msgid_plural)
         old = existing.get(key)
         if old is None:
             created += 1
             preview.append(
-                PreviewEntry("create", row.language, row.msgid, row.context, row.msgstr, row.is_active, "", None)
+                PreviewEntry(
+                    "create",
+                    row.language,
+                    row.msgid,
+                    row.context,
+                    row.msgid_plural,
+                    row.msgstr_forms,
+                    row.is_active,
+                    "",
+                    None,
+                )
             )
-        elif old == (row.msgstr, row.is_active):
+        elif old == (row.msgstr_forms, row.is_active):
             unchanged += 1
         else:
             updated += 1
             preview.append(
-                PreviewEntry("update", row.language, row.msgid, row.context, row.msgstr, row.is_active, old[0], old[1])
+                PreviewEntry(
+                    "update",
+                    row.language,
+                    row.msgid,
+                    row.context,
+                    row.msgid_plural,
+                    row.msgstr_forms,
+                    row.is_active,
+                    old[0],
+                    old[1],
+                )
             )
     return created, updated, unchanged, preview
 
@@ -288,8 +344,8 @@ def _bulk_import(rows: list[ExportRow], *, dry_run: bool = False) -> ImportResul
         )
 
     # Only upsert rows that actually changed (skip unchanged)
-    changed_keys = {(p.language, p.msgid, p.context) for p in preview}
-    changed_rows = [r for r in valid_rows if (r.language, r.msgid, r.context) in changed_keys]
+    changed_keys = {(p.language, p.msgid, p.context, p.msgid_plural) for p in preview}
+    changed_rows = [r for r in valid_rows if (r.language, r.msgid, r.context, r.msgid_plural) in changed_keys]
 
     if not changed_rows:
         return ImportResult(created=created, updated=updated, errors=errors)
@@ -300,7 +356,8 @@ def _bulk_import(rows: list[ExportRow], *, dry_run: bool = False) -> ImportResul
             language=row.language,
             msgid=row.msgid,
             context=row.context,
-            msgstr=row.msgstr,
+            msgid_plural=row.msgid_plural,
+            msgstr_forms=json.loads(row.msgstr_forms),
             is_active=row.is_active,
             updated_at=now,
         )
@@ -311,11 +368,11 @@ def _bulk_import(rows: list[ExportRow], *, dry_run: bool = False) -> ImportResul
         models.TranslationEntry.objects.bulk_create(
             entries_to_upsert,
             update_conflicts=True,
-            update_fields=["msgstr", "is_active", "updated_at"],
-            unique_fields=["language", "msgid", "context"],
+            update_fields=["msgstr_forms", "is_active", "updated_at"],
+            unique_fields=["language", "msgid", "context", "msgid_plural"],
         )
 
-        history_entries = [(row.language, MsgKey(row.msgid, row.context)) for row in changed_rows]
+        history_entries = [(row.language, MsgKey(row.msgid, row.context, row.msgid_plural)) for row in changed_rows]
 
         if history_entries:
             history.record_bulk_action(
@@ -336,21 +393,34 @@ def import_csv(content: str, *, dry_run: bool = False) -> ImportResult:
         if reader.fieldnames is None:
             return ImportResult(created=0, updated=0, errors=["Empty or invalid CSV file"], dry_run=dry_run)
 
-        missing = {"language", "msgid", "msgstr"} - set(reader.fieldnames)
-        if missing:
-            msg = f"Missing required columns: {', '.join(sorted(missing))}"
-            return ImportResult(created=0, updated=0, errors=[msg], dry_run=dry_run)
+        # Support both old format (msgstr column) and new format (msgstr_forms column)
+        has_new_format = "msgstr_forms" in reader.fieldnames
+        has_old_format = "msgstr" in reader.fieldnames and not has_new_format
+
+        if not has_new_format and not has_old_format:
+            missing = {"language", "msgid"} - set(reader.fieldnames)
+            if missing:
+                msg = f"Missing required columns: {', '.join(sorted(missing))}"
+                return ImportResult(created=0, updated=0, errors=[msg], dry_run=dry_run)
 
         rows: list[ExportRow] = []
         for line in reader:
             is_active_raw = line.get("is_active", "true").strip().lower()
             is_active = is_active_raw not in ("false", "0", "no")
+
+            if has_old_format:
+                # Legacy CSV: single msgstr column -> wrap as {"0": value}
+                msgstr_forms = json.dumps({"0": line.get("msgstr", "")})
+            else:
+                msgstr_forms = line.get("msgstr_forms", '{"0": ""}')
+
             rows.append(
                 ExportRow(
                     language=line.get("language", "").strip(),
                     msgid=line.get("msgid", ""),
                     context=line.get("context", "").strip(),
-                    msgstr=line.get("msgstr", ""),
+                    msgid_plural=line.get("msgid_plural", "").strip(),
+                    msgstr_forms=msgstr_forms,
                     is_active=is_active,
                 )
             )
@@ -383,15 +453,26 @@ def import_po(content: str, language: LanguageCode, *, dry_run: bool = False) ->
         if not entry.msgid:
             continue
 
-        # ltpending preserves exact DB state from our exports;
-        # fall back to fuzzy flag (standard PO convention).
         pending = _get_pending(entry)
         if pending is not None:
-            msgstr, is_active = pending, False
+            forms = pending
+            is_active = False
+        elif entry.msgid_plural:
+            forms = dict(entry.msgstr_plural)
+            is_active = "fuzzy" not in entry.flags
         else:
-            msgstr, is_active = entry.msgstr, "fuzzy" not in entry.flags
+            forms = {0: entry.msgstr}
+            is_active = "fuzzy" not in entry.flags
+
         rows.append(
-            ExportRow(language=lang, msgid=entry.msgid, context=entry.msgctxt or "", msgstr=msgstr, is_active=is_active)
+            ExportRow(
+                language=lang,
+                msgid=entry.msgid,
+                context=entry.msgctxt or "",
+                msgid_plural=entry.msgid_plural or "",
+                msgstr_forms=json.dumps(forms, ensure_ascii=False),
+                is_active=is_active,
+            )
         )
 
     return _bulk_import(rows, dry_run=dry_run)
