@@ -29,6 +29,7 @@
    * @property {string}   [currentLanguage]  - Server-resolved current language code.
    * @property {boolean}  [preview]          - Whether preview mode is active.
    * @property {Array<{m:string, c:string}>} [previewEntries] - Inactive override entries for preview.
+   * @property {string[]|null} [editableLanguages] - Subset of languages the current user may edit (null = all).
    * @property {Object<string, number>} [nplurals] - Map of language code to number of plural forms.
    */
 
@@ -81,7 +82,7 @@
    * @property {string|null}    user       - Username of the editor, or null.
    * @property {string|null}    old_value  - Previous msgstr (null for creates).
    * @property {string|null}    new_value  - New msgstr (null for deletes).
-   * @property {DiffSegment[]}  diff       - Token-level diff between old and new values.
+   * @property {DiffSegment[]}  [diff]      - Token-level diff between old and new values (absent for state changes).
    * @property {number}         form_index - Plural form index (0 for singular).
    */
 
@@ -97,6 +98,7 @@
    * @typedef {Object} DeleteResponse
    * @property {boolean} ok
    * @property {number}  deleted - Number of overrides deleted.
+   * @property {{text: string, is_preview_entry: boolean, reload_required: boolean}} [display] - Updated display info.
    */
 
   /**
@@ -319,39 +321,39 @@
           nodeToWrap.textContent = (nodeToWrap.textContent || "").replace(START_FLAG_RE, "");
         }
 
-        var didMultiWrap = false;
+        let didMultiWrap = false;
 
         if (nodeToWrap) {
-          var wrapParent = nodeToWrap.parentNode;
-          var canWrap = wrapParent && wrapParent.nodeName !== "OPTION" && wrapParent.nodeName !== "TITLE" && wrapParent.nodeName !== "SCRIPT" && wrapParent.nodeName !== "STYLE";
+          const wrapParent = nodeToWrap.parentNode;
+          const canWrap = wrapParent && wrapParent.nodeName !== "OPTION" && wrapParent.nodeName !== "TITLE" && wrapParent.nodeName !== "SCRIPT" && wrapParent.nodeName !== "STYLE";
 
           // ── Multi-node wrapping via start flag ──
           // Walk backwards from contentNode through previousSiblings looking
           // for the ZWC start flag.  When found, wrap all nodes from the
           // flag position through contentNode in a single <lt-t>.
           if (canWrap && contentNode) {
-            var cursor = contentNode;
+            let cursor = contentNode;
             while (cursor) {
               if (cursor.nodeType === Node.TEXT_NODE) {
                 START_FLAG_RE.lastIndex = 0;
-                var flagMatch = START_FLAG_RE.exec(cursor.textContent || "");
+                const flagMatch = START_FLAG_RE.exec(cursor.textContent || "");
                 if (flagMatch) {
-                  var flagIdx = flagMatch.index;
-                  var flagChar = flagMatch[0];
+                  const flagIdx = flagMatch.index;
+                  const flagChar = flagMatch[0];
                   // Strip the flag character
                   cursor.textContent = (cursor.textContent || "").slice(0, flagIdx) + (cursor.textContent || "").slice(flagIdx + 1);
                   // Determine split position:
                   // - Position-0 flag (\uFEFF): split at flagIdx (text before is non-translation)
                   // - Position-1 flag (\u2060): split at flagIdx-1 (char before flag is the
                   //   first translation char and must be included in <lt-t>)
-                  var splitAt = flagChar === WJ ? flagIdx - 1 : flagIdx;
-                  var wrapStart = cursor;
+                  const splitAt = flagChar === WJ ? flagIdx - 1 : flagIdx;
+                  let wrapStart = cursor;
                   if (splitAt > 0) {
                     wrapStart = /** @type {Text} */ (cursor.splitText(splitAt));
                   }
                   // Collect all nodes from wrapStart through contentNode (inclusive)
-                  var nodesToWrap = [];
-                  var n = wrapStart;
+                  const nodesToWrap = [];
+                  let n = wrapStart;
                   while (n) {
                     nodesToWrap.push(n);
                     if (n === contentNode) break;
@@ -365,16 +367,13 @@
                     }
                   }
                   if (nodesToWrap.length > 0) {
-                    var ltEl = document.createElement("lt-t");
-                    ltEl.dataset.ltMsgid = meta.m;
-                    ltEl.dataset.ltContext = meta.c;
-                    if (meta.p) ltEl.dataset.ltPlural = meta.p;
+                    const ltEl = _createLtElement(meta);
                     wrapParent.insertBefore(ltEl, nodesToWrap[0]);
-                    for (var ni = 0; ni < nodesToWrap.length; ni++) {
+                    for (let ni = 0; ni < nodesToWrap.length; ni++) {
                       ltEl.appendChild(nodesToWrap[ni]);
                     }
                     // Find the first text node inside for registration
-                    var firstText = _firstTextNode(ltEl);
+                    const firstText = _firstTextNode(ltEl);
                     registeredNodes.push({ node: firstText || nodeToWrap, msgid: meta.m, context: meta.c, span: ltEl, msgid_plural: meta.p || "" });
                     didMultiWrap = true;
                   }
@@ -382,7 +381,7 @@
                 }
               }
               // Stop walking at parent boundary or if we hit another <lt-t>
-              var prev = cursor.previousSibling;
+              const prev = cursor.previousSibling;
               if (!prev || (prev.nodeType === Node.ELEMENT_NODE && /** @type {Element} */ (prev).tagName === "LT-T")) break;
               cursor = prev;
             }
@@ -391,10 +390,7 @@
           // ── Fallback: single-node wrapping ──
           if (!didMultiWrap) {
             if (canWrap) {
-              var ltEl2 = document.createElement("lt-t");
-              ltEl2.dataset.ltMsgid = meta.m;
-              ltEl2.dataset.ltContext = meta.c;
-              if (meta.p) ltEl2.dataset.ltPlural = meta.p;
+              const ltEl2 = _createLtElement(meta);
               wrapParent.insertBefore(ltEl2, nodeToWrap);
               ltEl2.appendChild(nodeToWrap);
               registeredNodes.push({ node: nodeToWrap, msgid: meta.m, context: meta.c, span: ltEl2, msgid_plural: meta.p || "" });
@@ -445,13 +441,26 @@
   }
 
   /**
+   * Create an `<lt-t>` wrapper element with dataset attributes from a string-table entry.
+   * @param {StringTableEntry} meta - String-table entry with msgid, context, and optional plural.
+   * @returns {HTMLElement}
+   */
+  function _createLtElement(meta) {
+    const el = document.createElement("lt-t");
+    el.dataset.ltMsgid = meta.m;
+    el.dataset.ltContext = meta.c;
+    if (meta.p) el.dataset.ltPlural = meta.p;
+    return el;
+  }
+
+  /**
    * Find the first text node inside a DOM subtree.
    * @param {Node} root - Root node to search within.
    * @returns {Text|null}
    */
   function _firstTextNode(root) {
-    var tw = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    var n = tw.nextNode();
+    const tw = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const n = tw.nextNode();
     return n ? /** @type {Text} */ (n) : null;
   }
 
@@ -461,7 +470,7 @@
    * Set of HTML void elements that do not require a closing tag.
    * @type {Object<string, boolean>}
    */
-  var VOID_ELEMENTS = {
+  const VOID_ELEMENTS = {
     area:1, base:1, br:1, col:1, embed:1, hr:1, img:1, input:1,
     link:1, meta:1, param:1, source:1, track:1, wbr:1
   };
@@ -471,7 +480,7 @@
    * Groups: [1] = "/" for closing tags, [2] = tag name, [3] = "/" for self-closing.
    * @type {RegExp}
    */
-  var HTML_TAG_RE = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)\b[^>]*(\/?)>/g;
+  const HTML_TAG_RE = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)\b[^>]*(\/?)>/g;
 
   /**
    * Validate the HTML structure of a translation string.
@@ -492,15 +501,15 @@
   function _validateHtmlStructure(text) {
     if (text.indexOf("<") === -1) return [];
 
-    var errors = [];
-    var stack = [];
-    var match;
+    const errors = [];
+    const stack = [];
+    let match;
 
     HTML_TAG_RE.lastIndex = 0;
     while ((match = HTML_TAG_RE.exec(text)) !== null) {
-      var isClosing = match[1] === "/";
-      var tagName = match[2].toLowerCase();
-      var isSelfClosing = match[3] === "/";
+      const isClosing = match[1] === "/";
+      const tagName = match[2].toLowerCase();
+      const isSelfClosing = match[3] === "/";
 
       if (isSelfClosing || VOID_ELEMENTS[tagName]) {
         // Self-closing or void element — nothing to track
@@ -517,8 +526,8 @@
           stack.pop();
         } else {
           // Check if the tag exists deeper in the stack (nesting error)
-          var found = false;
-          for (var si = stack.length - 1; si >= 0; si--) {
+          let found = false;
+          for (let si = stack.length - 1; si >= 0; si--) {
             if (stack[si] === tagName) { found = true; break; }
           }
           if (found) {
@@ -533,7 +542,7 @@
     }
 
     // Any tags left on the stack are unclosed
-    for (var ui = stack.length - 1; ui >= 0; ui--) {
+    for (let ui = stack.length - 1; ui >= 0; ui--) {
       errors.push("Unclosed <" + stack[ui] + "> tag");
     }
 
@@ -565,11 +574,11 @@
       return;
     }
     // Published: clear draft cookie, then use URL prefix swap or django_language cookie
-    document.cookie = "lt_lang=; path=/; max-age=0; path=/";
-    var path = window.location.pathname;
-    var prefixMatch = path.match(/^\/([a-z]{2}(?:-[a-z]{2})?)(\/|$)/i);
+    document.cookie = "lt_lang=; path=/; max-age=0";
+    const path = window.location.pathname;
+    const prefixMatch = path.match(/^\/([a-z]{2}(?:-[a-z]{2})?)(\/|$)/i);
     if (prefixMatch && LANGUAGES.indexOf(prefixMatch[1].toLowerCase()) !== -1) {
-      var newPath = "/" + lang + path.substring(prefixMatch[1].length + 1);
+      const newPath = "/" + lang + path.substring(prefixMatch[1].length + 1);
       window.location.href = newPath + window.location.search + window.location.hash;
       return;
     }
@@ -584,6 +593,22 @@
    */
   function _parseLtAttrs(el) {
     try { return JSON.parse(el.dataset.ltAttrs || "[]"); } catch { return []; }
+  }
+
+  /**
+   * Sync preview/selection CSS classes on an element after a save.
+   * @param {Element} el              - The DOM element to update.
+   * @param {boolean} isPreviewEntry  - Whether this entry is an inactive preview override.
+   * @returns {void}
+   */
+  function _syncPreviewClass(el, isPreviewEntry) {
+    if (isPreviewEntry) {
+      el.classList.add("lt-preview");
+    } else {
+      el.classList.remove("lt-preview", "lt-selected");
+      const idx = selectedElements.indexOf(el);
+      if (idx !== -1) selectedElements.splice(idx, 1);
+    }
   }
 
   /**
@@ -914,37 +939,11 @@
       if (entry.msgid === msgid && entry.context === context) {
         if (entry.span) {
           entry.span.innerHTML = displayText;
-          // Update the registered text node ref to the first text node inside
-          var ft = _firstTextNode(entry.span);
+          const ft = _firstTextNode(entry.span);
           if (ft) entry.node = ft;
+          _syncPreviewClass(entry.span, isPreviewEntry);
         } else {
           entry.node.textContent = displayText;
-        }
-        if (entry.span) {
-          if (isPreviewEntry) {
-            entry.span.classList.add("lt-preview");
-          } else {
-            entry.span.classList.remove("lt-preview", "lt-selected");
-            const sidx = selectedElements.indexOf(entry.span);
-            if (sidx !== -1) selectedElements.splice(sidx, 1);
-          }
-        }
-      }
-    }
-
-    // Also update any inline text spans that may exist outside registeredNodes
-    // (e.g., if wrapping was skipped for some elements)
-    const spans = document.querySelectorAll("lt-t");
-    for (let i = 0; i < spans.length; i++) {
-      const sp = spans[i];
-      if (sp.dataset.ltMsgid === msgid && (sp.dataset.ltContext || "") === context) {
-        sp.innerHTML = displayText;
-        if (isPreviewEntry) {
-          sp.classList.add("lt-preview");
-        } else {
-          sp.classList.remove("lt-preview", "lt-selected");
-          const idx = selectedElements.indexOf(sp);
-          if (idx !== -1) selectedElements.splice(idx, 1);
         }
       }
     }
@@ -956,13 +955,7 @@
       for (let k = 0; k < attrs.length; k++) {
         if (attrs[k].m === msgid && (attrs[k].c || "") === context) {
           attrEls[j].setAttribute(attrs[k].a, displayText);
-          if (isPreviewEntry) {
-            attrEls[j].classList.add("lt-preview");
-          } else {
-            attrEls[j].classList.remove("lt-preview", "lt-selected");
-            const aidx = selectedElements.indexOf(attrEls[j]);
-            if (aidx !== -1) selectedElements.splice(aidx, 1);
-          }
+          _syncPreviewClass(attrEls[j], isPreviewEntry);
           break;
         }
       }
@@ -1295,11 +1288,11 @@
     const context = attrInfo ? attrInfo.c : (element.dataset.ltContext || "");
 
     // Resolve msgid_plural from the element's data attribute (set during marker resolution)
-    var msgidPlural = element.dataset.ltPlural || "";
+    let msgidPlural = element.dataset.ltPlural || "";
     // Also look up in the string table for a matching entry
     if (!msgidPlural) {
-      for (var stId in STRING_TABLE) {
-        var stEntry = STRING_TABLE[stId];
+      for (const stId in STRING_TABLE) {
+        const stEntry = STRING_TABLE[stId];
         if (stEntry.m === msgid && stEntry.c === (context || "") && stEntry.p) {
           msgidPlural = stEntry.p;
           break;
@@ -1335,7 +1328,7 @@
       function () { return msgidEl.dataset.msgid || ""; },
       "lt-dialog__msgid--copied"
     );
-    var openSaveBtn = dialog.querySelector(".lt-btn--save");
+    const openSaveBtn = dialog.querySelector(".lt-btn--save");
     openSaveBtn.disabled = true;
     openSaveBtn.textContent = "Save";
     showDialogError(null);
@@ -1386,11 +1379,11 @@
       const lang = LANGUAGES[i];
       const entry = data.translations[lang] || { msgstr_forms: {}, fuzzy: false };
       // msgstr_forms is {formIndex: value} — use it directly as our edit state
-      var forms = entry.msgstr_forms || {};
+      const forms = entry.msgstr_forms || {};
       // Ensure we have entries for all expected forms
-      var nForms = _isPlural() ? _getNplurals(lang) : 1;
-      var editForms = {};
-      for (var fi = 0; fi < nForms; fi++) {
+      const nForms = _isPlural() ? _getNplurals(lang) : 1;
+      const editForms = {};
+      for (let fi = 0; fi < nForms; fi++) {
         editForms[String(fi)] = forms[String(fi)] !== undefined ? forms[String(fi)] : "";
       }
       _editedValues[lang] = editForms;
@@ -1427,14 +1420,13 @@
 
     for (let i = 0; i < LANGUAGES.length; i++) {
       (function (lang) {
-        const meta = langMeta(lang);
         const entry = (_editData && _editData.translations[lang]) || {};
         const pill = document.createElement("button");
         pill.type = "button";
         pill.className = "lt-editor__tab" + (_editLang === lang ? " lt-editor__tab--active" : "") + (!_isEditable(lang) ? " lt-editor__tab--readonly" : "");
 
         // Leading dot (inactive override / marked for deletion)
-        var leadDot = document.createElement("span");
+        const leadDot = document.createElement("span");
         leadDot.className = "lt-editor__dot";
         leadDot.dataset.role = "status";
         if (entry.has_override && entry.is_active === false) {
@@ -1446,19 +1438,19 @@
         pill.appendChild(leadDot);
 
         // Label text
-        var label = document.createTextNode(meta ? meta.flag + "  " + meta.name : lang.toUpperCase());
+        const label = document.createTextNode(langLabel(lang));
         pill.appendChild(label);
 
         // Draft badge
         if (DRAFT_LANGUAGES.indexOf(lang) !== -1) {
-          var draftBadge = document.createElement("span");
+          const draftBadge = document.createElement("span");
           draftBadge.className = "lt-editor__draft-badge";
           draftBadge.textContent = "Draft";
           pill.appendChild(draftBadge);
         }
 
         // Trailing dot (unsaved changes)
-        var trailDot = document.createElement("span");
+        const trailDot = document.createElement("span");
         trailDot.className = "lt-editor__dot";
         trailDot.dataset.role = "dirty";
         trailDot.style.display = "none";
@@ -1507,10 +1499,10 @@
     if (!_editLang || !dialog) return;
 
     // Persist all form textareas for this language
-    var nForms = _isPlural() ? _getNplurals(_editLang) : 1;
-    var forms = _editedValues[_editLang] || {};
-    for (var fi = 0; fi < nForms; fi++) {
-      var ta = dialog.querySelector("#lt-input-" + _editLang + "-" + fi);
+    const nForms = _isPlural() ? _getNplurals(_editLang) : 1;
+    const forms = _editedValues[_editLang] || {};
+    for (let fi = 0; fi < nForms; fi++) {
+      const ta = dialog.querySelector("#lt-input-" + _editLang + "-" + fi);
       if (ta) {
         forms[String(fi)] = ta.value;
       }
@@ -1531,12 +1523,12 @@
   function _isLangDirty(lang) {
     if (_deletionsMarked[lang]) return true;
     // Compare per-form values
-    var edited = _editedValues[lang] || {};
-    var original = _originalValues[lang] || {};
-    for (var key in edited) {
+    const edited = _editedValues[lang] || {};
+    const original = _originalValues[lang] || {};
+    for (const key in edited) {
       if (edited[key] !== original[key]) return true;
     }
-    for (var key2 in original) {
+    for (const key2 in original) {
       if (original[key2] !== edited[key2]) return true;
     }
     if (_editedActiveFlags[lang] !== _originalActiveFlags[lang]) return true;
@@ -1558,11 +1550,11 @@
       let activeNow;
       if (lang === _editLang) {
         // Read live from DOM for the active tab
-        var nForms = _isPlural() ? _getNplurals(lang) : 1;
-        var formsDirty = false;
-        for (var fi = 0; fi < nForms; fi++) {
-          var ta = dialog.querySelector("#lt-input-" + lang + "-" + fi);
-          var origVal = (_originalValues[lang] || {})[String(fi)] || "";
+        const nForms = _isPlural() ? _getNplurals(lang) : 1;
+        let formsDirty = false;
+        for (let fi = 0; fi < nForms; fi++) {
+          const ta = dialog.querySelector("#lt-input-" + lang + "-" + fi);
+          const origVal = (_originalValues[lang] || {})[String(fi)] || "";
           if (ta && ta.value !== origVal) {
             formsDirty = true;
             break;
@@ -1576,7 +1568,7 @@
         activeNow = _editedActiveFlags[lang] !== undefined ? _editedActiveFlags[lang] : ACTIVE_BY_DEFAULT;
       }
       // Trailing dot: unsaved changes
-      var trailDot = tabs[i].querySelector('[data-role="dirty"]');
+      const trailDot = tabs[i].querySelector('[data-role="dirty"]');
       if (trailDot) {
         if (dirty) {
           trailDot.classList.add("lt-editor__dot--dirty");
@@ -1589,7 +1581,7 @@
         }
       }
       // Leading dot: deletion (red) supersedes inactive override (amber)
-      var leadDot = tabs[i].querySelector('[data-role="status"]');
+      const leadDot = tabs[i].querySelector('[data-role="status"]');
       if (leadDot) {
         leadDot.classList.remove("lt-editor__dot--delete", "lt-editor__dot--inactive");
         if (markedForDelete) {
@@ -1649,8 +1641,8 @@
     const poDefault = poDefaults[lang] || {};
     const hasOverride = !!entry.has_override;
     const markedForDelete = !!_deletionsMarked[lang];
-    var plural = _isPlural();
-    var nForms = plural ? _getNplurals(lang) : 1;
+    const plural = _isPlural();
+    const nForms = plural ? _getNplurals(lang) : 1;
 
     // Show language label in single-language mode (no tabs to indicate it)
     if (LANGUAGES.length <= 1) {
@@ -1663,39 +1655,39 @@
 
     // .po default hint (click to copy)
     // For singular: show single default. For plural: show per-form defaults.
-    var hasAnyDefault = false;
-    for (var dk in poDefault) {
+    let hasAnyDefault = false;
+    for (const dk in poDefault) {
       if (poDefault[dk]) { hasAnyDefault = true; break; }
     }
 
     if (hasAnyDefault) {
-      var poWrap = document.createElement("div");
+      const poWrap = document.createElement("div");
       poWrap.className = "lt-field__po-wrap";
 
       if (plural) {
         // Show per-form defaults for plural entries
-        for (var dfi = 0; dfi < nForms; dfi++) {
-          var formDefault = poDefault[String(dfi)] || "";
+        for (let dfi = 0; dfi < nForms; dfi++) {
+          const formDefault = poDefault[String(dfi)] || "";
           if (!formDefault) continue;
 
-          var poFormWrap = document.createElement("div");
+          const poFormWrap = document.createElement("div");
           poFormWrap.className = "lt-field__po-form";
 
-          var poHeader = document.createElement("div");
+          const poHeader = document.createElement("div");
           poHeader.className = "lt-field__po-header";
 
-          var poLabel = document.createElement("span");
+          const poLabel = document.createElement("span");
           poLabel.className = "lt-field__po-label";
           poLabel.textContent = "Form " + dfi + " default";
 
-          var poCopyIcon = document.createElement("span");
+          const poCopyIcon = document.createElement("span");
           poCopyIcon.className = "lt-field__po-copy";
           poCopyIcon.title = "Copy default";
 
           poHeader.appendChild(poLabel);
           poHeader.appendChild(poCopyIcon);
 
-          var poText = document.createElement("div");
+          const poText = document.createElement("div");
           poText.className = "lt-field__po-default";
           poText.textContent = formDefault;
 
@@ -1712,23 +1704,23 @@
         }
       } else {
         // Singular: single default (form 0)
-        var singleDefault = poDefault["0"] || "";
+        const singleDefault = poDefault["0"] || "";
         if (singleDefault) {
-          var poHeader2 = document.createElement("div");
+          const poHeader2 = document.createElement("div");
           poHeader2.className = "lt-field__po-header";
 
-          var poLabel2 = document.createElement("span");
+          const poLabel2 = document.createElement("span");
           poLabel2.className = "lt-field__po-label";
           poLabel2.textContent = "Default";
 
-          var poCopyIcon2 = document.createElement("span");
+          const poCopyIcon2 = document.createElement("span");
           poCopyIcon2.className = "lt-field__po-copy";
           poCopyIcon2.title = "Copy default";
 
           poHeader2.appendChild(poLabel2);
           poHeader2.appendChild(poCopyIcon2);
 
-          var poText2 = document.createElement("div");
+          const poText2 = document.createElement("div");
           poText2.className = "lt-field__po-default";
           poText2.textContent = singleDefault;
 
@@ -1748,24 +1740,25 @@
     }
 
     // Get the primary default for toggle visibility logic
-    var primaryDefault = poDefault["0"] || "";
+    const primaryDefault = poDefault["0"] || "";
 
     // Render textarea(s) — one per form for plural, single for singular
-    for (var formIdx = 0; formIdx < nForms; formIdx++) {
+    const langEditable = _isEditable(lang);
+    for (let formIdx = 0; formIdx < nForms; formIdx++) {
       // Form label for plural entries
       if (plural) {
-        var formLabel = document.createElement("label");
+        const formLabel = document.createElement("label");
         formLabel.className = "lt-field__form-label";
         formLabel.textContent = "Form " + formIdx;
         formLabel.setAttribute("for", "lt-input-" + lang + "-" + formIdx);
         container.appendChild(formLabel);
       }
 
-      var textarea = document.createElement("textarea");
+      const textarea = document.createElement("textarea");
       textarea.className = "lt-field__input";
       textarea.id = "lt-input-" + lang + "-" + formIdx;
       textarea.name = lang + "-" + formIdx;
-      var currentForms = _editedValues[lang] || {};
+      const currentForms = _editedValues[lang] || {};
       textarea.value = currentForms[String(formIdx)] || "";
       textarea.rows = 3;
       if (entry.fuzzy) {
@@ -1775,7 +1768,6 @@
         textarea.disabled = true;
         textarea.classList.add("lt-field__input--marked-delete");
       }
-      var langEditable = _isEditable(lang);
       if (!langEditable) {
         textarea.disabled = true;
         textarea.classList.add("lt-field__input--readonly");
@@ -1791,7 +1783,7 @@
           if (_htmlWarningAcked) {
             _htmlWarningAcked = false;
             showDialogError(null);
-            var saveBtn = dialog.querySelector(".lt-btn--save");
+            const saveBtn = dialog.querySelector(".lt-btn--save");
             if (saveBtn) saveBtn.textContent = "Save";
           }
         });
@@ -1802,9 +1794,9 @@
 
     // Active toggle
     const isActive = _editedActiveFlags[lang];
-    var currentVal = (_editedValues[lang] || {})["0"] || "";
+    const currentVal = (_editedValues[lang] || {})["0"] || "";
 
-    var isDraftLang = DRAFT_LANGUAGES.indexOf(lang) !== -1;
+    const isDraftLang = DRAFT_LANGUAGES.indexOf(lang) !== -1;
 
     const toggleWrap = document.createElement("label");
     toggleWrap.className = "lt-field__toggle";
@@ -1847,11 +1839,11 @@
     (function (toggle, defaults, cb, defaultActive, hadOverride, draft, langCode, parent) {
       function syncToggle() {
         if (draft) return; // Draft languages are always active — keep toggle hidden
-        var nf = _isPlural() ? _getNplurals(langCode) : 1;
-        var differs = false;
-        for (var fi2 = 0; fi2 < nf; fi2++) {
-          var ta2 = parent.querySelector("#lt-input-" + langCode + "-" + fi2);
-          var defVal = (defaults || {})[String(fi2)] || "";
+        const nf = _isPlural() ? _getNplurals(langCode) : 1;
+        let differs = false;
+        for (let fi2 = 0; fi2 < nf; fi2++) {
+          const ta2 = parent.querySelector("#lt-input-" + langCode + "-" + fi2);
+          const defVal = (defaults || {})[String(fi2)] || "";
           if (ta2 && ta2.value !== defVal) { differs = true; break; }
         }
         toggle.style.display = (differs || hadOverride) ? "" : "none";
@@ -1860,9 +1852,9 @@
         }
       }
       // Attach input listeners to all textareas
-      var nf = _isPlural() ? _getNplurals(langCode) : 1;
-      for (var fi2 = 0; fi2 < nf; fi2++) {
-        var ta2 = parent.querySelector("#lt-input-" + langCode + "-" + fi2);
+      const nf = _isPlural() ? _getNplurals(langCode) : 1;
+      for (let fi2 = 0; fi2 < nf; fi2++) {
+        const ta2 = parent.querySelector("#lt-input-" + langCode + "-" + fi2);
         if (ta2) {
           ta2.addEventListener("input", syncToggle);
         }
@@ -1966,9 +1958,7 @@
     // Capture whatever is in the current textarea/toggle before sending
     _persistCurrentEdit();
 
-    const attrData = currentAttrName ? _getAttrInfo(currentSpan, currentAttrName) : null;
-    const msgid = attrData ? attrData.m : currentSpan.dataset.ltMsgid;
-    const context = attrData ? attrData.c : (currentSpan.dataset.ltContext || "");
+    const { msgid, context } = _getMsgidAndContext();
 
     // Separate languages into save vs delete groups (only include dirty languages)
     const translations = {};
@@ -1989,8 +1979,8 @@
 
     // Run save and delete sequentially — SQLite cannot handle concurrent
     // write transactions from parallel requests ("database is locked").
-    var hasSave = Object.keys(translations).length > 0;
-    var hasDelete = langsToDelete.length > 0;
+    const hasSave = Object.keys(translations).length > 0;
+    const hasDelete = langsToDelete.length > 0;
 
     if (!hasSave && !hasDelete) {
       saveBtn.disabled = false;
@@ -2001,13 +1991,13 @@
 
     // ── HTML structure validation (client-side warning) ──
     if (!_htmlWarningAcked && hasSave) {
-      var htmlErrors = {};
-      for (var hlang in translations) {
-        var langForms = translations[hlang];
-        for (var hfi in langForms) {
-          var errs = _validateHtmlStructure(langForms[hfi]);
+      const htmlErrors = {};
+      for (const hlang in translations) {
+        const langForms = translations[hlang];
+        for (const hfi in langForms) {
+          const errs = _validateHtmlStructure(langForms[hfi]);
           if (errs.length) {
-            var errKey = _isPlural() ? hlang + " (form " + hfi + ")" : hlang;
+            const errKey = _isPlural() ? hlang + " (form " + hfi + ")" : hlang;
             htmlErrors[errKey] = errs;
           }
         }
@@ -2022,13 +2012,13 @@
     }
 
     try {
-      var display = null;
+      let display = null;
       if (hasSave) {
-        var saveResult = await api.saveTranslations(msgid, context, translations, activeFlags, _editMsgidPlural);
+        const saveResult = await api.saveTranslations(msgid, context, translations, activeFlags, _editMsgidPlural);
         if (saveResult && saveResult.display) display = saveResult.display;
       }
       if (hasDelete) {
-        var deleteResult = await api.deleteTranslation(msgid, context, langsToDelete, _editMsgidPlural);
+        const deleteResult = await api.deleteTranslation(msgid, context, langsToDelete, _editMsgidPlural);
         if (deleteResult && deleteResult.display) display = deleteResult.display;
       }
       if (display) {
@@ -2180,6 +2170,18 @@
   };
 
   /**
+   * Append a middle-dot separator span to a parent element.
+   * @param {HTMLElement} parent - Element to append the separator to.
+   * @returns {void}
+   */
+  function _appendSep(parent) {
+    const sep = document.createElement("span");
+    sep.className = "lt-history__sep";
+    sep.textContent = "\u00b7";
+    parent.appendChild(sep);
+  }
+
+  /**
    * Render the history timeline into the given container.
    *
    * Builds language filter pills (when multiple languages have history),
@@ -2299,26 +2301,15 @@
 
       // Form index label for plural entries (show when form_index > 0)
       if (entry.form_index > 0) {
-        if (hasFlag) {
-          var sepForm = document.createElement("span");
-          sepForm.className = "lt-history__sep";
-          sepForm.textContent = "\u00b7";
-          header.appendChild(sepForm);
-        }
-        var formTag = document.createElement("span");
+        if (hasFlag) _appendSep(header);
+        const formTag = document.createElement("span");
         formTag.className = "lt-history__form-tag";
         formTag.textContent = "Form " + entry.form_index;
         header.appendChild(formTag);
-        hasFlag = true; // treat as flag for separator logic
+        hasFlag = true;
       }
 
-      // Separator between flag and time (only when flag is visible)
-      if (hasFlag) {
-        const sep1 = document.createElement("span");
-        sep1.className = "lt-history__sep";
-        sep1.textContent = "\u00b7";
-        header.appendChild(sep1);
-      }
+      if (hasFlag) _appendSep(header);
 
       const time = document.createElement("time");
       time.className = "lt-history__time";
@@ -2327,13 +2318,8 @@
       time.title = new Date(entry.created_at).toLocaleString();
       header.appendChild(time);
 
-      // User
       if (entry.user && entry.user !== "System") {
-        const sep2 = document.createElement("span");
-        sep2.className = "lt-history__sep";
-        sep2.textContent = "\u00b7";
-        header.appendChild(sep2);
-
+        _appendSep(header);
         const user = document.createElement("span");
         user.className = "lt-history__user";
         user.textContent = entry.user;
@@ -2540,9 +2526,9 @@
     for (let b = 0; b < buttons.length; b++) buttons[b].disabled = true;
 
     const info = _getMsgidAndContext();
-    var fi = formIndex || 0;
-    var translations = {};
-    var forms = {};
+    const fi = formIndex || 0;
+    const translations = {};
+    const forms = {};
     forms[String(fi)] = value;
     translations[language] = forms;
     const activeFlags = {};
@@ -2874,33 +2860,47 @@
     _updateHintActiveState();
   }
 
+  /**
+   * Toggle between active and inactive edit mode.
+   * @returns {void}
+   */
+  function _toggleEditMode() {
+    if (state === "inactive") {
+      activateEditMode();
+    } else {
+      deactivateEditMode();
+    }
+  }
+
+  /**
+   * Toggle preview mode: flip the preview cookie and reload.
+   * @returns {void}
+   */
+  function _togglePreview() {
+    if (document.cookie.indexOf("lt_preview=1") !== -1) {
+      document.cookie = "lt_preview=; path=/; max-age=0";
+    } else {
+      document.cookie = "lt_preview=1; path=/; max-age=86400; SameSite=Lax";
+    }
+    window.location.reload();
+  }
+
   // ─── Keyboard Handler ───────────────────────────────
 
   document.addEventListener("keydown", function (e) {
     const tag = document.activeElement ? document.activeElement.tagName : "";
     const inInput = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 
-    // Toggle edit mode
     if (_matchShortcut(e, SC_EDIT)) {
       if (inInput) return;
       e.preventDefault();
-      if (state === "inactive") {
-        activateEditMode();
-      } else {
-        deactivateEditMode();
-      }
+      _toggleEditMode();
     }
 
-    // Toggle preview mode (cookie + reload)
     if (_matchShortcut(e, SC_PREVIEW)) {
       if (inInput) return;
       e.preventDefault();
-      if (document.cookie.indexOf("lt_preview=1") !== -1) {
-        document.cookie = "lt_preview=; path=/; max-age=0";
-      } else {
-        document.cookie = "lt_preview=1; path=/; max-age=86400; SameSite=Lax";
-      }
-      window.location.reload();
+      _togglePreview();
     }
   });
 
@@ -2921,7 +2921,7 @@
         // attribute-translatable element that has a preview marker, select
         // the *parent* attribute element (not the inner text span).
         if (e.shiftKey && PREVIEW) {
-          var parentAttr = span.closest("[data-lt-attrs]");
+          const parentAttr = span.closest("[data-lt-attrs]");
           if (parentAttr && parentAttr.classList.contains("lt-preview")) {
             _toggleSelected(parentAttr);
             window.getSelection().removeAllRanges();
@@ -3017,36 +3017,35 @@
 
     // Language switcher (only shown when multiple languages configured)
     if (LANGUAGES.length > 1) {
-      var langSwitcher = document.createElement("div");
+      const langSwitcher = document.createElement("div");
       langSwitcher.className = "lt-hint__lang";
 
-      var langTrigger = document.createElement("button");
+      const langTrigger = document.createElement("button");
       langTrigger.type = "button";
       langTrigger.className = "lt-hint__lang-trigger";
-      var currentMeta = langMeta(_pageLang());
+      const currentMeta = langMeta(_pageLang());
       langTrigger.textContent = currentMeta
         ? currentMeta.flag + " " + _pageLang().toUpperCase()
         : _pageLang().toUpperCase();
       langTrigger.title = "Switch language";
 
-      var langMenu = document.createElement("div");
+      const langMenu = document.createElement("div");
       langMenu.className = "lt-hint__lang-menu";
 
-      for (var li = 0; li < LANGUAGES.length; li++) {
+      for (let li = 0; li < LANGUAGES.length; li++) {
         (function (lang) {
-          var item = document.createElement("button");
+          const item = document.createElement("button");
           item.type = "button";
           item.className = "lt-hint__lang-item";
           if (lang === _pageLang()) {
             item.classList.add("lt-hint__lang-item--active");
           }
 
-          var meta = langMeta(lang);
-          var isDraft = DRAFT_LANGUAGES.indexOf(lang) !== -1;
-          item.textContent = meta ? meta.flag + "  " + meta.name : lang.toUpperCase();
+          const isDraft = DRAFT_LANGUAGES.indexOf(lang) !== -1;
+          item.textContent = langLabel(lang);
 
           if (isDraft) {
-            var badge = document.createElement("span");
+            const badge = document.createElement("span");
             badge.className = "lt-hint__lang-badge";
             badge.textContent = "Draft";
             item.appendChild(badge);
@@ -3080,7 +3079,7 @@
       langSwitcher.appendChild(langMenu);
       bar.appendChild(langSwitcher);
 
-      var sep1 = document.createElement("span");
+      const sep1 = document.createElement("span");
       sep1.className = "lt-hint__sep";
       bar.appendChild(sep1);
     }
@@ -3096,11 +3095,7 @@
       '<span class="lt-hint__label">Edit</span>';
     editBtn.addEventListener("click", function () {
       if (_hintDidDrag) return;
-      if (state === "inactive") {
-        activateEditMode();
-      } else {
-        deactivateEditMode();
-      }
+      _toggleEditMode();
     });
     bar.appendChild(editBtn);
 
@@ -3115,12 +3110,7 @@
       '<span class="lt-hint__label">Preview</span>';
     previewBtn.addEventListener("click", function () {
       if (_hintDidDrag) return;
-      if (document.cookie.indexOf("lt_preview=1") !== -1) {
-        document.cookie = "lt_preview=; path=/; max-age=0";
-      } else {
-        document.cookie = "lt_preview=1; path=/; max-age=86400; SameSite=Lax";
-      }
-      window.location.reload();
+      _togglePreview();
     });
     bar.appendChild(previewBtn);
 
