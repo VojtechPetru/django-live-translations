@@ -61,7 +61,7 @@ def _parse_csv(content: str) -> list[dict[str, str]]:
 def _make_csv(rows: list[dict[str, str]]) -> str:
     buf = io.StringIO()
     writer = csv.DictWriter(
-        buf, fieldnames=["language", "msgid", "context", "msgid_plural", "msgstr_forms", "is_active"]
+        buf, fieldnames=["language", "msgid", "context", "msgid_plural", "form_index", "msgstr", "is_active"]
     )
     writer.writeheader()
     for row in rows:
@@ -144,7 +144,7 @@ class TestExportCSV:
         result = importexport.export_csv(qs, include_defaults=False, languages=None)
         rows = _parse_csv(result)
         assert rows == []
-        assert "language,msgid,context,msgid_plural,msgstr_forms,is_active" in result
+        assert "language,msgid,context,msgid_plural,form_index,msgstr,is_active" in result
 
     def test_overrides_only(self) -> None:
         models.TranslationEntry.objects.create(
@@ -159,7 +159,8 @@ class TestExportCSV:
         assert len(rows) == 2
         assert rows[0]["language"] == "cs"
         assert rows[0]["msgid"] == "hello"
-        assert json.loads(rows[0]["msgstr_forms"]) == {"0": "Ahoj"}
+        assert rows[0]["msgstr"] == "Ahoj"
+        assert rows[0]["form_index"] == ""
         assert rows[0]["is_active"] == "true"
         assert rows[1]["language"] == "en"
         assert rows[1]["is_active"] == "false"
@@ -191,10 +192,8 @@ class TestExportCSV:
         rows = _parse_csv(result)
         assert len(rows) == 2
         by_msgid = {r["msgid"]: r for r in rows}
-        assert json.loads(by_msgid["hello"]["msgstr_forms"]) == {"0": "Cau"}, "DB override should win over PO default"
-        assert json.loads(by_msgid["bye"]["msgstr_forms"]) == {"0": "Nashle"}, (
-            "PO default preserved when no DB override"
-        )
+        assert by_msgid["hello"]["msgstr"] == "Cau", "DB override should win over PO default"
+        assert by_msgid["bye"]["msgstr"] == "Nashle", "PO default preserved when no DB override"
 
     def test_csv_handles_commas_and_newlines(self) -> None:
         models.TranslationEntry.objects.create(
@@ -204,7 +203,7 @@ class TestExportCSV:
         result = importexport.export_csv(qs, include_defaults=False, languages=None)
         rows = _parse_csv(result)
         assert len(rows) == 1
-        assert json.loads(rows[0]["msgstr_forms"]) == {"0": "Hello, world\nnew line"}
+        assert rows[0]["msgstr"] == "Hello, world\nnew line"
 
 
 # ---------------------------------------------------------------------------
@@ -374,16 +373,18 @@ class TestImportCSV:
                     "language": "cs",
                     "msgid": "hello",
                     "context": "",
-                    "msgstr_forms": '{"0": "Ahoj"}',
                     "msgid_plural": "",
+                    "form_index": "",
+                    "msgstr": "Ahoj",
                     "is_active": "true",
                 },
                 {
                     "language": "en",
                     "msgid": "hello",
                     "context": "",
-                    "msgstr_forms": '{"0": "Hi"}',
                     "msgid_plural": "",
+                    "form_index": "",
+                    "msgstr": "Hi",
                     "is_active": "false",
                 },
             ]
@@ -410,8 +411,9 @@ class TestImportCSV:
                     "language": "cs",
                     "msgid": "hello",
                     "context": "",
-                    "msgstr_forms": '{"0": "Cau"}',
                     "msgid_plural": "",
+                    "form_index": "",
+                    "msgstr": "Cau",
                     "is_active": "true",
                 },
             ]
@@ -441,16 +443,18 @@ class TestImportCSV:
                     "language": "cs",
                     "msgid": "",
                     "context": "",
-                    "msgstr_forms": '{"0": "Ahoj"}',
                     "msgid_plural": "",
+                    "form_index": "",
+                    "msgstr": "Ahoj",
                     "is_active": "true",
                 },
                 {
                     "language": "cs",
                     "msgid": "hello",
                     "context": "",
-                    "msgstr_forms": '{"0": "Ahoj"}',
                     "msgid_plural": "",
+                    "form_index": "",
+                    "msgstr": "Ahoj",
                     "is_active": "true",
                 },
             ]
@@ -461,15 +465,14 @@ class TestImportCSV:
         assert "empty msgid" in result["errors"][0]
 
     def test_context_defaults_to_empty(self) -> None:
-        # CSV without context column
-        content = "language,msgid,msgstr\ncs,hello,Ahoj\n"
+        content = "language,msgid,form_index,msgstr\ncs,hello,,Ahoj\n"
         result = importexport.import_csv(content)
         assert result["created"] == 1
         entry = models.TranslationEntry.objects.qs.get(language="cs", msgid="hello")
         assert entry.context == ""
 
     def test_is_active_defaults_to_true(self) -> None:
-        content = "language,msgid,msgstr\ncs,hello,Ahoj\n"
+        content = "language,msgid,form_index,msgstr\ncs,hello,,Ahoj\n"
         result = importexport.import_csv(content)
         assert result["created"] == 1
         entry = models.TranslationEntry.objects.qs.get(language="cs", msgid="hello")
@@ -482,16 +485,18 @@ class TestImportCSV:
                     "language": "",
                     "msgid": "hello",
                     "context": "",
-                    "msgstr_forms": '{"0": "Ahoj"}',
                     "msgid_plural": "",
+                    "form_index": "",
+                    "msgstr": "Ahoj",
                     "is_active": "true",
                 },
                 {
                     "language": "cs",
                     "msgid": "bye",
                     "context": "",
-                    "msgstr_forms": '{"0": "Nashle"}',
                     "msgid_plural": "",
+                    "form_index": "",
+                    "msgstr": "Nashle",
                     "is_active": "true",
                 },
             ]
@@ -511,8 +516,9 @@ class TestImportCSV:
                     "language": "cs",
                     "msgid": "hello",
                     "context": "",
-                    "msgstr_forms": '{"0": "Ahoj"}',
                     "msgid_plural": "",
+                    "form_index": "",
+                    "msgstr": "Ahoj",
                     "is_active": "true",
                 }
             ]
@@ -526,7 +532,7 @@ class TestImportCSV:
 
     def test_csv_parse_error(self) -> None:
         with unittest.mock.patch("live_translations.importexport.csv.DictReader") as mock_reader:
-            mock_reader.return_value.fieldnames = ["language", "msgid", "msgstr"]
+            mock_reader.return_value.fieldnames = ["language", "msgid", "msgstr", "form_index"]
             mock_reader.return_value.__iter__ = unittest.mock.Mock(side_effect=csv.Error("bad csv"))
             result = importexport.import_csv("dummy")
         assert result["created"] == 0
@@ -936,14 +942,15 @@ class TestCrossBackendRoundTrip:
         rows = _parse_csv(csv_content)
         for row in rows:
             if row["msgid"] == "hello":
-                row["msgstr_forms"] = '{"0": "Cau"}'
+                row["msgstr"] = "Cau"
         rows.append(
             {
                 "language": "cs",
                 "msgid": "thanks",
                 "context": "",
-                "msgstr_forms": '{"0": "Diky"}',
                 "msgid_plural": "",
+                "form_index": "",
+                "msgstr": "Diky",
                 "is_active": "true",
             }
         )
@@ -1147,7 +1154,7 @@ class TestImportView:
         assert response.context_data["result"] is None
 
     def test_post_csv_import(self) -> None:
-        csv_content = "language,msgid,context,msgstr,is_active\ncs,hello,,Ahoj,true\n"
+        csv_content = "language,msgid,context,msgid_plural,form_index,msgstr,is_active\ncs,hello,,,,Ahoj,true\n"
         factory = django.test.RequestFactory()
         request = factory.post(
             "/admin/live_translations/translationentry/import/",
@@ -1258,8 +1265,9 @@ class TestDryRun:
                     "language": "cs",
                     "msgid": "hello",
                     "context": "",
-                    "msgstr_forms": '{"0": "Ahoj"}',
                     "msgid_plural": "",
+                    "form_index": "",
+                    "msgstr": "Ahoj",
                     "is_active": "true",
                 }
             ]
@@ -1292,8 +1300,9 @@ class TestDryRun:
                     "language": "cs",
                     "msgid": "hello",
                     "context": "",
-                    "msgstr_forms": '{"0": "Cau"}',
                     "msgid_plural": "",
+                    "form_index": "",
+                    "msgstr": "Cau",
                     "is_active": "false",
                 }
             ]
@@ -1326,8 +1335,9 @@ class TestDryRun:
                     "language": "cs",
                     "msgid": "hello",
                     "context": "",
-                    "msgstr_forms": '{"0": "Ahoj"}',
                     "msgid_plural": "",
+                    "form_index": "",
+                    "msgstr": "Ahoj",
                     "is_active": "true",
                 }
             ]
@@ -1348,16 +1358,18 @@ class TestDryRun:
                     "language": "cs",
                     "msgid": "hello",
                     "context": "",
-                    "msgstr_forms": '{"0": "Cau"}',
                     "msgid_plural": "",
+                    "form_index": "",
+                    "msgstr": "Cau",
                     "is_active": "true",
                 },
                 {
                     "language": "cs",
                     "msgid": "bye",
                     "context": "",
-                    "msgstr_forms": '{"0": "Nashle"}',
                     "msgid_plural": "",
+                    "form_index": "",
+                    "msgstr": "Nashle",
                     "is_active": "true",
                 },
             ]
@@ -1403,7 +1415,7 @@ class TestDryRun:
         settings.LIVE_TRANSLATIONS = {**_BASE_SETTINGS}
         conf.get_settings.cache_clear()
 
-        csv_content = "language,msgid,context,msgstr,is_active\ncs,hello,,Ahoj,true\n"
+        csv_content = "language,msgid,context,msgid_plural,form_index,msgstr,is_active\ncs,hello,,,,Ahoj,true\n"
         factory = django.test.RequestFactory()
         request = factory.post(
             "/admin/live_translations/translationentry/import/",

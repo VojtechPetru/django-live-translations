@@ -19,7 +19,7 @@ Choose between two export formats:
 
 === "CSV"
 
-    A flat CSV file with columns: `language`, `msgid`, `context`, `msgstr`, `is_active`.
+    A flat CSV file with columns: `language`, `msgid`, `context`, `msgid_plural`, `form_index`, `msgstr`, `is_active`. Plural translations expand into multiple rows (one per form), while singular translations use a single row.
 
     CSV exports support two scopes:
 
@@ -60,14 +60,34 @@ Click the **Import** button in the toolbar to open the import form.
 
 ### CSV format
 
-The CSV file must have a header row. Required columns: `language`, `msgid`, `msgstr`. Optional columns: `context`, `is_active`.
+The CSV file must have a header row. Required columns: `language`, `msgid`, `msgstr`. Optional columns: `context`, `msgid_plural`, `form_index`, `is_active`.
 
-```csv title="translations.csv"
-language,msgid,context,msgstr,is_active
-en,Hello,,Hello World,true
-en,Welcome,,Welcome to the app,true
-cs,Hello,,Ahoj světe,false
-```
+For singular translations, each entry is one row with `msgid_plural` and `form_index` left empty. For plural translations, each form gets its own row with `form_index` set to the form number (0, 1, 2, ...).
+
+=== "Table view"
+
+    | language | msgid | context | msgid_plural | form_index | msgstr | is_active |
+    |----------|-------|---------|--------------|:----------:|--------|:---------:|
+    | en | hello | | | | Hello | true |
+    | en | cart | | cart.plural | 0 | %(n)s item | true |
+    | en | cart | | cart.plural | 1 | %(n)s items | true |
+    | cs | hello | | | | Ahoj | false |
+    | cs | cart | | cart.plural | 0 | %(n)s kus | true |
+    | cs | cart | | cart.plural | 1 | %(n)s kusy | true |
+    | cs | cart | | cart.plural | 2 | %(n)s kusů | true |
+
+=== "Raw CSV"
+
+    ```csv title="translations.csv"
+    language,msgid,context,msgid_plural,form_index,msgstr,is_active
+    en,hello,,,,Hello,true
+    en,cart,,cart.plural,0,%(n)s item,true
+    en,cart,,cart.plural,1,%(n)s items,true
+    cs,hello,,,,Ahoj,false
+    cs,cart,,cart.plural,0,%(n)s kus,true
+    cs,cart,,cart.plural,1,%(n)s kusy,true
+    cs,cart,,cart.plural,2,%(n)s kusů,true
+    ```
 
 When `is_active` is omitted, entries default to active. Values `false`, `0`, and `no` (case-insensitive) are treated as inactive.
 
@@ -80,14 +100,14 @@ Check **Dry run** before importing to preview what would change without writing 
 - A detailed table of each change, showing old and new values side by side
 - Any validation errors (empty msgid, missing language)
 
-The preview table displays up to 100 entries. Review the preview, then re-upload the same file without dry run to apply the changes.
+Review the preview, then re-upload the same file without dry run to apply the changes.
 
 ### Import behavior
 
-Imports use upsert logic. Each row is matched by `(language, msgid, context)`:
+Imports use upsert logic. Rows are grouped by `(language, msgid, context, msgid_plural)` and each group becomes one translation entry:
 
 - If no matching entry exists, a new one is created
-- If a matching entry exists, its `msgstr` and `is_active` fields are updated
+- If a matching entry exists, its translation and `is_active` fields are updated
 - All changes happen in a single database transaction
 - [Edit history](admin.md#translation-history) is recorded for the import
 

@@ -107,27 +107,31 @@ Subclass `TranslationBackend` and implement the two required methods:
 
 ```python title="myapp/backends.py"
 from live_translations.backends.base import TranslationBackend, TranslationEntry
-from live_translations.types import LanguageCode, MsgKey
+from live_translations.types import LanguageCode, MsgKey, PluralForms
 
 
 class MyBackend(TranslationBackend):
     def get_translations(
         self,
-        key: MsgKey,
+        key: MsgKey,  # (1)!
         languages: list[LanguageCode],
-    ) -> dict[LanguageCode, TranslationEntry]:
+    ) -> dict[LanguageCode, TranslationEntry]:  # (2)!
         """Fetch translations for a msgid across languages."""
         ...
 
     def save_translations(
         self,
         key: MsgKey,
-        translations: dict[LanguageCode, str],
+        translations: dict[LanguageCode, PluralForms],  # (3)!
         active_flags: dict[LanguageCode, bool] | None = None,
     ) -> None:
         """Save translations for a msgid."""
         ...
 ```
+
+1. `MsgKey` is a `NamedTuple` with three fields: `msgid`, `context`, and `msgid_plural`. For singular translations, `msgid_plural` is an empty string.
+2. `TranslationEntry` uses `msgstr_forms: PluralForms` (a `dict[int, str]` mapping form index to translated string). Singular entries use `{0: "text"}`.
+3. `PluralForms` is `dict[int, str]`. For singular translations, you receive `{0: "the translation"}`. For plurals, `{0: "1 item", 1: "%d items"}`.
 
 Optional methods to override:
 

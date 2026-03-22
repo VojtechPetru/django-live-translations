@@ -27,7 +27,7 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-_CSV_COLUMNS = ["language", "msgid", "context", "msgid_plural", "msgstr_forms", "is_active"]
+_CSV_COLUMNS = ["language", "msgid", "context", "msgid_plural", "form_index", "msgstr", "is_active"]
 
 
 class ExportRow(t.NamedTuple):
@@ -133,17 +133,19 @@ def export_csv(
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(_CSV_COLUMNS)
+    is_active_str = ""
     for row in rows:
-        writer.writerow(
-            [
-                row.language,
-                row.msgid,
-                row.context,
-                row.msgid_plural,
-                row.msgstr_forms,
-                str(row.is_active).lower(),
-            ]
-        )
+        forms: dict[str, str] = json.loads(row.msgstr_forms)
+        is_active_str = str(row.is_active).lower()
+        if row.msgid_plural:
+            # Plural entry: one CSV row per form, form_index filled in
+            for form_idx in sorted(forms, key=int):
+                writer.writerow(
+                    [row.language, row.msgid, row.context, row.msgid_plural, form_idx, forms[form_idx], is_active_str]
+                )
+        else:
+            # Singular entry: one CSV row, form_index and msgid_plural empty
+            writer.writerow([row.language, row.msgid, row.context, "", "", forms.get("0", ""), is_active_str])
     return buf.getvalue()
 
 
@@ -393,41 +395,62 @@ def import_csv(content: str, *, dry_run: bool = False) -> ImportResult:
         if reader.fieldnames is None:
             return ImportResult(created=0, updated=0, errors=["Empty or invalid CSV file"], dry_run=dry_run)
 
-        # Support both old format (msgstr column) and new format (msgstr_forms column)
-        has_new_format = "msgstr_forms" in reader.fieldnames
-        has_old_format = "msgstr" in reader.fieldnames and not has_new_format
+        fields = set(reader.fieldnames)
+        missing = {"language", "msgid", "msgstr"} - fields
+        if missing:
+            msg = f"Missing required columns: {', '.join(sorted(missing))}"
+            return ImportResult(created=0, updated=0, errors=[msg], dry_run=dry_run)
 
-        if not has_new_format and not has_old_format:
-            missing = {"language", "msgid"} - set(reader.fieldnames)
-            if missing:
-                msg = f"Missing required columns: {', '.join(sorted(missing))}"
-                return ImportResult(created=0, updated=0, errors=[msg], dry_run=dry_run)
-
-        rows: list[ExportRow] = []
-        for line in reader:
-            is_active_raw = line.get("is_active", "true").strip().lower()
-            is_active = is_active_raw not in ("false", "0", "no")
-
-            if has_old_format:
-                # Legacy CSV: single msgstr column -> wrap as {"0": value}
-                msgstr_forms = json.dumps({"0": line.get("msgstr", "")})
-            else:
-                msgstr_forms = line.get("msgstr_forms", '{"0": ""}')
-
-            rows.append(
-                ExportRow(
-                    language=line.get("language", "").strip(),
-                    msgid=line.get("msgid", ""),
-                    context=line.get("context", "").strip(),
-                    msgid_plural=line.get("msgid_plural", "").strip(),
-                    msgstr_forms=msgstr_forms,
-                    is_active=is_active,
-                )
-            )
+        rows = _import_csv_row_per_form(reader)
     except csv.Error as e:
         return ImportResult(created=0, updated=0, errors=[f"CSV parse error: {e}"], dry_run=dry_run)
 
     return _bulk_import(rows, dry_run=dry_run)
+
+
+type _GroupKey = tuple[str, str, str, str]
+
+
+def _import_csv_row_per_form(reader: csv.DictReader[str]) -> list[ExportRow]:
+    """Import CSV with one row per plural form."""
+    # Group rows by (language, msgid, context, msgid_plural) and collect forms
+    grouped: dict[_GroupKey, dict[str, str]] = {}
+    active_flags: dict[_GroupKey, bool] = {}
+    key_order: list[_GroupKey] = []
+
+    for line in reader:
+        language = line.get("language", "").strip()
+        msgid = line.get("msgid", "")
+        context = line.get("context", "").strip()
+        msgid_plural = line.get("msgid_plural", "").strip()
+        form_index = line.get("form_index", "").strip()
+        msgstr = line.get("msgstr", "")
+        is_active_raw = line.get("is_active", "true").strip().lower()
+        is_active = is_active_raw not in ("false", "0", "no")
+
+        gk: _GroupKey = (language, msgid, context, msgid_plural)
+        if gk not in grouped:
+            grouped[gk] = {}
+            key_order.append(gk)
+        active_flags[gk] = is_active
+
+        idx = form_index or "0"
+        grouped[gk][idx] = msgstr
+
+    rows: list[ExportRow] = []
+    for gk in key_order:
+        language, msgid, context, msgid_plural = gk
+        rows.append(
+            ExportRow(
+                language=language,
+                msgid=msgid,
+                context=context,
+                msgid_plural=msgid_plural,
+                msgstr_forms=json.dumps(grouped[gk]),
+                is_active=active_flags[gk],
+            )
+        )
+    return rows
 
 
 def import_po(content: str, language: LanguageCode, *, dry_run: bool = False) -> ImportResult:
