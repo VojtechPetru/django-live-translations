@@ -13,7 +13,7 @@ import django.db.utils
 
 from live_translations import conf, history, models
 from live_translations.backends.base import TranslationBackend, TranslationEntry
-from live_translations.types import DbOverride, LanguageCode, MsgKey, OverrideMap
+from live_translations.types import DbOverride, LanguageCode, MsgKey, OverrideMap, PluralForms, plural_forms_from_json
 
 __all__ = [
     "CheckCrashBackend",
@@ -47,7 +47,7 @@ class TestBackend(TranslationBackend):
     ) -> None:
         super().__init__(locale_dir, domain, cache_alias)
         # In-memory stores for defaults/hints (no PO file dependency)
-        self._defaults: dict[tuple[LanguageCode, str, str], str] = {}
+        self._defaults: dict[tuple[LanguageCode, str, str, str], PluralForms] = {}
         self._hints: dict[tuple[str, str], str] = {}
         # Simple version counter (no cache dependency)
         self._version: int = 0
@@ -67,9 +67,22 @@ class TestBackend(TranslationBackend):
         msgstr: str,
         *,
         context: str = "",
+        msgid_plural: str = "",
     ) -> None:
-        """Pre-load a PO-file-like default translation."""
-        self._defaults[(language, msgid, context)] = msgstr
+        """Pre-load a PO-file-like default translation (singular)."""
+        self._defaults[(language, msgid, context, msgid_plural)] = {0: msgstr}
+
+    def seed_default_plural(
+        self,
+        language: LanguageCode,
+        msgid: str,
+        msgid_plural: str,
+        forms: PluralForms,
+        *,
+        context: str = "",
+    ) -> None:
+        """Pre-load a PO-file-like default translation (plural)."""
+        self._defaults[(language, msgid, context, msgid_plural)] = forms
 
     def seed_hint(self, msgid: str, hint: str, *, context: str = "") -> None:
         """Pre-load a translator hint/comment."""
@@ -101,22 +114,24 @@ class TestBackend(TranslationBackend):
             for row in (
                 models.TranslationEntry.objects.qs.for_key(key)
                 .for_languages(languages)
-                .values_list("language", "msgstr", "is_active")
+                .values_list("language", "msgstr_forms", "is_active")
             ):
-                db_overrides[row[0]] = DbOverride(row[1], row[2])
+                forms = plural_forms_from_json(row[1]) if row[1] else {0: ""}
+                db_overrides[row[0]] = DbOverride(forms, row[2])
         except (django.db.utils.OperationalError, django.db.utils.ProgrammingError):
             pass
 
         result: dict[LanguageCode, TranslationEntry] = {}
         for lang in languages:
-            default_msgstr = self._defaults.get((lang, key.msgid, key.context), "")
+            default_forms = self._defaults.get((lang, key.msgid, key.context, key.msgid_plural), {0: ""})
             db_entry = db_overrides.get(lang)
 
             result[lang] = TranslationEntry(
                 language=lang,
                 msgid=key.msgid,
-                msgstr=db_entry.msgstr if db_entry is not None else default_msgstr,
+                msgstr_forms=db_entry.msgstr_forms if db_entry is not None else default_forms,
                 context=key.context,
+                msgid_plural=key.msgid_plural,
                 fuzzy=False,
                 is_active=db_entry.is_active if db_entry is not None else True,
                 has_override=db_entry is not None,
@@ -128,9 +143,11 @@ class TestBackend(TranslationBackend):
     def save_translations(
         self,
         key: MsgKey,
-        translations: dict[LanguageCode, str],
+        translations: dict[LanguageCode, PluralForms],
         active_flags: dict[LanguageCode, bool] | None = None,
     ) -> None:
+        from live_translations.types import plural_forms_to_json
+
         self.call_log.append(("save_translations", (key, translations), {"active_flags": active_flags}))
 
         fallback_active = conf.get_settings().translation_active_by_default
@@ -141,23 +158,24 @@ class TestBackend(TranslationBackend):
         for row in (
             models.TranslationEntry.objects.qs.for_key(key)
             .filter(language__in=translations.keys())
-            .values_list("language", "msgstr", "is_active")
+            .values_list("language", "msgstr_forms", "is_active")
         ):
-            row: tuple[LanguageCode, str, bool]
-            existing[row[0]] = DbOverride(row[1], row[2])
+            row: tuple[LanguageCode, dict[str, str], bool]
+            forms = plural_forms_from_json(row[1]) if row[1] else {0: ""}
+            existing[row[0]] = DbOverride(forms, row[2])
 
-        old_text_values: dict[LanguageCode, str] = {}
+        old_text_values: dict[LanguageCode, PluralForms] = {}
         old_active_states: dict[LanguageCode, bool] = {}
         new_active_states: dict[LanguageCode, bool] = {}
-        for lang, msgstr in translations.items():
+        for lang, forms in translations.items():
             old_entry = existing.get(lang)
             is_active = active_flags.get(lang, fallback_active) if active_flags else fallback_active
 
             # Skip phantom entries (same logic as DatabaseBackend)
-            if old_entry is None and msgstr == po_defaults.get(lang, "") and is_active == fallback_active:
+            if old_entry is None and forms == po_defaults.get(lang, {0: ""}) and is_active == fallback_active:
                 continue
 
-            old_text_values[lang] = old_entry.msgstr if old_entry else ""
+            old_text_values[lang] = old_entry.msgstr_forms if old_entry else {}
             new_active_states[lang] = is_active
             if old_entry is not None:
                 old_active_states[lang] = old_entry.is_active
@@ -166,7 +184,8 @@ class TestBackend(TranslationBackend):
                 language=lang,
                 msgid=key.msgid,
                 context=key.context,
-                defaults={"msgstr": msgstr, "is_active": is_active},
+                msgid_plural=key.msgid_plural,
+                defaults={"msgstr_forms": plural_forms_to_json(forms), "is_active": is_active},
             )
 
         history.record_text_changes(
@@ -209,11 +228,14 @@ class TestBackend(TranslationBackend):
 
         q = django.db.models.Q()
         for key in msgids:
-            q |= django.db.models.Q(msgid=key.msgid, context=key.context)
+            q |= django.db.models.Q(msgid=key.msgid, context=key.context, msgid_plural=key.msgid_plural)
 
         qs = models.TranslationEntry.objects.qs.for_languages([language]).active(active=False).filter(q)
 
-        activated = [MsgKey(msgid, ctx) for msgid, ctx in qs.values_list("msgid", "context")]
+        activated = [
+            MsgKey(msgid, ctx, msgid_plural)
+            for msgid, ctx, msgid_plural in qs.values_list("msgid", "context", "msgid_plural")
+        ]
         qs.update(is_active=True)
 
         if activated:
@@ -226,13 +248,14 @@ class TestBackend(TranslationBackend):
         self.call_log.append(("get_inactive_overrides", (language,), {}))
         overrides: OverrideMap = {}
         try:
-            for msgid, ctx, msgstr in (
+            for msgid, ctx, msgid_plural, msgstr_forms in (
                 models.TranslationEntry.objects.qs.for_languages([language])
                 .active(active=False)
-                .exclude(msgstr="")
-                .values_list("msgid", "context", "msgstr")
+                .values_list("msgid", "context", "msgid_plural", "msgstr_forms")
             ):
-                overrides[MsgKey(msgid, ctx)] = msgstr
+                forms = plural_forms_from_json(msgstr_forms) if msgstr_forms else {0: ""}
+                if any(v for v in forms.values()):
+                    overrides[MsgKey(msgid, ctx, msgid_plural)] = forms
         except (django.db.utils.OperationalError, django.db.utils.ProgrammingError):
             pass
         return overrides
@@ -242,11 +265,11 @@ class TestBackend(TranslationBackend):
         self,
         key: MsgKey,
         languages: list[LanguageCode],
-    ) -> dict[LanguageCode, str]:
+    ) -> dict[LanguageCode, PluralForms]:
         self.call_log.append(("get_defaults", (key, languages), {}))
-        result: dict[LanguageCode, str] = {}
+        result: dict[LanguageCode, PluralForms] = {}
         for lang in languages:
-            val = self._defaults.get((lang, key.msgid, key.context))
+            val = self._defaults.get((lang, key.msgid, key.context, key.msgid_plural))
             if val is not None:
                 result[lang] = val
         return result
@@ -274,7 +297,7 @@ class SaveErrorBackend(TestBackend):
     def save_translations(
         self,
         key: MsgKey,
-        translations: dict[LanguageCode, str],
+        translations: dict[LanguageCode, PluralForms],
         active_flags: dict[LanguageCode, bool] | None = None,
     ) -> None:
         raise RuntimeError("unexpected backend error")
@@ -287,7 +310,7 @@ class FileNotFoundBackend(TestBackend):
     def save_translations(
         self,
         key: MsgKey,
-        translations: dict[LanguageCode, str],
+        translations: dict[LanguageCode, PluralForms],
         active_flags: dict[LanguageCode, bool] | None = None,
     ) -> None:
         raise FileNotFoundError("PO file not found")

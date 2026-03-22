@@ -63,15 +63,17 @@ def _make_entry(
     *,
     pk: int | None = None,
     msgid: str = "hello",
-    msgstr: str = "Ahoj",
+    msgstr_forms: dict[str, str] | None = None,
     language: str = "cs",
     context: str = "",
     is_active: bool = True,
 ) -> models.TranslationEntry:
+    if msgstr_forms is None:
+        msgstr_forms = {"0": "Ahoj"}
     return models.TranslationEntry(
         pk=pk,
         msgid=msgid,
-        msgstr=msgstr,
+        msgstr_forms=msgstr_forms,
         language=language,
         context=context,
         is_active=is_active,
@@ -118,20 +120,20 @@ class TestMsgidShort:
 class TestMsgstrShort:
     def test_short_msgstr(self) -> None:
         ma = _get_admin_instance()
-        obj = _make_entry(msgstr="short")
+        obj = _make_entry(msgstr_forms={"0": "short"})
         assert ma.msgstr_short(obj) == "short"
 
     def test_long_msgstr_truncated(self) -> None:
         ma = _get_admin_instance()
         long_msgstr = "b" * 120
-        obj = _make_entry(msgstr=long_msgstr)
+        obj = _make_entry(msgstr_forms={"0": long_msgstr})
         result = ma.msgstr_short(obj)
         assert len(result) == admin._MSGSTR_MAX_LEN
         assert result.endswith("...")
 
     def test_exact_boundary_msgstr(self) -> None:
         ma = _get_admin_instance()
-        obj = _make_entry(msgstr="b" * admin._MSGSTR_MAX_LEN)
+        obj = _make_entry(msgstr_forms={"0": "b" * admin._MSGSTR_MAX_LEN})
         assert ma.msgstr_short(obj) == "b" * admin._MSGSTR_MAX_LEN
 
 
@@ -141,7 +143,7 @@ class TestPoDefaultDisplay:
         obj = _make_entry(pk=None)
         assert ma.po_default_display(obj) == "-"
 
-    @unittest.mock.patch.object(services, "get_default", return_value="")
+    @unittest.mock.patch.object(services, "get_default", return_value={})
     def test_no_default_returns_styled_message(self, mock_get_default: unittest.mock.MagicMock) -> None:
         ma = _get_admin_instance()
         obj = _make_entry(pk=1)
@@ -150,7 +152,7 @@ class TestPoDefaultDisplay:
         assert "color: #999" in str(result)
         mock_get_default.assert_called_once_with(key=MsgKey("hello", ""), language="cs")
 
-    @unittest.mock.patch.object(services, "get_default", return_value="Default translation")
+    @unittest.mock.patch.object(services, "get_default", return_value={0: "Default translation"})
     def test_with_default_returns_styled_div(self, mock_get_default: unittest.mock.MagicMock) -> None:
         ma = _get_admin_instance()
         obj = _make_entry(pk=1)
@@ -160,7 +162,7 @@ class TestPoDefaultDisplay:
         assert "background: #f5f5f5" in str(result)
         mock_get_default.assert_called_once_with(key=MsgKey("hello", ""), language="cs")
 
-    @unittest.mock.patch.object(services, "get_default", return_value="<script>alert('xss')</script>")
+    @unittest.mock.patch.object(services, "get_default", return_value={0: "<script>alert('xss')</script>"})
     def test_html_is_escaped(self, mock_get_default: unittest.mock.MagicMock) -> None:
         ma = _get_admin_instance()
         obj = _make_entry(pk=1)
@@ -173,21 +175,23 @@ class TestSaveModel:
     @unittest.mock.patch.object(services, "save_translations")
     def test_save_existing_entry(self, mock_save: unittest.mock.MagicMock) -> None:
         ma = _get_admin_instance()
-        obj = _make_entry(pk=42, msgid="hello", msgstr="Ahoj", language="cs", is_active=True)
+        obj = _make_entry(pk=42, msgid="hello", msgstr_forms={"0": "Ahoj"}, language="cs", is_active=True)
         request = _make_request()
 
         ma.save_model(request, obj, None, change=True)
 
         mock_save.assert_called_once_with(
             key=MsgKey("hello", ""),
-            translations={"cs": "Ahoj"},
+            translations={"cs": {0: "Ahoj"}},
             active_flags={"cs": True},
         )
 
     @unittest.mock.patch.object(services, "save_translations")
     def test_save_new_entry_refreshes_pk(self, mock_save: unittest.mock.MagicMock) -> None:
         ma = _get_admin_instance()
-        obj = _make_entry(pk=None, msgid="hello", msgstr="Ahoj", language="cs", context="ctx", is_active=False)
+        obj = _make_entry(
+            pk=None, msgid="hello", msgstr_forms={"0": "Ahoj"}, language="cs", context="ctx", is_active=False
+        )
         request = _make_request()
 
         fake_saved = unittest.mock.MagicMock(pk=99)
@@ -200,7 +204,7 @@ class TestSaveModel:
 
         mock_save.assert_called_once_with(
             key=MsgKey("hello", "ctx"),
-            translations={"cs": "Ahoj"},
+            translations={"cs": {0: "Ahoj"}},
             active_flags={"cs": False},
         )
         mock_qs.for_key.assert_called_once_with(MsgKey("hello", "ctx"))
@@ -429,14 +433,14 @@ class TestModifiedByFilter:
             language="cs",
             msgid="hello",
             context="",
-            msgstr="Ahoj",
+            msgstr_forms={"0": "Ahoj"},
             is_active=True,
         )
         entry_bob = models.TranslationEntry.objects.create(
             language="en",
             msgid="bye",
             context="",
-            msgstr="Bye",
+            msgstr_forms={"0": "Bye"},
             is_active=True,
         )
 

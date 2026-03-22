@@ -1,6 +1,8 @@
 import dataclasses
 import functools
+import logging
 import pathlib
+import re
 import typing as t
 
 import django.conf
@@ -8,6 +10,8 @@ import django.http
 import django.utils.module_loading
 
 from live_translations.types import LanguageCode, PermissionCheck, PermissionResult
+
+logger = logging.getLogger("live_translations")
 
 if t.TYPE_CHECKING:
     from live_translations.backends.base import TranslationBackend
@@ -18,6 +22,7 @@ __all__ = [
     "LiveTranslationsSettings",
     "default_permission_check",
     "get_backend_instance",
+    "get_nplurals",
     "get_permission_checker",
     "get_settings",
     "is_draft_language",
@@ -216,3 +221,27 @@ def get_backend_instance() -> "TranslationBackend":
         domain=settings.gettext_domain,
         cache_alias=settings.cache,
     )
+
+
+_NPLURALS_RE = re.compile(r"nplurals\s*=\s*(\d+)")
+
+
+@functools.cache
+def get_nplurals() -> dict[LanguageCode, int]:
+    """Read nplurals from each language's PO Plural-Forms header. Fallback: 2."""
+    import polib
+
+    settings = get_settings()
+    result: dict[LanguageCode, int] = {}
+    for lang in settings.languages:
+        path = settings.locale_dir / lang / "LC_MESSAGES" / f"{settings.gettext_domain}.po"
+        try:
+            po = polib.pofile(str(path))
+        except (OSError, ValueError):
+            result[lang] = 2
+            continue
+        plural_forms = po.metadata.get("Plural-Forms", "")
+        match = _NPLURALS_RE.search(plural_forms)
+        result[lang] = int(match.group(1)) if match else 2
+        logger.debug("nplurals for %s: %d (from %s)", lang, result[lang], plural_forms or "<missing>")
+    return result

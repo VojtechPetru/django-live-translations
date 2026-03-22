@@ -48,11 +48,20 @@ Click **Save** to persist changes across all tabs. On save:
 
 Click **Delete Override** to revert a language to its `.po` file default. This removes the database entry (DB backend) or the pending override comment (PO backend).
 
+### Plural translations
+
+When editing a plural string (from `ngettext`, `npgettext`, or `{% blocktranslate count %}`), the modal shows multiple textareas per language tab, one for each plural form. The number of forms depends on the language: English has 2 (singular, plural), Czech has 3, Arabic has 6.
+
+Each form is labeled "Form 0", "Form 1", etc. Form 0 is the singular form.
+
+!!! note
+    After saving a plural translation, the page reloads automatically. The widget cannot determine which plural form is currently displayed without the original `number` argument, so a live DOM update is not possible for plurals.
+
 ### Validation
 
 The editor validates translations before saving. Two types of validation run:
 
-**Placeholder validation** checks that format strings like `%(name)s` and `{name}` match between the original `msgid` and each translation. This is enforced server-side. Mismatched placeholders block the save.
+**Placeholder validation** checks that format strings like `%(name)s` and `{name}` match between the original `msgid` and each translation. For plural translations, each form is validated against the union of placeholders from both `msgid` and `msgid_plural`. This is enforced server-side. Mismatched placeholders block the save.
 
 **HTML structure validation** checks for unclosed, mismatched, or stray tags in translations that contain HTML. This is client-side only and non-blocking.
 

@@ -60,7 +60,7 @@ class TestSaveTranslationsView:
     @pytest.mark.django_db
     def test_value_error_400(self, make_request):
         """Empty msgid triggers ValueError in services.save_translations."""
-        request = make_request("post", _SAVE_PATH, data={"msgid": "", "translations": {"en": "Hi"}})
+        request = make_request("post", _SAVE_PATH, data={"msgid": "", "translations": {"en": {"0": "Hi"}}})
         response = save_translations(request)
         assert response.status_code == 400
         assert json.loads(response.content)["error"] == "msgid is required"
@@ -68,7 +68,7 @@ class TestSaveTranslationsView:
     @pytest.mark.django_db
     def test_placeholder_error_400(self, make_request):
         """Placeholder mismatch triggers PlaceholderValidationError naturally."""
-        request = make_request("post", _SAVE_PATH, data={"msgid": "Hello %s", "translations": {"en": "Hi"}})
+        request = make_request("post", _SAVE_PATH, data={"msgid": "Hello %s", "translations": {"en": {"0": "Hi"}}})
         response = save_translations(request)
         assert response.status_code == 400
         body = json.loads(response.content)
@@ -87,7 +87,7 @@ class TestSaveTranslationsView:
         conf.get_settings.cache_clear()
         conf.get_backend_instance.cache_clear()
 
-        request = make_request("post", _SAVE_PATH, data={"msgid": "hello", "translations": {"en": "Hi"}})
+        request = make_request("post", _SAVE_PATH, data={"msgid": "hello", "translations": {"en": {"0": "Hi"}}})
         response = save_translations(request)
         assert response.status_code == 404
         assert json.loads(response.content)["error"] == "PO file not found"
@@ -103,7 +103,7 @@ class TestSaveTranslationsView:
         conf.get_settings.cache_clear()
         conf.get_backend_instance.cache_clear()
 
-        request = make_request("post", _SAVE_PATH, data={"msgid": "hello", "translations": {"en": "Hi"}})
+        request = make_request("post", _SAVE_PATH, data={"msgid": "hello", "translations": {"en": {"0": "Hi"}}})
         response = save_translations(request)
         assert response.status_code == 500
         assert json.loads(response.content)["error"] == "Backend error"
@@ -223,19 +223,21 @@ class TestPerLanguagePermission:
 
     @pytest.mark.django_db
     def test_save_permitted_language_succeeds(self, make_request):
-        request = make_request("post", _SAVE_PATH, data={"msgid": "hello", "translations": {"en": "Hi"}})
+        request = make_request("post", _SAVE_PATH, data={"msgid": "hello", "translations": {"en": {"0": "Hi"}}})
         response = save_translations(request)
         assert response.status_code == 200
 
     def test_save_forbidden_language_403(self, make_request):
-        request = make_request("post", _SAVE_PATH, data={"msgid": "hello", "translations": {"de": "Hallo"}})
+        request = make_request("post", _SAVE_PATH, data={"msgid": "hello", "translations": {"de": {"0": "Hallo"}}})
         response = save_translations(request)
         assert response.status_code == 403
         body = json.loads(response.content)
         assert "de" in body["error"]
 
     def test_save_mixed_permitted_forbidden_403(self, make_request):
-        request = make_request("post", _SAVE_PATH, data={"msgid": "hello", "translations": {"en": "Hi", "de": "Hallo"}})
+        request = make_request(
+            "post", _SAVE_PATH, data={"msgid": "hello", "translations": {"en": {"0": "Hi"}, "de": {"0": "Hallo"}}}
+        )
         response = save_translations(request)
         assert response.status_code == 403
 

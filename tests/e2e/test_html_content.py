@@ -29,7 +29,7 @@ class TestHtmlContentInTranslations:
         open_modal(page_as_superuser_for_backend, self.MSGID)
         wait_for_fields_loaded(page_as_superuser_for_backend)
 
-        textarea = page_as_superuser_for_backend.locator("#lt-input-en")
+        textarea = page_as_superuser_for_backend.locator("#lt-input-en-0")
         textarea.fill("Live <strong>Translations</strong> Demo")
         check_active_toggle(page_as_superuser_for_backend)
         page_as_superuser_for_backend.locator(".lt-btn--save").click()
@@ -76,7 +76,7 @@ class TestHtmlContentInTranslations:
         open_modal(page_as_superuser_for_backend, self.MSGID)
         wait_for_fields_loaded(page_as_superuser_for_backend)
 
-        textarea = page_as_superuser_for_backend.locator("#lt-input-en")
+        textarea = page_as_superuser_for_backend.locator("#lt-input-en-0")
         textarea.fill("Click <strong>here</strong> now")
         check_active_toggle(page_as_superuser_for_backend)
         page_as_superuser_for_backend.locator(".lt-btn--save").click()

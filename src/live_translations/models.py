@@ -34,7 +34,7 @@ class TranslationEntryQuerySet(django.db.models.QuerySet["TranslationEntry"]):
         key: MsgKey,
         /,
     ) -> t.Self:
-        return self.filter(msgid=key.msgid, context=key.context)
+        return self.filter(msgid=key.msgid, context=key.context, msgid_plural=key.msgid_plural)
 
     def active(self, *, active: bool = True) -> t.Self:
         return self.filter(is_active=active)
@@ -53,7 +53,7 @@ class TranslationEntryManager(django.db.models.Manager["TranslationEntry"]):
 class TranslationEntry(django.db.models.Model):
     """A single translation override stored in the database.
 
-    Overrides the .po file translation for a given (msgid, context, language) triple.
+    Overrides the .po file translation for a given (msgid, context, msgid_plural, language) tuple.
     """
 
     language = django.db.models.CharField(
@@ -75,11 +75,18 @@ class TranslationEntry(django.db.models.Model):
         help_text="Optional gettext context (msgctxt). Used to disambiguate identical message IDs "
         "with different meanings. Leave blank for standard translations.",
     )
-    msgstr = django.db.models.TextField(
-        "Translation",
+    msgid_plural = django.db.models.TextField(
+        "Plural Message ID",
+        default="",
         blank=True,
-        help_text="The translated text that overrides the .po file default. "
-        "If set to the same value as the .po default, this record will be removed automatically.",
+        help_text="The plural form of the message ID (from ngettext/npgettext). Empty for singular-only translations.",
+    )
+    msgstr_forms = django.db.models.JSONField(
+        "Translation forms",
+        default=dict,
+        blank=True,
+        help_text='JSON dict mapping form index to translated text, e.g. {"0": "apple", "1": "apples"}. '
+        'Singular translations use {"0": "text"}.',
     )
     is_active = django.db.models.BooleanField(
         "Active",
@@ -94,18 +101,19 @@ class TranslationEntry(django.db.models.Model):
 
     class Meta:
         db_table = "live_translations_entry"
-        unique_together = [("language", "msgid", "context")]
+        unique_together = [("language", "msgid", "context", "msgid_plural")]
         ordering = ["language", "msgid"]
         verbose_name = "Translation override"
         verbose_name_plural = "Translation overrides"
 
     def __str__(self) -> str:
         ctx = f" [{self.context}]" if self.context else ""
-        return f"{self.language}: {self.msgid}{ctx}"
+        plural = f" (plural: {self.msgid_plural[:30]})" if self.msgid_plural else ""
+        return f"{self.language}: {self.msgid}{ctx}{plural}"
 
     @property
     def key(self) -> MsgKey:
-        return MsgKey(self.msgid, self.context)
+        return MsgKey(self.msgid, self.context, self.msgid_plural)
 
 
 class TranslationHistory(django.db.models.Model):
@@ -121,9 +129,11 @@ class TranslationHistory(django.db.models.Model):
     language = django.db.models.CharField(max_length=10, db_index=True)
     msgid = django.db.models.TextField()
     context = django.db.models.CharField(max_length=255, default="", blank=True)
+    msgid_plural = django.db.models.TextField(default="", blank=True)
     action = django.db.models.CharField(max_length=10, choices=Action)
     old_value = django.db.models.TextField(blank=True, default="")
     new_value = django.db.models.TextField(blank=True, default="")
+    form_index = django.db.models.IntegerField(default=0)
     user = django.db.models.ForeignKey(
         django.conf.settings.AUTH_USER_MODEL,
         on_delete=django.db.models.SET_NULL,
@@ -138,8 +148,8 @@ class TranslationHistory(django.db.models.Model):
         ordering = ["-created_at"]
         indexes = [
             django.db.models.Index(
-                fields=["msgid", "context", "language", "-created_at"],
-                name="lt_history_lookup",
+                fields=["msgid", "context", "msgid_plural", "language", "-created_at"],
+                name="lt_history_lookup_v2",
             ),
         ]
         verbose_name = "Translation history entry"
@@ -147,4 +157,5 @@ class TranslationHistory(django.db.models.Model):
 
     def __str__(self) -> str:
         ctx = f" [{self.context}]" if self.context else ""
-        return f"{self.action} {self.language}: {self.msgid}{ctx}"
+        form = f" [form {self.form_index}]" if self.form_index > 0 else ""
+        return f"{self.action} {self.language}: {self.msgid}{ctx}{form}"

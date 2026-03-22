@@ -161,6 +161,25 @@ msgstr ""
 "Django generates the labels and help texts from verbose_name / help_text — "
 "live translations can edit these just like manually rendered fields."
 
+#. Plural forms
+msgid "plurals.heading"
+msgstr "Plural forms"
+
+msgid "plurals.notification_one %(count)s"
+msgid_plural "plurals.notification_other %(count)s"
+msgstr[0] "You have %(count)s new notification."
+msgstr[1] "You have %(count)s new notifications."
+
+msgid "plurals.message_one %(count)s"
+msgid_plural "plurals.message_other %(count)s"
+msgstr[0] "There is %(count)s unread message."
+msgstr[1] "There are %(count)s unread messages."
+
+msgid "plurals.litre_one %(count)s"
+msgid_plural "plurals.litre_other %(count)s"
+msgstr[0] "%(count)s litre remaining."
+msgstr[1] "%(count)s litres remaining."
+
 #. Auth bar
 msgid "auth.logged_in %(username)s"
 msgstr "Logged in as %(username)s (translator)"

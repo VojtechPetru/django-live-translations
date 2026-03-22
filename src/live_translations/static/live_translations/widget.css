@@ -477,6 +477,22 @@
   resize: none;
 }
 
+/* ── Plural Form Labels ─────────────────────────────── */
+
+.lt-field__form-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #71717a;
+  letter-spacing: 0.03em;
+  margin: 8px 0 3px;
+  text-transform: uppercase;
+}
+
+.lt-field__form-label:first-of-type {
+  margin-top: 4px;
+}
+
 /* ── Inline Error ────────────────────────────────────── */
 
 .lt-dialog__error {

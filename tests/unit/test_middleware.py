@@ -290,7 +290,7 @@ class TestHandleRequest:
         # Seed an inactive override in the backend
         from live_translations.models import TranslationEntry as TEModel
 
-        TEModel.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=False)
+        TEModel.objects.create(language="cs", msgid="hello", context="", msgstr_forms={"0": "Ahoj"}, is_active=False)
 
         with django.utils.translation.override("cs"):
             request = make_request("get", "/page/")
@@ -557,7 +557,7 @@ class TestInjectAssets:
     def test_preview_entries_included(self, make_request, settings):
         response = _html_response("<html><body>X</body></html>")
         mw = LiveTranslationsMiddleware(lambda r: response)
-        preview: OverrideMap = {MsgKey("hello", ""): "Ahoj", MsgKey("bye", "ctx"): "Nashle"}
+        preview: OverrideMap = {MsgKey("hello", ""): {0: "Ahoj"}, MsgKey("bye", "ctx"): {0: "Nashle"}}
 
         settings.LIVE_TRANSLATIONS = _middleware_settings()
         _clear_caches()
@@ -649,12 +649,12 @@ class TestLoadPreviewOverrides:
 
         from live_translations.models import TranslationEntry as TEModel
 
-        TEModel.objects.create(language="cs", msgid="hello", context="", msgstr="Ahoj", is_active=False)
+        TEModel.objects.create(language="cs", msgid="hello", context="", msgstr_forms={"0": "Ahoj"}, is_active=False)
 
         with django.utils.translation.override("cs"):
             result = LiveTranslationsMiddleware._load_preview_overrides()
 
-        assert result == {MsgKey("hello", ""): "Ahoj"}
+        assert result == {MsgKey("hello", ""): {0: "Ahoj"}}
 
     def test_empty_language_returns_empty_dict(self, settings):
         settings.LIVE_TRANSLATIONS = _middleware_settings()
@@ -681,12 +681,12 @@ class TestLoadPreviewOverrides:
 
         from live_translations.models import TranslationEntry as TEModel
 
-        TEModel.objects.create(language="ja", msgid="hello", context="", msgstr="Hola", is_active=False)
+        TEModel.objects.create(language="ja", msgid="hello", context="", msgstr_forms={"0": "Hola"}, is_active=False)
 
         with django.utils.translation.override("en"):
             result = LiveTranslationsMiddleware._load_preview_overrides(language="ja")
 
-        assert result == {MsgKey("hello", ""): "Hola"}
+        assert result == {MsgKey("hello", ""): {0: "Hola"}}
 
 
 @pytest.mark.django_db
@@ -701,7 +701,7 @@ class TestPreviewWithDraftLanguage:
 
         from live_translations.models import TranslationEntry as TEModel
 
-        TEModel.objects.create(language="xx", msgid="hello", context="", msgstr="Hola", is_active=False)
+        TEModel.objects.create(language="xx", msgid="hello", context="", msgstr_forms={"0": "Hola"}, is_active=False)
 
         inner_response = _html_response("<html><body>Hi</body></html>")
         inner = lambda r: inner_response  # noqa: E731

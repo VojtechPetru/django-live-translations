@@ -103,5 +103,5 @@ class TestDraftLanguages:
         # Verify the translation is active by fetching it
         data = api_get_translations(page_as_superuser, base_url, "demo.title")
         es_entry = data["translations"]["es"]
-        assert es_entry["msgstr"] == "Demo de Traducciones"
+        assert es_entry["msgstr_forms"]["0"] == "Demo de Traducciones"
         assert es_entry["is_active"] is True

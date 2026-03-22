@@ -21,13 +21,13 @@ class TestModalEditing:
         page_as_superuser.wait_for_load_state("domcontentloaded")
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         expect(textarea).to_have_value("Live Translations Demo")
 
     def test_textarea_auto_resizes_on_input(self, page_as_superuser: Page) -> None:
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         initial_height = page_as_superuser.evaluate("el => el.offsetHeight", textarea.element_handle())
         textarea.focus()
         textarea.press("End")
@@ -67,13 +67,13 @@ class TestModalEditing:
     def test_no_fuzzy_class_for_normal_entry(self, page_as_superuser: Page) -> None:
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         expect(textarea).not_to_have_class("lt-field__input--fuzzy")
 
     def test_saving_preserves_no_fuzzy_class(self, page_as_superuser: Page, base_url: str) -> None:
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         textarea.fill("Updated Title")
         check_active_toggle(page_as_superuser)
         page_as_superuser.locator(".lt-btn--save").click()
@@ -81,7 +81,7 @@ class TestModalEditing:
         # Reopen modal to verify saved state
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         expect(textarea).not_to_have_class("lt-field__input--fuzzy")
         close_modal(page_as_superuser)
         # Restore original PO value to not leave state for other tests

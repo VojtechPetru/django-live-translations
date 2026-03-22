@@ -19,6 +19,13 @@ from playwright.sync_api import Page
 # All known msgids used across tests — derived from PO_DEFAULTS
 ALL_MSGIDS = sorted({msgid for msgid, _ in PO_DEFAULTS})
 
+# Plural msgids: (msgid, msgid_plural) tuples for cleanup
+PLURAL_MSGIDS = [
+    ("plurals.notification_one %(count)s", "plurals.notification_other %(count)s"),
+    ("plurals.message_one %(count)s", "plurals.message_other %(count)s"),
+    ("plurals.litre_one %(count)s", "plurals.litre_other %(count)s"),
+]
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -269,6 +276,8 @@ def page_as_superuser_for_backend(
         #    request re-injects from a now-empty DB).
         for msgid in ALL_MSGIDS:
             api_delete(page, base_url_for_backend, msgid, ["en", "cs"])
+        for msgid, msgid_plural in PLURAL_MSGIDS:
+            api_delete(page, base_url_for_backend, msgid, ["en", "cs"], msgid_plural=msgid_plural)
 
         # 2. Wipe TranslationHistory via manage.py shell — uses the Django
         #    ORM in a separate process which respects SQLite WAL-mode

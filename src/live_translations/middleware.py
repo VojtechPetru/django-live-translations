@@ -18,7 +18,7 @@ import django.urls
 import django.utils.translation
 
 from live_translations import conf, strings, views
-from live_translations.types import LanguageCode, OverrideMap, StringTable
+from live_translations.types import LanguageCode, OverrideMap, StringTable, StringTableEntry
 
 __all__ = ["LiveTranslationsMiddleware"]
 
@@ -209,12 +209,19 @@ class LiveTranslationsMiddleware:
 
         active_by_default = "true" if settings.translation_active_by_default else "false"
 
+        # nplurals per language for plural editing UI
+        nplurals = conf.get_nplurals()
+        nplurals_json = json.dumps(nplurals, separators=(",", ":"))
+
         preview_config = ""
         if preview_entries is not None:
-            entries_json = json.dumps(
-                [{"m": m, "c": c} for (m, c) in preview_entries],
-                separators=(",", ":"),
-            )
+            preview_items = []
+            for key in preview_entries:
+                item: dict[str, str] = {"m": key.msgid, "c": key.context}
+                if key.msgid_plural:
+                    item["p"] = key.msgid_plural
+                preview_items.append(item)
+            entries_json = json.dumps(preview_items, separators=(",", ":"))
             preview_config = f",preview:true,previewEntries:{entries_json}"
 
         editable_config = ""
@@ -229,7 +236,12 @@ class LiveTranslationsMiddleware:
 
         # Serialize the per-request string registry for client-side marker resolution
         registry = strings.get_string_registry()
-        table: StringTable = {i: {"m": key.msgid, "c": key.context} for i, key in enumerate(registry)}
+        table: StringTable = {}
+        for i, key in enumerate(registry):
+            entry: StringTableEntry = {"m": key.msgid, "c": key.context}
+            if key.msgid_plural:
+                entry["p"] = key.msgid_plural
+            table[i] = entry
         strings_json = json.dumps(table, separators=(",", ":"))
 
         snippet = (
@@ -242,7 +254,8 @@ class LiveTranslationsMiddleware:
             f"csrfToken:'{csrf_token}',"
             f"activeByDefault:{active_by_default},"
             f"shortcutEdit:{shortcut_edit_js},"
-            f"shortcutPreview:{shortcut_preview_js}"
+            f"shortcutPreview:{shortcut_preview_js},"
+            f"nplurals:{nplurals_json}"
             f"{editable_config}"
             f"{preview_config}}};"
             f"window.__LT_STRINGS__={strings_json};"
