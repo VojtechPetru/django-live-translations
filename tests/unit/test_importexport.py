@@ -82,6 +82,32 @@ def _setup_po_files(tmp_path: pathlib.Path, translations: dict[str, dict[str, st
     return locale_dir
 
 
+def _setup_po_files_with_plurals(
+    tmp_path: pathlib.Path,
+    translations: dict[str, dict[str, str]],
+    plurals: dict[str, list[tuple[str, str, dict[int, str]]]] | None = None,
+) -> pathlib.Path:
+    locale_dir = tmp_path / "locale"
+    all_langs = set(translations.keys())
+    if plurals:
+        all_langs |= set(plurals.keys())
+    for lang in all_langs:
+        lc = locale_dir / lang / "LC_MESSAGES"
+        lc.mkdir(parents=True, exist_ok=True)
+        po = polib.POFile()
+        po.metadata = {"Content-Type": "text/plain; charset=utf-8", "Language": lang}
+        for msgid, msgstr in translations.get(lang, {}).items():
+            po.append(polib.POEntry(msgid=msgid, msgstr=msgstr))
+        if plurals and lang in plurals:
+            po.metadata["Plural-Forms"] = "nplurals=2; plural=(n != 1);"
+            for msgid, msgid_plural, forms in plurals[lang]:
+                entry = polib.POEntry(msgid=msgid, msgstr="", msgid_plural=msgid_plural)
+                entry.msgstr_plural = forms
+                po.append(entry)
+        po.save(str(lc / "django.po"))
+    return locale_dir
+
+
 def _configure_settings(
     settings: "SettingsWrapper",
     locale_dir: pathlib.Path,
@@ -194,6 +220,28 @@ class TestExportCSV:
         by_msgid = {r["msgid"]: r for r in rows}
         assert by_msgid["hello"]["msgstr"] == "Cau", "DB override should win over PO default"
         assert by_msgid["bye"]["msgstr"] == "Nashle", "PO default preserved when no DB override"
+
+    def test_plural_entry_exports_multiple_rows(self) -> None:
+        models.TranslationEntry.objects.create(
+            language="cs",
+            msgid="item",
+            context="",
+            msgid_plural="items",
+            msgstr_forms={"0": "1 item", "1": "2 items"},
+            is_active=True,
+        )
+        qs = models.TranslationEntry.objects.qs.all()
+        result = importexport.export_csv(qs, include_defaults=False, languages=None)
+        rows = _parse_csv(result)
+        assert len(rows) == 2
+        assert rows[0]["msgid"] == "item"
+        assert rows[0]["msgid_plural"] == "items"
+        assert rows[0]["form_index"] == "0"
+        assert rows[0]["msgstr"] == "1 item"
+        assert rows[1]["msgid"] == "item"
+        assert rows[1]["msgid_plural"] == "items"
+        assert rows[1]["form_index"] == "1"
+        assert rows[1]["msgstr"] == "2 items"
 
     def test_csv_handles_commas_and_newlines(self) -> None:
         models.TranslationEntry.objects.create(
@@ -810,6 +858,99 @@ class TestRoundTrip:
         assert models.TranslationEntry.objects.qs.get(language="cs", msgid="hello").msgstr_forms == {"0": "Ahoj"}
         assert models.TranslationEntry.objects.qs.get(language="en", msgid="hello").msgstr_forms == {"0": "Hi"}
 
+    def test_csv_round_trip_with_plurals(self) -> None:
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Ahoj"}, is_active=True
+        )
+        models.TranslationEntry.objects.create(
+            language="cs",
+            msgid="hello",
+            context="",
+            msgid_plural="hellos",
+            msgstr_forms={"0": "1 hello", "1": "many hellos"},
+            is_active=True,
+        )
+
+        # Export
+        qs = models.TranslationEntry.objects.qs.all()
+        csv_content = importexport.export_csv(qs, include_defaults=False, languages=None)
+
+        # Clear DB
+        models.TranslationEntry.objects.qs.all().delete()
+        assert models.TranslationEntry.objects.qs.count() == 0
+
+        # Import
+        result = importexport.import_csv(csv_content)
+        assert result["created"] == 2
+        assert result["errors"] == []
+
+        # Singular entry preserved
+        singular = models.TranslationEntry.objects.qs.get(language="cs", msgid="hello", msgid_plural="")
+        assert singular.msgstr_forms == {"0": "Ahoj"}
+        assert singular.is_active is True
+
+        # Plural entry preserved
+        plural = models.TranslationEntry.objects.qs.get(language="cs", msgid="hello", msgid_plural="hellos")
+        assert plural.msgstr_forms == {"0": "1 hello", "1": "many hellos"}
+        assert plural.msgid_plural == "hellos"
+        assert plural.is_active is True
+
+    def test_po_round_trip_with_plurals(
+        self,
+        tmp_path: pathlib.Path,
+        settings: "SettingsWrapper",
+    ) -> None:
+        locale_dir = _setup_po_files_with_plurals(
+            tmp_path,
+            {"cs": {"bye": "Nashle"}},
+            plurals={"cs": [("item", "items", {0: "polozka", 1: "polozky"})]},
+        )
+        _configure_settings(settings, locale_dir, ["cs"])
+
+        # Active plural override
+        models.TranslationEntry.objects.create(
+            language="cs",
+            msgid="item",
+            context="",
+            msgid_plural="items",
+            msgstr_forms={"0": "kus", "1": "kusy"},
+            is_active=True,
+        )
+        # Inactive plural override (new key, not in PO)
+        models.TranslationEntry.objects.create(
+            language="cs",
+            msgid="file",
+            context="",
+            msgid_plural="files",
+            msgstr_forms={"0": "soubor", "1": "soubory"},
+            is_active=False,
+        )
+
+        # Export
+        po_content = importexport.export_po(language="cs")
+
+        # Clear DB
+        models.TranslationEntry.objects.qs.all().delete()
+
+        # Import
+        result = importexport.import_po(po_content, language="cs")
+        assert result["errors"] == []
+
+        # Active plural override round-trips with override value
+        item = models.TranslationEntry.objects.qs.get(language="cs", msgid="item", msgid_plural="items")
+        assert item.msgstr_forms == {"0": "kus", "1": "kusy"}
+        assert item.is_active is True
+
+        # Inactive plural override round-trips via ltpending
+        file_entry = models.TranslationEntry.objects.qs.get(language="cs", msgid="file", msgid_plural="files")
+        assert file_entry.msgstr_forms == {"0": "soubor", "1": "soubory"}
+        assert file_entry.is_active is False
+
+        # Singular PO default also preserved
+        bye = models.TranslationEntry.objects.qs.get(language="cs", msgid="bye", msgid_plural="")
+        assert bye.msgstr_forms == {"0": "Nashle"}
+        assert bye.is_active is True
+
 
 # ---------------------------------------------------------------------------
 # Cross-backend round-trips (simulating environment migration)
@@ -1003,6 +1144,85 @@ class TestCrossBackendRoundTrip:
         bye = po.find("bye")
         assert bye is not None
         assert "fuzzy" in bye.flags, "Inactive entries should get fuzzy flag in PO export"
+
+    def test_csv_plural_export_with_defaults_import_to_clean_db(
+        self,
+        tmp_path: pathlib.Path,
+        settings: "SettingsWrapper",
+    ) -> None:
+        locale_dir = _setup_po_files_with_plurals(
+            tmp_path,
+            {"cs": {"greeting": "Ahoj"}},
+            plurals={"cs": [("item", "items", {0: "polozka", 1: "polozky"})]},
+        )
+        _configure_settings(settings, locale_dir, ["cs"])
+
+        # DB override for the plural entry with different forms
+        models.TranslationEntry.objects.create(
+            language="cs",
+            msgid="item",
+            context="",
+            msgid_plural="items",
+            msgstr_forms={"0": "kus", "1": "kusy"},
+            is_active=True,
+        )
+
+        # Export CSV with defaults (merges PO + DB, DB wins)
+        qs = models.TranslationEntry.objects.qs.all()
+        csv_content = importexport.export_csv(qs, include_defaults=True, languages=["cs"])
+
+        # Clear DB
+        models.TranslationEntry.objects.qs.all().delete()
+
+        # Import into fresh environment
+        result = importexport.import_csv(csv_content)
+        assert result["errors"] == []
+
+        # Plural forms from DB override preserved (DB wins over PO default)
+        item = models.TranslationEntry.objects.qs.get(language="cs", msgid="item", msgid_plural="items")
+        assert item.msgstr_forms == {"0": "kus", "1": "kusy"}
+        assert item.is_active is True
+
+        # Singular PO default also imported
+        greeting = models.TranslationEntry.objects.qs.get(language="cs", msgid="greeting")
+        assert greeting.msgstr_forms == {"0": "Ahoj"}
+
+    def test_csv_to_po_format_conversion_with_plurals(
+        self,
+        tmp_path: pathlib.Path,
+        settings: "SettingsWrapper",
+    ) -> None:
+        locale_dir = _setup_po_files(tmp_path, {"cs": {}})
+        _configure_settings(settings, locale_dir, ["cs"])
+
+        models.TranslationEntry.objects.create(
+            language="cs",
+            msgid="file",
+            context="",
+            msgid_plural="files",
+            msgstr_forms={"0": "soubor", "1": "soubory"},
+            is_active=True,
+        )
+
+        # Export as CSV
+        qs = models.TranslationEntry.objects.qs.all()
+        csv_content = importexport.export_csv(qs, include_defaults=False, languages=None)
+
+        # Clear and reimport from CSV
+        models.TranslationEntry.objects.qs.all().delete()
+        result = importexport.import_csv(csv_content)
+        assert result["created"] == 1
+        assert result["errors"] == []
+
+        # Now export as PO and verify plural structure
+        po_content = importexport.export_po(language="cs")
+        po = polib.pofile(po_content)
+
+        file_entry = po.find("file")
+        assert file_entry is not None
+        assert file_entry.msgid_plural == "files"
+        assert file_entry.msgstr_plural == {0: "soubor", 1: "soubory"}
+        assert "fuzzy" not in file_entry.flags
 
 
 # ---------------------------------------------------------------------------

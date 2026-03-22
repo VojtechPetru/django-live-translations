@@ -173,11 +173,12 @@ def api_get_translations(
     msgid: str,
     *,
     context: str = "",
+    msgid_plural: str = "",
 ) -> dict:
     """Fetch translation data for a msgid via the API."""
     response = page.request.get(
         f"{base_url}{API_PREFIX}/translations/",
-        params={"msgid": msgid, "context": context},
+        params={"msgid": msgid, "context": context, "msgid_plural": msgid_plural},
     )
     return response.json()
 
@@ -228,6 +229,7 @@ def api_delete(
     languages: list[str] | None = None,
     *,
     context: str = "",
+    msgid_plural: str = "",
     page_language: str = "en",
 ) -> dict:
     """Delete a translation override via the API directly (for test setup)."""
@@ -235,6 +237,7 @@ def api_delete(
     body: dict = {
         "msgid": msgid,
         "context": context,
+        "msgid_plural": msgid_plural,
         "page_language": page_language,
     }
     if languages:
