@@ -16,7 +16,7 @@ if t.TYPE_CHECKING:
     from live_translations.backends import db
     from tests.backends import TestBackend  # type: ignore[import-not-found]
 
-from live_translations import conf
+from live_translations import conf, plurals
 from live_translations.types import LanguageCode
 
 
@@ -55,10 +55,12 @@ def _clear_conf_caches():
     conf.get_settings.cache_clear()
     conf.get_backend_instance.cache_clear()
     conf.get_permission_checker.cache_clear()
+    plurals.get_plural_hints.cache_clear()
     yield
     conf.get_settings.cache_clear()
     conf.get_backend_instance.cache_clear()
     conf.get_permission_checker.cache_clear()
+    plurals.get_plural_hints.cache_clear()
 
 
 @pytest.fixture

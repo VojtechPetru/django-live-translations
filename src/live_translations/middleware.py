@@ -17,7 +17,7 @@ import django.templatetags.static
 import django.urls
 import django.utils.translation
 
-from live_translations import conf, strings, views
+from live_translations import conf, plurals, strings, views
 from live_translations.types import LanguageCode, OverrideMap, StringTable, StringTableEntry
 
 __all__ = ["LiveTranslationsMiddleware"]
@@ -213,6 +213,13 @@ class LiveTranslationsMiddleware:
         nplurals = conf.get_nplurals()
         nplurals_json = json.dumps(nplurals, separators=(",", ":"))
 
+        # Plural form hints (CLDR category names + example numbers)
+        plural_hints = plurals.get_plural_hints()
+        plural_hints_json = json.dumps(
+            {lang: [list(h) for h in lang_hints] for lang, lang_hints in plural_hints.items()},
+            separators=(",", ":"),
+        )
+
         preview_config = ""
         if preview_entries is not None:
             preview_items = []
@@ -255,7 +262,8 @@ class LiveTranslationsMiddleware:
             f"activeByDefault:{active_by_default},"
             f"shortcutEdit:{shortcut_edit_js},"
             f"shortcutPreview:{shortcut_preview_js},"
-            f"nplurals:{nplurals_json}"
+            f"nplurals:{nplurals_json},"
+            f"pluralHints:{plural_hints_json}"
             f"{editable_config}"
             f"{preview_config}}};"
             f"window.__LT_STRINGS__={strings_json};"

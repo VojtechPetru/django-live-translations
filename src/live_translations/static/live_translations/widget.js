@@ -31,6 +31,7 @@
    * @property {Array<{m:string, c:string}>} [previewEntries] - Inactive override entries for preview.
    * @property {string[]|null} [editableLanguages] - Subset of languages the current user may edit (null = all).
    * @property {Object<string, number>} [nplurals] - Map of language code to number of plural forms.
+   * @property {Object<string, Array<[string, string]>>} [pluralHints] - CLDR category names + examples per form per language.
    */
 
   /**
@@ -158,6 +159,8 @@
   const EDITABLE_LANGUAGES = CONFIG.editableLanguages || null;
   /** @type {Object<string, number>} */
   const NPLURALS = CONFIG.nplurals || {};
+  /** @type {Object<string, Array<[string, string]>>} */
+  const PLURAL_HINTS = CONFIG.pluralHints || {};
 
   /**
    * Check whether a language is editable by the current user.
@@ -176,6 +179,28 @@
    */
   function _getNplurals(lang) {
     return NPLURALS[lang] || 2;
+  }
+
+  /**
+   * Build a descriptive label for a plural form index.
+   * Returns e.g. "Form 0 \u2014 one (e.g. 1)" or plain "Form 0" when no hints.
+   * @param {string} lang - Language code.
+   * @param {number} formIdx - Plural form index.
+   * @returns {string}
+   */
+  function _formLabel(lang, formIdx) {
+    var base = "Form " + formIdx;
+    var langHints = PLURAL_HINTS[lang] || PLURAL_HINTS[lang.split("-")[0]] || PLURAL_HINTS[lang.split("_")[0]];
+    if (!langHints || !langHints[formIdx]) return base;
+    var hint = langHints[formIdx];
+    var category = hint[0];
+    var examples = hint[1];
+    if (!category && !examples) return base;
+    var parts = base + " \u2014 ";
+    if (category) parts += category;
+    if (category && examples) parts += " ";
+    if (examples) parts += "(e.g. " + examples + ")";
+    return parts;
   }
 
   // ─── String Table & ZWC Marker Resolution ───────────
@@ -1653,47 +1678,87 @@
       container.appendChild(langLabelEl);
     }
 
-    // .po default hint (click to copy)
-    // For singular: show single default. For plural: show per-form defaults.
-    let hasAnyDefault = false;
-    for (const dk in poDefault) {
-      if (poDefault[dk]) { hasAnyDefault = true; break; }
+    // .po default hint (click to copy) — singular only; plural defaults are interleaved below
+    if (!plural) {
+      const singleDefault = poDefault["0"] || "";
+      if (singleDefault) {
+        const poWrap = document.createElement("div");
+        poWrap.className = "lt-field__po-wrap";
+
+        const poHeader2 = document.createElement("div");
+        poHeader2.className = "lt-field__po-header";
+
+        const poLabel2 = document.createElement("span");
+        poLabel2.className = "lt-field__po-label";
+        poLabel2.textContent = "Default";
+
+        const poCopyIcon2 = document.createElement("span");
+        poCopyIcon2.className = "lt-field__po-copy";
+        poCopyIcon2.title = "Copy default";
+
+        poHeader2.appendChild(poLabel2);
+        poHeader2.appendChild(poCopyIcon2);
+
+        const poText2 = document.createElement("div");
+        poText2.className = "lt-field__po-default";
+        poText2.textContent = singleDefault;
+
+        poWrap.appendChild(poHeader2);
+        poWrap.appendChild(poText2);
+
+        _makeCopyable(
+          poWrap,
+          poCopyIcon2,
+          function () { return singleDefault; },
+          "lt-field__po-wrap--copied"
+        );
+
+        container.appendChild(poWrap);
+      }
     }
 
-    if (hasAnyDefault) {
-      const poWrap = document.createElement("div");
-      poWrap.className = "lt-field__po-wrap";
+    // Get the primary default for toggle visibility logic
+    const primaryDefault = poDefault["0"] || "";
 
+    // Render textarea(s) — one per form for plural, single for singular
+    // For plural entries, each form's .po default is rendered right above its textarea.
+    const langEditable = _isEditable(lang);
+    for (let formIdx = 0; formIdx < nForms; formIdx++) {
+      // Form label for plural entries
       if (plural) {
-        // Show per-form defaults for plural entries
-        for (let dfi = 0; dfi < nForms; dfi++) {
-          const formDefault = poDefault[String(dfi)] || "";
-          if (!formDefault) continue;
+        const formLabel = document.createElement("label");
+        formLabel.className = "lt-field__form-label";
+        formLabel.textContent = _formLabel(lang, formIdx);
+        formLabel.setAttribute("for", "lt-input-" + lang + "-" + formIdx);
+        container.appendChild(formLabel);
 
-          const poFormWrap = document.createElement("div");
-          poFormWrap.className = "lt-field__po-form";
+        // Per-form .po default (interleaved with textareas)
+        var formDefault = poDefault[String(formIdx)] || "";
+        if (formDefault) {
+          var poFormWrap = document.createElement("div");
+          poFormWrap.className = "lt-field__po-wrap lt-field__po-form";
 
-          const poHeader = document.createElement("div");
+          var poHeader = document.createElement("div");
           poHeader.className = "lt-field__po-header";
 
-          const poLabel = document.createElement("span");
+          var poLabel = document.createElement("span");
           poLabel.className = "lt-field__po-label";
-          poLabel.textContent = "Form " + dfi + " default";
+          poLabel.textContent = "Default";
 
-          const poCopyIcon = document.createElement("span");
+          var poCopyIcon = document.createElement("span");
           poCopyIcon.className = "lt-field__po-copy";
           poCopyIcon.title = "Copy default";
 
           poHeader.appendChild(poLabel);
           poHeader.appendChild(poCopyIcon);
 
-          const poText = document.createElement("div");
+          var poText = document.createElement("div");
           poText.className = "lt-field__po-default";
           poText.textContent = formDefault;
 
           poFormWrap.appendChild(poHeader);
           poFormWrap.appendChild(poText);
-          poWrap.appendChild(poFormWrap);
+          container.appendChild(poFormWrap);
 
           _makeCopyable(
             poFormWrap,
@@ -1702,56 +1767,6 @@
             "lt-field__po-wrap--copied"
           );
         }
-      } else {
-        // Singular: single default (form 0)
-        const singleDefault = poDefault["0"] || "";
-        if (singleDefault) {
-          const poHeader2 = document.createElement("div");
-          poHeader2.className = "lt-field__po-header";
-
-          const poLabel2 = document.createElement("span");
-          poLabel2.className = "lt-field__po-label";
-          poLabel2.textContent = "Default";
-
-          const poCopyIcon2 = document.createElement("span");
-          poCopyIcon2.className = "lt-field__po-copy";
-          poCopyIcon2.title = "Copy default";
-
-          poHeader2.appendChild(poLabel2);
-          poHeader2.appendChild(poCopyIcon2);
-
-          const poText2 = document.createElement("div");
-          poText2.className = "lt-field__po-default";
-          poText2.textContent = singleDefault;
-
-          poWrap.appendChild(poHeader2);
-          poWrap.appendChild(poText2);
-
-          _makeCopyable(
-            poWrap,
-            poCopyIcon2,
-            function () { return singleDefault; },
-            "lt-field__po-wrap--copied"
-          );
-        }
-      }
-
-      container.appendChild(poWrap);
-    }
-
-    // Get the primary default for toggle visibility logic
-    const primaryDefault = poDefault["0"] || "";
-
-    // Render textarea(s) — one per form for plural, single for singular
-    const langEditable = _isEditable(lang);
-    for (let formIdx = 0; formIdx < nForms; formIdx++) {
-      // Form label for plural entries
-      if (plural) {
-        const formLabel = document.createElement("label");
-        formLabel.className = "lt-field__form-label";
-        formLabel.textContent = "Form " + formIdx;
-        formLabel.setAttribute("for", "lt-input-" + lang + "-" + formIdx);
-        container.appendChild(formLabel);
       }
 
       const textarea = document.createElement("textarea");
@@ -2304,7 +2319,7 @@
         if (hasFlag) _appendSep(header);
         const formTag = document.createElement("span");
         formTag.className = "lt-history__form-tag";
-        formTag.textContent = "Form " + entry.form_index;
+        formTag.textContent = _formLabel(entry.language, entry.form_index);
         header.appendChild(formTag);
         hasFlag = true;
       }

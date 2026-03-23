@@ -67,8 +67,10 @@ class TestPluralModalRendering:
         wait_for_fields_loaded(page_as_superuser_for_backend)
         labels = page_as_superuser_for_backend.locator(".lt-field__form-label")
         expect(labels).to_have_count(2)
-        expect(labels.nth(0)).to_have_text("Form 0")
-        expect(labels.nth(1)).to_have_text("Form 1")
+        expect(labels.nth(0)).to_contain_text("Form 0")
+        expect(labels.nth(0)).to_contain_text("one")
+        expect(labels.nth(1)).to_contain_text("Form 1")
+        expect(labels.nth(1)).to_contain_text("other")
 
     def test_textareas_show_po_defaults(
         self, page_as_superuser_for_backend: Page, backend_id: str, base_url_for_backend: str
