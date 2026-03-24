@@ -13,6 +13,7 @@ example/db.sqlite3
 .opencode/
 .superset/
 .claude/
+.dev/
 site/
 .coverage
 .benchmarks/

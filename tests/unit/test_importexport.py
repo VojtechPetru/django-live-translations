@@ -946,10 +946,8 @@ class TestRoundTrip:
         assert file_entry.msgstr_forms == {"0": "soubor", "1": "soubory"}
         assert file_entry.is_active is False
 
-        # Singular PO default also preserved
-        bye = models.TranslationEntry.objects.qs.get(language="cs", msgid="bye", msgid_plural="")
-        assert bye.msgstr_forms == {"0": "Nashle"}
-        assert bye.is_active is True
+        # Singular PO default is NOT imported as DB entry (matches .po file)
+        assert not models.TranslationEntry.objects.qs.filter(language="cs", msgid="bye", msgid_plural="").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -992,13 +990,15 @@ class TestCrossBackendRoundTrip:
         # Import into fresh environment
         result = importexport.import_csv(csv_content)
         assert result["errors"] == []
-        assert result["created"] == 3
+        # "hello" (active override, differs from PO "Ahoj") and "bye" (inactive override) are created.
+        # "thanks" matches PO default "Diky" so it's skipped.
+        assert result["created"] == 2
 
         assert models.TranslationEntry.objects.qs.get(language="cs", msgid="hello").msgstr_forms == {"0": "Cau"}
         assert models.TranslationEntry.objects.qs.get(language="cs", msgid="hello").is_active is True
         assert models.TranslationEntry.objects.qs.get(language="cs", msgid="bye").msgstr_forms == {"0": "Sbohem"}
         assert models.TranslationEntry.objects.qs.get(language="cs", msgid="bye").is_active is False
-        assert models.TranslationEntry.objects.qs.get(language="cs", msgid="thanks").msgstr_forms == {"0": "Diky"}
+        assert not models.TranslationEntry.objects.qs.filter(language="cs", msgid="thanks").exists()
 
     def test_po_export_from_db_env_import_to_clean_env(
         self,
@@ -1183,9 +1183,8 @@ class TestCrossBackendRoundTrip:
         assert item.msgstr_forms == {"0": "kus", "1": "kusy"}
         assert item.is_active is True
 
-        # Singular PO default also imported
-        greeting = models.TranslationEntry.objects.qs.get(language="cs", msgid="greeting")
-        assert greeting.msgstr_forms == {"0": "Ahoj"}
+        # Singular PO default is NOT imported as DB entry (matches .po file)
+        assert not models.TranslationEntry.objects.qs.filter(language="cs", msgid="greeting").exists()
 
     def test_csv_to_po_format_conversion_with_plurals(
         self,
@@ -1223,6 +1222,267 @@ class TestCrossBackendRoundTrip:
         assert file_entry.msgid_plural == "files"
         assert file_entry.msgstr_plural == {0: "soubor", 1: "soubory"}
         assert "fuzzy" not in file_entry.flags
+
+
+# ---------------------------------------------------------------------------
+# Import skips PO defaults (bug fix)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+class TestImportSkipsPoDefaults:
+    """Import should not create DB entries for translations that match .po file defaults."""
+
+    def test_csv_import_skips_rows_matching_po_defaults(
+        self,
+        tmp_path: pathlib.Path,
+        settings: "SettingsWrapper",
+    ) -> None:
+        locale_dir = _setup_po_files(tmp_path, {"cs": {"hello": "Ahoj", "bye": "Nashle"}})
+        _configure_settings(settings, locale_dir, ["cs"])
+
+        content = _make_csv(
+            [
+                {
+                    "language": "cs",
+                    "msgid": "hello",
+                    "context": "",
+                    "msgid_plural": "",
+                    "form_index": "",
+                    "msgstr": "Ahoj",
+                    "is_active": "true",
+                },
+                {
+                    "language": "cs",
+                    "msgid": "bye",
+                    "context": "",
+                    "msgid_plural": "",
+                    "form_index": "",
+                    "msgstr": "Sbohem",
+                    "is_active": "true",
+                },
+            ]
+        )
+        result = importexport.import_csv(content)
+        assert result["errors"] == []
+        # "hello" matches PO default -> skipped; "bye" differs -> created
+        assert result["created"] == 1
+        assert not models.TranslationEntry.objects.qs.filter(msgid="hello").exists()
+        assert models.TranslationEntry.objects.qs.get(msgid="bye").msgstr_forms == {"0": "Sbohem"}
+
+    def test_import_creates_all_when_no_po_file(
+        self,
+        tmp_path: pathlib.Path,
+        settings: "SettingsWrapper",
+    ) -> None:
+        """When no .po file exists (migration scenario), all rows are created."""
+        locale_dir = tmp_path / "empty_locale"
+        locale_dir.mkdir()
+        _configure_settings(settings, locale_dir, ["cs"])
+
+        content = _make_csv(
+            [
+                {
+                    "language": "cs",
+                    "msgid": "hello",
+                    "context": "",
+                    "msgid_plural": "",
+                    "form_index": "",
+                    "msgstr": "Ahoj",
+                    "is_active": "true",
+                },
+                {
+                    "language": "cs",
+                    "msgid": "bye",
+                    "context": "",
+                    "msgid_plural": "",
+                    "form_index": "",
+                    "msgstr": "Nashle",
+                    "is_active": "true",
+                },
+            ]
+        )
+        result = importexport.import_csv(content)
+        assert result["created"] == 2
+        assert models.TranslationEntry.objects.qs.count() == 2
+
+    def test_import_removes_db_entry_when_reset_to_po_default(
+        self,
+        tmp_path: pathlib.Path,
+        settings: "SettingsWrapper",
+    ) -> None:
+        """Importing a value matching the PO default deletes the existing DB override."""
+        locale_dir = _setup_po_files(tmp_path, {"cs": {"hello": "Ahoj"}})
+        _configure_settings(settings, locale_dir, ["cs"])
+
+        # Existing DB override
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Cau"}, is_active=True
+        )
+
+        # Import with PO default value
+        content = _make_csv(
+            [
+                {
+                    "language": "cs",
+                    "msgid": "hello",
+                    "context": "",
+                    "msgid_plural": "",
+                    "form_index": "",
+                    "msgstr": "Ahoj",
+                    "is_active": "true",
+                },
+            ]
+        )
+        result = importexport.import_csv(content)
+        assert result["errors"] == []
+        assert result.get("removed", 0) == 1
+        assert not models.TranslationEntry.objects.qs.filter(msgid="hello").exists()
+
+    def test_inactive_import_not_treated_as_po_default(
+        self,
+        tmp_path: pathlib.Path,
+        settings: "SettingsWrapper",
+    ) -> None:
+        """An inactive row should always create a DB entry, even if msgstr matches .po."""
+        locale_dir = _setup_po_files(tmp_path, {"cs": {"hello": "Ahoj"}})
+        _configure_settings(settings, locale_dir, ["cs"])
+
+        content = _make_csv(
+            [
+                {
+                    "language": "cs",
+                    "msgid": "hello",
+                    "context": "",
+                    "msgid_plural": "",
+                    "form_index": "",
+                    "msgstr": "Ahoj",
+                    "is_active": "false",
+                },
+            ]
+        )
+        result = importexport.import_csv(content)
+        assert result["created"] == 1
+        entry = models.TranslationEntry.objects.qs.get(msgid="hello")
+        assert entry.is_active is False
+
+    def test_dry_run_shows_remove_action(
+        self,
+        tmp_path: pathlib.Path,
+        settings: "SettingsWrapper",
+    ) -> None:
+        locale_dir = _setup_po_files(tmp_path, {"cs": {"hello": "Ahoj"}})
+        _configure_settings(settings, locale_dir, ["cs"])
+
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", context="", msgstr_forms={"0": "Cau"}, is_active=True
+        )
+
+        content = _make_csv(
+            [
+                {
+                    "language": "cs",
+                    "msgid": "hello",
+                    "context": "",
+                    "msgid_plural": "",
+                    "form_index": "",
+                    "msgstr": "Ahoj",
+                    "is_active": "true",
+                },
+            ]
+        )
+        result = importexport.import_csv(content, dry_run=True)
+        assert result["dry_run"] is True
+        assert result.get("removed", 0) == 1
+        assert len(result["preview"]) == 1  # type: ignore[arg-type]
+        assert result["preview"][0].action == "remove"  # type: ignore[index]
+        # DB entry still exists (dry run)
+        assert models.TranslationEntry.objects.qs.filter(msgid="hello").exists()
+
+    def test_po_import_skips_po_defaults(
+        self,
+        tmp_path: pathlib.Path,
+        settings: "SettingsWrapper",
+    ) -> None:
+        locale_dir = _setup_po_files(tmp_path, {"cs": {"hello": "Ahoj", "bye": "Nashle"}})
+        _configure_settings(settings, locale_dir, ["cs"])
+
+        po = polib.POFile()
+        po.metadata = {"Language": "cs"}
+        po.append(polib.POEntry(msgid="hello", msgstr="Ahoj"))  # matches PO default
+        po.append(polib.POEntry(msgid="bye", msgstr="Sbohem"))  # differs
+
+        result = importexport.import_po(str(po), language="cs")
+        assert result["errors"] == []
+        assert result["created"] == 1
+        assert not models.TranslationEntry.objects.qs.filter(msgid="hello").exists()
+        assert models.TranslationEntry.objects.qs.get(msgid="bye").msgstr_forms == {"0": "Sbohem"}
+
+    def test_plural_import_skips_po_defaults(
+        self,
+        tmp_path: pathlib.Path,
+        settings: "SettingsWrapper",
+    ) -> None:
+        locale_dir = _setup_po_files_with_plurals(
+            tmp_path,
+            {"cs": {}},
+            plurals={"cs": [("item", "items", {0: "polozka", 1: "polozky"})]},
+        )
+        _configure_settings(settings, locale_dir, ["cs"])
+
+        # Import with same plural forms as PO default
+        content = _make_csv(
+            [
+                {
+                    "language": "cs",
+                    "msgid": "item",
+                    "context": "",
+                    "msgid_plural": "items",
+                    "form_index": "0",
+                    "msgstr": "polozka",
+                    "is_active": "true",
+                },
+                {
+                    "language": "cs",
+                    "msgid": "item",
+                    "context": "",
+                    "msgid_plural": "items",
+                    "form_index": "1",
+                    "msgstr": "polozky",
+                    "is_active": "true",
+                },
+            ]
+        )
+        result = importexport.import_csv(content)
+        assert result["created"] == 0
+        assert not models.TranslationEntry.objects.qs.filter(msgid="item").exists()
+
+        # Now import with different plural forms
+        content2 = _make_csv(
+            [
+                {
+                    "language": "cs",
+                    "msgid": "item",
+                    "context": "",
+                    "msgid_plural": "items",
+                    "form_index": "0",
+                    "msgstr": "kus",
+                    "is_active": "true",
+                },
+                {
+                    "language": "cs",
+                    "msgid": "item",
+                    "context": "",
+                    "msgid_plural": "items",
+                    "form_index": "1",
+                    "msgstr": "kusy",
+                    "is_active": "true",
+                },
+            ]
+        )
+        result2 = importexport.import_csv(content2)
+        assert result2["created"] == 1
+        assert models.TranslationEntry.objects.qs.get(msgid="item").msgstr_forms == {"0": "kus", "1": "kusy"}
 
 
 # ---------------------------------------------------------------------------

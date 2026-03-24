@@ -5,6 +5,7 @@ import logging
 import typing as t
 import zipfile
 
+import django.db.models
 import django.db.transaction
 import django.utils.timezone
 import polib
@@ -45,11 +46,12 @@ class ImportResult(t.TypedDict):
     errors: list[str]
     dry_run: t.NotRequired[bool]
     unchanged: t.NotRequired[int]
+    removed: t.NotRequired[int]
     preview: t.NotRequired[list["PreviewEntry"]]
 
 
 class PreviewEntry(t.NamedTuple):
-    action: t.Literal["create", "update"]
+    action: t.Literal["create", "update", "remove"]
     language: LanguageCode
     msgid: str
     context: str
@@ -268,35 +270,73 @@ def _snapshot_existing(
     return existing
 
 
+def _matches_po_default(
+    row: ExportRow,
+    po_defaults: dict[LanguageCode, dict[MsgKey, PluralForms]],
+) -> bool:
+    """Check if a row's translation matches the .po file default."""
+    if not row.is_active:
+        return False
+    lang_defaults = po_defaults.get(row.language)
+    if lang_defaults is None:
+        return False
+    msg_key = MsgKey(row.msgid, row.context, row.msgid_plural)
+    po_forms = lang_defaults.get(msg_key)
+    if po_forms is None:
+        return False
+    row_forms: dict[str, str] = json.loads(row.msgstr_forms)
+    return row_forms == {str(k): v for k, v in po_forms.items()}
+
+
 def _build_preview(
     valid_rows: list[ExportRow],
     existing: dict[tuple[LanguageCode, str, str, str], tuple[str, bool]],
-) -> tuple[int, int, int, list[PreviewEntry]]:
-    """Classify rows as create/update/unchanged and build preview entries."""
+    po_defaults: dict[LanguageCode, dict[MsgKey, PluralForms]],
+) -> tuple[int, int, int, int, list[PreviewEntry]]:
+    """Classify rows as create/update/unchanged/remove and build preview entries."""
     preview: list[PreviewEntry] = []
     created = 0
     updated = 0
     unchanged = 0
+    removed = 0
     for row in valid_rows:
         key = (row.language, row.msgid, row.context, row.msgid_plural)
         old = existing.get(key)
         if old is None:
-            created += 1
+            if _matches_po_default(row, po_defaults):
+                unchanged += 1
+            else:
+                created += 1
+                preview.append(
+                    PreviewEntry(
+                        "create",
+                        row.language,
+                        row.msgid,
+                        row.context,
+                        row.msgid_plural,
+                        row.msgstr_forms,
+                        row.is_active,
+                        "",
+                        None,
+                    )
+                )
+        elif old == (row.msgstr_forms, row.is_active):
+            unchanged += 1
+        elif _matches_po_default(row, po_defaults):
+            removed += 1
             preview.append(
                 PreviewEntry(
-                    "create",
+                    "remove",
                     row.language,
                     row.msgid,
                     row.context,
                     row.msgid_plural,
                     row.msgstr_forms,
                     row.is_active,
-                    "",
-                    None,
+                    old[0],
+                    old[1],
                 )
             )
-        elif old == (row.msgstr_forms, row.is_active):
-            unchanged += 1
         else:
             updated += 1
             preview.append(
@@ -312,7 +352,7 @@ def _build_preview(
                     old[1],
                 )
             )
-    return created, updated, unchanged, preview
+    return created, updated, unchanged, removed, preview
 
 
 def _validate_rows(rows: list[ExportRow]) -> tuple[list[ExportRow], list[str]]:
@@ -330,6 +370,12 @@ def _validate_rows(rows: list[ExportRow]) -> tuple[list[ExportRow], list[str]]:
     return valid_rows, errors
 
 
+def _load_po_defaults(valid_rows: list[ExportRow]) -> dict[LanguageCode, dict[MsgKey, PluralForms]]:
+    """Load .po defaults once per unique language in the import rows."""
+    languages = {row.language for row in valid_rows}
+    return {lang: _read_po_defaults(lang) for lang in languages}
+
+
 def _bulk_import(rows: list[ExportRow], *, dry_run: bool = False) -> ImportResult:
     """Core import logic: upsert TranslationEntry rows from ExportRow list."""
     valid_rows, errors = _validate_rows(rows)
@@ -338,18 +384,29 @@ def _bulk_import(rows: list[ExportRow], *, dry_run: bool = False) -> ImportResul
         return ImportResult(created=0, updated=0, errors=errors, dry_run=dry_run, unchanged=0, preview=[])
 
     existing = _snapshot_existing(valid_rows)
-    created, updated, unchanged, preview = _build_preview(valid_rows, existing)
+    po_defaults = _load_po_defaults(valid_rows)
+    created, updated, unchanged, removed, preview = _build_preview(valid_rows, existing, po_defaults)
 
     if dry_run:
         return ImportResult(
-            created=created, updated=updated, errors=errors, dry_run=True, unchanged=unchanged, preview=preview
+            created=created,
+            updated=updated,
+            errors=errors,
+            dry_run=True,
+            unchanged=unchanged,
+            removed=removed,
+            preview=preview,
         )
 
-    # Only upsert rows that actually changed (skip unchanged)
-    changed_keys = {(p.language, p.msgid, p.context, p.msgid_plural) for p in preview}
-    changed_rows = [r for r in valid_rows if (r.language, r.msgid, r.context, r.msgid_plural) in changed_keys]
+    # Only upsert rows that actually changed (skip unchanged and removed)
+    upsert_keys = {
+        (p.language, p.msgid, p.context, p.msgid_plural) for p in preview if p.action in ("create", "update")
+    }
+    upsert_rows = [r for r in valid_rows if (r.language, r.msgid, r.context, r.msgid_plural) in upsert_keys]
 
-    if not changed_rows:
+    remove_keys = {(p.language, p.msgid, p.context, p.msgid_plural) for p in preview if p.action == "remove"}
+
+    if not upsert_rows and not remove_keys:
         return ImportResult(created=created, updated=updated, errors=errors)
 
     now = django.utils.timezone.now()
@@ -363,18 +420,28 @@ def _bulk_import(rows: list[ExportRow], *, dry_run: bool = False) -> ImportResul
             is_active=row.is_active,
             updated_at=now,
         )
-        for row in changed_rows
+        for row in upsert_rows
     ]
 
     with django.db.transaction.atomic():
-        models.TranslationEntry.objects.bulk_create(
-            entries_to_upsert,
-            update_conflicts=True,
-            update_fields=["msgstr_forms", "is_active", "updated_at"],
-            unique_fields=["language", "msgid", "context", "msgid_plural"],
-        )
+        if entries_to_upsert:
+            models.TranslationEntry.objects.bulk_create(
+                entries_to_upsert,
+                update_conflicts=True,
+                update_fields=["msgstr_forms", "is_active", "updated_at"],
+                unique_fields=["language", "msgid", "context", "msgid_plural"],
+            )
 
-        history_entries = [(row.language, MsgKey(row.msgid, row.context, row.msgid_plural)) for row in changed_rows]
+        if remove_keys:
+            q = django.db.models.Q()
+            for lang, msgid, context, msgid_plural in remove_keys:
+                q |= django.db.models.Q(language=lang, msgid=msgid, context=context, msgid_plural=msgid_plural)
+            models.TranslationEntry.objects.filter(q).delete()
+
+        all_changed_rows = upsert_rows + [
+            r for r in valid_rows if (r.language, r.msgid, r.context, r.msgid_plural) in remove_keys
+        ]
+        history_entries = [(row.language, MsgKey(row.msgid, row.context, row.msgid_plural)) for row in all_changed_rows]
 
         if history_entries:
             history.record_bulk_action(
@@ -386,7 +453,7 @@ def _bulk_import(rows: list[ExportRow], *, dry_run: bool = False) -> ImportResul
 
         conf.get_backend_instance().bump_catalog_version()
 
-    return ImportResult(created=created, updated=updated, errors=errors)
+    return ImportResult(created=created, updated=updated, removed=removed, errors=errors)
 
 
 def import_csv(content: str, *, dry_run: bool = False) -> ImportResult:
