@@ -298,12 +298,16 @@ class DatabaseBackend(base.TranslationBackend):
             if old_entry is not None:
                 old_active_states[lang] = old_entry.is_active
 
+            # For plural entries, merge incoming forms with existing ones so that
+            # saving a single form (e.g. history restore) doesn't wipe the others.
+            merged = {**old_entry.msgstr_forms, **forms} if old_entry and key.msgid_plural else forms
+
             models.TranslationEntry.objects.update_or_create(
                 language=lang,
                 msgid=key.msgid,
                 context=key.context,
                 msgid_plural=key.msgid_plural,
-                defaults={"msgstr_forms": plural_forms_to_json(forms), "is_active": is_active},
+                defaults={"msgstr_forms": plural_forms_to_json(merged), "is_active": is_active},
             )
 
         history.record_text_changes(

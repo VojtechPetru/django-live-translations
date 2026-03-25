@@ -406,6 +406,32 @@ class TestSaveTranslations:
         _, kwargs = calls[0]
         assert kwargs["active_flags"] == {"cs": True}
 
+    @pytest.mark.django_db
+    def test_partial_plural_save_preserves_other_forms(self, test_backend: "TestBackend"):
+        """Saving a single plural form (e.g. history restore) must not overwrite other forms."""
+        key = MsgKey("item", "", "items")
+        # Create an existing plural entry with forms 0 and 1
+        models.TranslationEntry.objects.create(
+            language="cs",
+            msgid="item",
+            context="",
+            msgid_plural="items",
+            msgstr_forms={"0": "polozka", "1": "polozky"},
+            is_active=True,
+        )
+
+        # Simulate a history restore that sends only form 0
+        services.save_translations(
+            key=key,
+            translations={"cs": {0: "kus"}},
+            active_flags={"cs": True},
+        )
+
+        entry = models.TranslationEntry.objects.qs.get(language="cs", msgid="item")
+        # Form 0 should be updated, form 1 should be preserved
+        assert entry.msgstr_forms["0"] == "kus"
+        assert entry.msgstr_forms["1"] == "polozky"
+
     def test_multiple_draft_languages_forced_active(self, test_backend: "TestBackend", settings):
         """All draft languages are forced active in a single save call."""
         settings.LANGUAGES = [("en", "English")]
