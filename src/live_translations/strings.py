@@ -11,8 +11,8 @@ Two distinct start-flag characters are used: ``\\u2060`` (WORD JOINER) at
 the tag name).  The distinct characters let the JS apply the correct wrapping
 strategy for multi-node inline-HTML translations.
 
-The middleware injects the string table as ``window.__LT_STRINGS__`` and the
-client-side JS uses the start flag to locate the beginning of a translation span
+The middleware injects the string table as a ``<template data-lt-strings>``
+attribute and the client-side JS uses the start flag to locate the beginning of a translation span
 (which may contain multiple DOM nodes when HTML tags are present), strips the
 markers, builds an internal registry, and wraps text nodes in ``<lt-t>`` elements.
 """

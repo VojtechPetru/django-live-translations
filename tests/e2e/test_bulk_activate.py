@@ -4,7 +4,7 @@ import json
 import re
 
 import pytest
-from helpers import api_delete, api_restore_po_default, api_save, disable_preview, enable_preview
+from helpers import api_delete, api_restore_po_default, api_save, disable_preview, enable_preview, get_csrf_token
 from playwright.sync_api import Page, expect
 
 
@@ -224,7 +224,7 @@ class TestBulkActivate:
         span_en = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span_en).to_have_text("EN Activated")
         # Verify CS is still inactive via API — fetch translation and check active flag
-        csrf = page_as_superuser_for_backend.evaluate("() => window.__LT_CONFIG__?.csrfToken || ''")
+        csrf = get_csrf_token(page_as_superuser_for_backend)
         response = page_as_superuser_for_backend.request.post(
             f"{base_url_for_backend}/__live-translations__/translations/save/",
             data=json.dumps(

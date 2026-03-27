@@ -18,8 +18,8 @@ class TestPreviewMode:
         preview_cookie = next((c for c in cookies if c["name"] == "lt_preview"), None)
         assert preview_cookie is not None
         assert preview_cookie["value"] == "1"
-        preview_flag = page_as_superuser_for_backend.evaluate("() => window.__LT_CONFIG__?.preview")
-        assert preview_flag is True
+        body = page_as_superuser_for_backend.locator("body")
+        expect(body).to_have_class(re.compile(r"lt-edit-mode"))
         # Cleanup
         disable_preview(page_as_superuser_for_backend, base_url_for_backend)
 

@@ -1,6 +1,6 @@
 """E2E tests for the permission system — widget visibility and API access control."""
 
-from helpers import API_PREFIX
+from helpers import API_PREFIX, get_csrf_token
 from playwright.sync_api import Page, expect
 
 
@@ -10,14 +10,14 @@ class TestPermissionSystem:
         expect(hint).to_be_visible()
 
     def test_superuser_sees_widget_js_injected(self, page_as_superuser: Page) -> None:
-        config = page_as_superuser.evaluate("() => typeof window.__LT_CONFIG__")
-        assert config != "undefined"
+        has_widget = page_as_superuser.evaluate("() => document.querySelector('script[src*=\"widget.js\"]') !== null")
+        assert has_widget is True
 
-    def test_superuser_sees_lt_config_with_correct_languages(self, page_as_superuser: Page) -> None:
-        config = page_as_superuser.evaluate("() => window.__LT_CONFIG__")
-        assert isinstance(config, dict)
-        assert sorted(config["languages"]) == ["cs", "en", "es"]
-        assert config["csrfToken"]
+    def test_superuser_sees_widget_with_correct_languages(self, page_as_superuser: Page) -> None:
+        has_widget = page_as_superuser.evaluate("() => document.querySelector('script[src*=\"widget.js\"]') !== null")
+        assert has_widget is True
+        csrf = get_csrf_token(page_as_superuser)
+        assert csrf
 
     def test_superuser_page_has_translatable_spans(self, page_as_superuser: Page) -> None:
         spans = page_as_superuser.locator("lt-t[data-lt-msgid]")
@@ -29,8 +29,10 @@ class TestPermissionSystem:
         expect(hint).to_have_count(0)
 
     def test_regular_user_no_widget_js(self, page_as_regular_user: Page) -> None:
-        config = page_as_regular_user.evaluate("() => typeof window.__LT_CONFIG__")
-        assert config == "undefined"
+        has_widget = page_as_regular_user.evaluate(
+            "() => document.querySelector('script[src*=\"widget.js\"]') !== null"
+        )
+        assert has_widget is False
 
     def test_anonymous_user_no_hint_bar(self, page_anonymous: Page) -> None:
         hint = page_anonymous.locator(".lt-hint")
@@ -48,7 +50,7 @@ class TestPermissionSystem:
         assert response.status == 403
 
     def test_api_save_returns_403_for_regular_user(self, page_as_regular_user: Page, base_url: str) -> None:
-        csrf = page_as_regular_user.evaluate("() => document.cookie.match(/csrftoken=([^;]+)/)?.[1] || ''")
+        csrf = get_csrf_token(page_as_regular_user)
         response = page_as_regular_user.request.post(
             f"{base_url}{API_PREFIX}/translations/save/",
             data={

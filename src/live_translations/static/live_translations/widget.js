@@ -17,6 +17,12 @@
 (function () {
   "use strict";
 
+  // ─── Data Attribute Constants ──────────────────────────
+  // Shared with the Python middleware that injects these attributes.
+  /** @type {string} */ var ATTR_CONFIG = "data-lt-config";
+  /** @type {string} */ var ATTR_STRINGS = "data-lt-strings";
+  /** @type {string} */ var SEL_ATTR_TRANSLATIONS = "[data-lt-attrs]";
+
   /**
    * @typedef {Object} LTConfig
    * @property {string}   [apiBase]          - URL prefix for the translation API endpoints.
@@ -132,9 +138,14 @@
    * @property {number} y
    */
 
-  // ─── Config (injected by middleware) ─────────────────
+  // ─── Config (read from <template data-lt-config>) ────
   /** @type {LTConfig} */
-  const CONFIG = window.__LT_CONFIG__ || {};
+  var CONFIG = {};
+  var _configTmpl = document.querySelector("template[" + ATTR_CONFIG + "]");
+  if (_configTmpl) {
+    try { CONFIG = JSON.parse(_configTmpl.getAttribute(ATTR_CONFIG) || "{}"); } catch (e) { /* ignore */ }
+    _configTmpl.removeAttribute(ATTR_CONFIG);
+  }
   /** @type {string} */
   const API_BASE = CONFIG.apiBase || "/__live-translations__";
   /** @type {string[]} */
@@ -212,7 +223,7 @@
 
   /**
    * @typedef {Object<number, StringTableEntry>} StringTable
-   * Maps string ID to {msgid, context[, msgid_plural]}. Injected as window.__LT_STRINGS__.
+   * Maps string ID to {msgid, context[, msgid_plural]}. Delivered via &lt;template data-lt-strings&gt;.
    */
 
   /**
@@ -244,7 +255,7 @@
   const WJ = "\u2060";
 
   /** @type {StringTable} */
-  const STRING_TABLE = window.__LT_STRINGS__ || {};
+  var STRING_TABLE = {};
 
   /** @type {RegisteredNode[]} */
   const registeredNodes = [];
@@ -267,11 +278,11 @@
    * strip them, and populate registeredNodes[].
    * @returns {void}
    */
-  function resolveMarkers() {
+  function resolveMarkers(root) {
     // Phase 1: Text nodes
     /** @type {Text[]} */
     const textNodes = [];
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    const walker = document.createTreeWalker(root || document.body, NodeFilter.SHOW_TEXT);
     /** @type {Node|null} */
     let wNode;
     while ((wNode = walker.nextNode()) !== null) {
@@ -441,7 +452,7 @@
     }
 
     // Phase 2: Attribute values
-    const allElements = document.querySelectorAll("*");
+    const allElements = (root || document.body).querySelectorAll("*");
     for (let ei = 0; ei < allElements.length; ei++) {
       const el = /** @type {HTMLElement} */ (allElements[ei]);
       /** @type {AttrInfo[]} */
@@ -487,6 +498,44 @@
     const tw = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     const n = tw.nextNode();
     return n ? /** @type {Text} */ (n) : null;
+  }
+
+  // ─── Dynamic Content Support ─────────────────────────
+
+  /**
+   * Find &lt;template data-lt-strings&gt; elements injected by the middleware,
+   * merge their entries into STRING_TABLE, and remove them from the DOM.
+   * Works for both the initial full-page template and partial-response templates
+   * appended after dynamic content swaps (htmx, fetch, etc.).
+   * @returns {void}
+   */
+  function _processPartialStrings() {
+    var templates = document.body.querySelectorAll("template[" + ATTR_STRINGS + "]");
+    for (var i = 0; i < templates.length; i++) {
+      try {
+        var data = JSON.parse(templates[i].getAttribute(ATTR_STRINGS) || "{}");
+        for (var key in data) {
+          if (data.hasOwnProperty(key)) STRING_TABLE[key] = data[key];
+        }
+      } catch (e) { /* ignore malformed JSON */ }
+      templates[i].removeAttribute(ATTR_STRINGS);
+      // Remove the template entirely if it has no remaining attributes
+      if (!templates[i].attributes.length) {
+        templates[i].parentNode.removeChild(templates[i]);
+      }
+    }
+  }
+
+  /**
+   * Process any pending string-table templates and resolve ZWC markers.
+   * Called on initial page load, after htmx content swaps, or manually
+   * via {@link window.__LT_RESCAN__}.
+   * @param {Element} [root] - DOM subtree to scan (defaults to document.body).
+   * @returns {void}
+   */
+  function rescanMarkers(root) {
+    _processPartialStrings();
+    resolveMarkers(root || document.body);
   }
 
   // ─── HTML Validation ─────────────────────────────────
@@ -974,7 +1023,7 @@
     }
 
     // Update attribute translations (always use textContent — attributes don't render HTML)
-    const attrEls = document.querySelectorAll("[data-lt-attrs]");
+    const attrEls = document.querySelectorAll(SEL_ATTR_TRANSLATIONS);
     for (let j = 0; j < attrEls.length; j++) {
       const attrs = _parseLtAttrs(/** @type {HTMLElement} */ (attrEls[j]));
       for (let k = 0; k < attrs.length; k++) {
@@ -1806,6 +1855,7 @@
 
       // Modified-from-default indicator
       (function (ta, defVal) {
+        /** @returns {void} */
         function syncModified() {
           ta.classList.toggle("lt-field__input--modified", ta.value !== defVal);
         }
@@ -1861,6 +1911,7 @@
 
     // Show/hide toggle based on whether any form differs from default
     (function (toggle, defaults, cb, defaultActive, hadOverride, draft, langCode, parent) {
+      /** @returns {void} */
       function syncToggle() {
         if (draft) return; // Draft languages are always active — keep toggle hidden
         const nf = _isPlural() ? _getNplurals(langCode) : 1;
@@ -2584,6 +2635,7 @@
     /**
      * @param {string} label - Section heading ("Before" / "After").
      * @param {string} text  - Value to display.
+     * @returns {void}
      */
     function addSection(label, text) {
       const sec = document.createElement("div");
@@ -2844,7 +2896,7 @@
     }
 
     // Mark attribute-translatable elements
-    const attrEls = document.querySelectorAll("[data-lt-attrs]");
+    const attrEls = document.querySelectorAll(SEL_ATTR_TRANSLATIONS);
     for (let a = 0; a < attrEls.length; a++) {
       const attrs = _parseLtAttrs(/** @type {HTMLElement} */ (attrEls[a]));
       for (let j = 0; j < attrs.length; j++) {
@@ -2945,7 +2997,7 @@
         // attribute-translatable element that has a preview marker, select
         // the *parent* attribute element (not the inner text span).
         if (e.shiftKey && PREVIEW) {
-          const parentAttr = span.closest("[data-lt-attrs]");
+          const parentAttr = span.closest(SEL_ATTR_TRANSLATIONS);
           if (parentAttr && parentAttr.classList.contains("lt-preview")) {
             _toggleSelected(parentAttr);
             window.getSelection().removeAllRanges();
@@ -2963,7 +3015,7 @@
       }
 
       // Check for attribute-translatable element
-      const attrEl = e.target.closest("[data-lt-attrs]");
+      const attrEl = e.target.closest(SEL_ATTR_TRANSLATIONS);
       if (attrEl) {
         e.preventDefault();
         e.stopPropagation();
@@ -2987,8 +3039,8 @@
   // ─── ZWC Marker Resolution + Edit Mode Restore ───────
 
   document.addEventListener("DOMContentLoaded", function () {
-    // Resolve ZWC markers in text nodes and attribute values
-    resolveMarkers();
+    // Process string table from <template> and resolve ZWC markers
+    rescanMarkers();
 
     // Restore edit mode after reload (if persisted in sessionStorage)
     try {
@@ -3008,6 +3060,23 @@
       _initPreviewMode();
     }
   });
+
+  // ─── Dynamic Content Event Listeners ─────────────────
+  // Re-scan markers when htmx (or similar libraries) swap in new content.
+  // We use htmx:load (not htmx:afterSettle) because outerHTML swaps detach the
+  // trigger element from the DOM, preventing afterSettle from bubbling.
+  // htmx:load fires on the NEW elements after insertion, so it always bubbles.
+  // Note: htmx also fires htmx:load on initial init with document.body as elt,
+  // causing a redundant rescanMarkers call (DOMContentLoaded already ran it).
+  // This is harmless since rescanMarkers is idempotent — not worth guarding.
+  // If htmx is not loaded, this event never fires — zero overhead.
+  document.body.addEventListener("htmx:load", /** @param {CustomEvent<{elt: Element}>} e */ function (e) {
+    rescanMarkers(e.detail && e.detail.elt);
+  });
+
+  // Public API: call window.__LT_RESCAN__() after inserting dynamic content
+  // that contains translated strings (e.g. via fetch + innerHTML).
+  window.__LT_RESCAN__ = rescanMarkers;
 
   // ─── Shortcut Hint (sticky bar) ──────────────────────
 

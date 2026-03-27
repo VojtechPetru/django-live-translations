@@ -9,6 +9,7 @@ from helpers import (
     api_restore_po_default,
     api_save,
     check_active_toggle,
+    get_csrf_token,
     open_modal,
     wait_for_fields_loaded,
 )
@@ -21,7 +22,7 @@ class TestEdgeCases:
         assert response.status == 400
 
     def test_save_with_unconfigured_language_returns_403(self, page_as_superuser: Page, base_url: str) -> None:
-        csrf = page_as_superuser.evaluate("() => window.__LT_CONFIG__?.csrfToken || ''")
+        csrf = get_csrf_token(page_as_superuser)
         response = page_as_superuser.request.post(
             f"{base_url}{API_PREFIX}/translations/save/",
             data=json.dumps(
@@ -40,7 +41,7 @@ class TestEdgeCases:
         assert "xx" in body.get("error", "")
 
     def test_save_with_invalid_json_returns_400(self, page_as_superuser: Page, base_url: str) -> None:
-        csrf = page_as_superuser.evaluate("() => window.__LT_CONFIG__?.csrfToken || ''")
+        csrf = get_csrf_token(page_as_superuser)
         response = page_as_superuser.request.post(
             f"{base_url}{API_PREFIX}/translations/save/",
             data="this is not json",
@@ -49,7 +50,7 @@ class TestEdgeCases:
         assert response.status in (400, 403, 500)  # Invalid body may trigger different error paths
 
     def test_delete_with_missing_msgid_returns_400(self, page_as_superuser: Page, base_url: str) -> None:
-        csrf = page_as_superuser.evaluate("() => window.__LT_CONFIG__?.csrfToken || ''")
+        csrf = get_csrf_token(page_as_superuser)
         response = page_as_superuser.request.post(
             f"{base_url}{API_PREFIX}/translations/delete/",
             data=json.dumps({"context": "", "languages": ["en"], "page_language": "en"}),
@@ -58,7 +59,7 @@ class TestEdgeCases:
         assert response.status == 400
 
     def test_bulk_activate_with_empty_msgids_returns_400(self, page_as_superuser: Page, base_url: str) -> None:
-        csrf = page_as_superuser.evaluate("() => window.__LT_CONFIG__?.csrfToken || ''")
+        csrf = get_csrf_token(page_as_superuser)
         response = page_as_superuser.request.post(
             f"{base_url}{API_PREFIX}/translations/bulk-activate/",
             data=json.dumps({"language": "en", "msgids": []}),
@@ -67,7 +68,7 @@ class TestEdgeCases:
         assert response.status == 400
 
     def test_bulk_activate_without_language_returns_400(self, page_as_superuser: Page, base_url: str) -> None:
-        csrf = page_as_superuser.evaluate("() => window.__LT_CONFIG__?.csrfToken || ''")
+        csrf = get_csrf_token(page_as_superuser)
         response = page_as_superuser.request.post(
             f"{base_url}{API_PREFIX}/translations/bulk-activate/",
             data=json.dumps({"msgids": [{"msgid": "demo.title", "context": ""}]}),
