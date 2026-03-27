@@ -24,7 +24,7 @@ class TestHtmlValidation:
         open_modal(page_as_superuser, self.MSGID)
         wait_for_fields_loaded(page_as_superuser)
 
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         textarea.fill("Live <strong>Translations Demo")
         check_active_toggle(page_as_superuser)
         page_as_superuser.locator(".lt-btn--save").click()
@@ -41,7 +41,7 @@ class TestHtmlValidation:
         open_modal(page_as_superuser, self.MSGID)
         wait_for_fields_loaded(page_as_superuser)
 
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         textarea.fill("<strong>text</em>")
         check_active_toggle(page_as_superuser)
         page_as_superuser.locator(".lt-btn--save").click()
@@ -58,7 +58,7 @@ class TestHtmlValidation:
         open_modal(page_as_superuser, self.MSGID)
         wait_for_fields_loaded(page_as_superuser)
 
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         textarea.fill("Live <strong>Translations Demo")
         check_active_toggle(page_as_superuser)
 
@@ -86,7 +86,7 @@ class TestHtmlValidation:
         open_modal(page_as_superuser, self.MSGID)
         wait_for_fields_loaded(page_as_superuser)
 
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         textarea.fill("Live <strong>Translations</strong> Demo")
         check_active_toggle(page_as_superuser)
         page_as_superuser.locator(".lt-btn--save").click()
@@ -101,7 +101,7 @@ class TestHtmlValidation:
         open_modal(page_as_superuser, self.MSGID)
         wait_for_fields_loaded(page_as_superuser)
 
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         textarea.fill("Plain text, no HTML at all")
         check_active_toggle(page_as_superuser)
         page_as_superuser.locator(".lt-btn--save").click()
@@ -116,7 +116,7 @@ class TestHtmlValidation:
         open_modal(page_as_superuser, self.MSGID)
         wait_for_fields_loaded(page_as_superuser)
 
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         textarea.fill("Live <strong>Translations Demo")
         check_active_toggle(page_as_superuser)
 
@@ -146,7 +146,7 @@ class TestHtmlValidation:
         open_modal(page_as_superuser, self.MSGID)
         wait_for_fields_loaded(page_as_superuser)
 
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         textarea.fill("Live <strong>Translations Demo")
         check_active_toggle(page_as_superuser)
         page_as_superuser.locator(".lt-btn--save").click()

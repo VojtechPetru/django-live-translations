@@ -72,7 +72,7 @@ class TestDeleteOverride:
         delete_btn = page_as_superuser_for_backend.locator(".lt-btn--delete-override")
         delete_btn.click()
         expect(delete_btn).to_have_class(re.compile(r"--checked"))
-        textarea = page_as_superuser_for_backend.locator("#lt-input-en")
+        textarea = page_as_superuser_for_backend.locator("#lt-input-en-0")
         expect(textarea).to_have_class(re.compile(r"--marked-delete"))
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
@@ -96,7 +96,7 @@ class TestDeleteOverride:
         expect(delete_btn).to_have_class(re.compile(r"--checked"))
         delete_btn.click()
         expect(delete_btn).not_to_have_class(re.compile(r"--checked"))
-        textarea = page_as_superuser_for_backend.locator("#lt-input-en")
+        textarea = page_as_superuser_for_backend.locator("#lt-input-en-0")
         expect(textarea).not_to_have_class(re.compile(r"--marked-delete"))
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
@@ -117,7 +117,7 @@ class TestDeleteOverride:
         wait_for_fields_loaded(page_as_superuser_for_backend)
         delete_btn = page_as_superuser_for_backend.locator(".lt-btn--delete-override")
         delete_btn.click()
-        textarea = page_as_superuser_for_backend.locator("#lt-input-en")
+        textarea = page_as_superuser_for_backend.locator("#lt-input-en-0")
         expect(textarea).to_be_disabled()
         expect(textarea).to_have_class(re.compile(r"--marked-delete"))
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
@@ -169,7 +169,7 @@ class TestDeleteOverride:
         wait_for_fields_loaded(page_as_superuser_for_backend)
         delete_btn_after = page_as_superuser_for_backend.locator(".lt-btn--delete-override")
         expect(delete_btn_after).to_be_hidden()
-        expect(page_as_superuser_for_backend.locator("#lt-input-en")).to_have_value("Live Translations Demo")
+        expect(page_as_superuser_for_backend.locator("#lt-input-en-0")).to_have_value("Live Translations Demo")
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
 
     def test_save_mixed_delete_and_save(
@@ -193,7 +193,7 @@ class TestDeleteOverride:
 
         # Switch to CS and edit text
         page_as_superuser_for_backend.locator('.lt-editor__tab[data-lang="cs"]').click()
-        cs_textarea = page_as_superuser_for_backend.locator("#lt-input-cs")
+        cs_textarea = page_as_superuser_for_backend.locator("#lt-input-cs-0")
         cs_textarea.fill("Updated CS")
         check_active_toggle(page_as_superuser_for_backend, "cs")
 
@@ -207,7 +207,7 @@ class TestDeleteOverride:
         expect(en_delete_btn).to_be_hidden()
 
         page_as_superuser_for_backend.locator('.lt-editor__tab[data-lang="cs"]').click()
-        expect(page_as_superuser_for_backend.locator("#lt-input-cs")).to_have_value("Updated CS")
+        expect(page_as_superuser_for_backend.locator("#lt-input-cs-0")).to_have_value("Updated CS")
 
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en", "cs"])
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en", "cs"])
@@ -243,7 +243,7 @@ class TestDeleteOverride:
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
         expect(page_as_superuser_for_backend.locator(".lt-btn--delete-override")).to_be_hidden()
-        expect(page_as_superuser_for_backend.locator("#lt-input-en")).to_have_value("Live Translations Demo")
+        expect(page_as_superuser_for_backend.locator("#lt-input-en-0")).to_have_value("Live Translations Demo")
 
         page_as_superuser_for_backend.locator('.lt-editor__tab[data-lang="cs"]').click()
         expect(page_as_superuser_for_backend.locator(".lt-btn--delete-override")).to_be_hidden()

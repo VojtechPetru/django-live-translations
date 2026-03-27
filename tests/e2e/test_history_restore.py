@@ -181,7 +181,7 @@ class TestHistoryRestore:
         expect(span).to_have_text("Hello", timeout=5000)
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
-        expect(page_as_superuser_for_backend.locator("#lt-input-en")).to_have_value("Hello")
+        expect(page_as_superuser_for_backend.locator("#lt-input-en-0")).to_have_value("Hello")
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
 

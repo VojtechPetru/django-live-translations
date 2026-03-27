@@ -21,7 +21,7 @@ class TestSaveFlowPOBackend:
     def test_save_active_translation(self, page_as_superuser: Page, base_url: str) -> None:
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         textarea.fill("Custom Title")
         check_active_toggle(page_as_superuser)
         page_as_superuser.locator(".lt-btn--save").click()
@@ -33,7 +33,7 @@ class TestSaveFlowPOBackend:
     def test_save_inactive_translation(self, page_as_superuser: Page, base_url: str) -> None:
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         textarea.fill("Inactive Override")
         toggle = page_as_superuser.locator("#lt-active-en")
         expect(toggle).not_to_be_checked()
@@ -47,12 +47,12 @@ class TestSaveFlowPOBackend:
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
 
-        en_textarea = page_as_superuser.locator("#lt-input-en")
+        en_textarea = page_as_superuser.locator("#lt-input-en-0")
         en_textarea.fill("English Override")
         check_active_toggle(page_as_superuser, "en")
 
         page_as_superuser.locator('.lt-editor__tab[data-lang="cs"]').click()
-        cs_textarea = page_as_superuser.locator("#lt-input-cs")
+        cs_textarea = page_as_superuser.locator("#lt-input-cs-0")
         cs_textarea.fill("Czech Override")
         check_active_toggle(page_as_superuser, "cs")
 
@@ -61,16 +61,16 @@ class TestSaveFlowPOBackend:
 
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
-        expect(page_as_superuser.locator("#lt-input-en")).to_have_value("English Override")
+        expect(page_as_superuser.locator("#lt-input-en-0")).to_have_value("English Override")
         page_as_superuser.locator('.lt-editor__tab[data-lang="cs"]').click()
-        expect(page_as_superuser.locator("#lt-input-cs")).to_have_value("Czech Override")
+        expect(page_as_superuser.locator("#lt-input-cs-0")).to_have_value("Czech Override")
 
         api_restore_po_default(page_as_superuser, base_url, "demo.title", ["en", "cs"])
 
     def test_save_inactive_then_reopen_shows_pending(self, page_as_superuser: Page, base_url: str) -> None:
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         textarea.fill("Pending Text")
         toggle = page_as_superuser.locator("#lt-active-en")
         expect(toggle).not_to_be_checked()
@@ -79,7 +79,7 @@ class TestSaveFlowPOBackend:
 
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
-        expect(page_as_superuser.locator("#lt-input-en")).to_have_value("Pending Text")
+        expect(page_as_superuser.locator("#lt-input-en-0")).to_have_value("Pending Text")
         expect(page_as_superuser.locator("#lt-active-en")).not_to_be_checked()
 
         api_restore_po_default(page_as_superuser, base_url, "demo.title", ["en"])
@@ -87,7 +87,7 @@ class TestSaveFlowPOBackend:
     def test_save_inactive_matching_current_auto_activates(self, page_as_superuser: Page, base_url: str) -> None:
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         textarea.fill("Live Translations Demo")
         uncheck_active_toggle(page_as_superuser)
         page_as_superuser.locator(".lt-btn--save").click()
@@ -166,7 +166,7 @@ class TestSaveNoPhantomEntries:
         must not create a CS override (backend defense-in-depth)."""
         # Get PO defaults first
         defaults = api_get_translations(page, db_base_url, "demo.title")
-        cs_default = defaults["translations"]["cs"]["msgstr"]
+        cs_default = defaults["translations"]["cs"]["msgstr_forms"]
 
         # Save both, but CS value matches PO default and active flag matches
         # TRANSLATION_ACTIVE_BY_DEFAULT (False on the E2E server).
@@ -190,7 +190,7 @@ class TestSaveNoPhantomEntries:
         wait_for_fields_loaded(page)
 
         # Edit only EN
-        textarea = page.locator("#lt-input-en")
+        textarea = page.locator("#lt-input-en-0")
         textarea.fill("Widget English Only")
         check_active_toggle(page, "en")
 
@@ -212,7 +212,7 @@ class TestSaveValidation:
     def test_placeholder_mismatch_shows_error(self, page_as_superuser: Page) -> None:
         open_modal(page_as_superuser, self.PLACEHOLDER_MSGID)
         wait_for_fields_loaded(page_as_superuser)
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         textarea.fill("No placeholder here")
         check_active_toggle(page_as_superuser)
         page_as_superuser.locator(".lt-btn--save").click()
@@ -224,7 +224,7 @@ class TestSaveValidation:
     def test_placeholder_error_shows_per_language_details(self, page_as_superuser: Page) -> None:
         open_modal(page_as_superuser, self.PLACEHOLDER_MSGID)
         wait_for_fields_loaded(page_as_superuser)
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         textarea.fill("Missing the placeholder")
         check_active_toggle(page_as_superuser)
         page_as_superuser.locator(".lt-btn--save").click()
@@ -235,7 +235,7 @@ class TestSaveValidation:
     def test_save_with_correct_placeholders_succeeds(self, page_as_superuser: Page, base_url: str) -> None:
         open_modal(page_as_superuser, self.PLACEHOLDER_MSGID)
         wait_for_fields_loaded(page_as_superuser)
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         textarea.fill("Press %(key)s to do something")
         check_active_toggle(page_as_superuser)
         page_as_superuser.locator(".lt-btn--save").click()
@@ -245,7 +245,7 @@ class TestSaveValidation:
     def test_error_banner_clears_on_next_valid_save(self, page_as_superuser: Page, base_url: str) -> None:
         open_modal(page_as_superuser, self.PLACEHOLDER_MSGID)
         wait_for_fields_loaded(page_as_superuser)
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         textarea.fill("No placeholder")
         check_active_toggle(page_as_superuser)
         page_as_superuser.locator(".lt-btn--save").click()
@@ -261,7 +261,7 @@ class TestSaveValidation:
     def test_error_banner_cleared_on_modal_reopen(self, page_as_superuser: Page) -> None:
         open_modal(page_as_superuser, self.PLACEHOLDER_MSGID)
         wait_for_fields_loaded(page_as_superuser)
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         textarea.fill("No placeholder")
         check_active_toggle(page_as_superuser)
         page_as_superuser.locator(".lt-btn--save").click()

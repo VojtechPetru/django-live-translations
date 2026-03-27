@@ -16,14 +16,14 @@ The list view shows all overrides with columns for message ID, language, transla
 
 **Filters**: language, context, active status, modified by (user)
 
-**Search**: across msgid, msgstr, and context fields
+**Search**: across msgid and context fields
 
 ### Detail view
 
 The edit form has two fieldsets:
 
-- **Translation**: PO file default (read-only), the override value, and active toggle
-- **Identification**: language, message ID, and context
+- **Translation**: PO file default (read-only, showing all plural forms for plural entries), the override forms (`msgstr_forms` JSON field), and active toggle
+- **Identification**: language, message ID, context, and plural message ID (`msgid_plural`)
 
 The PO default lets you compare your override against the baseline `.po` file value.
 
@@ -42,7 +42,7 @@ The change list toolbar includes **Export** and **Import** buttons for bulk oper
 
 ## Translation history
 
-A read-only audit log of all changes. Shows timestamp, action type, language, message ID, context, and user.
+A read-only audit log of all changes. Shows timestamp, action type, language, message ID, context, plural message ID, form index, and user. The `form_index` field indicates which plural form was changed (0 for singular or the first plural form).
 
 No entries can be added, edited, or deleted through the admin. The history is append-only.
 

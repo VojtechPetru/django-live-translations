@@ -8,7 +8,7 @@ import typing as t
 import django.db
 
 from live_translations import models, strings
-from live_translations.types import DiffSegment, LanguageCode, MsgKey
+from live_translations.types import DiffSegment, LanguageCode, MsgKey, PluralForms
 
 # Raised when the history table doesn't exist (migrations not applied).
 # OperationalError on SQLite, ProgrammingError on PostgreSQL.
@@ -35,13 +35,14 @@ def get_user() -> "AbstractBaseUser | None":
     return user
 
 
-def record_change(
+def record_change(  # noqa: PLR0913
     *,
     language: LanguageCode,
     key: MsgKey,
     action: models.TranslationHistory.Action,
     old_value: str = "",
     new_value: str = "",
+    form_index: int = 0,
 ) -> models.TranslationHistory | None:
     """Create a single TranslationHistory entry, reading user from contextvar.
 
@@ -52,9 +53,11 @@ def record_change(
             language=language,
             msgid=key.msgid,
             context=key.context,
+            msgid_plural=key.msgid_plural,
             action=action,
             old_value=old_value,
             new_value=new_value,
+            form_index=form_index,
             user=get_user(),
         )
     return None
@@ -63,35 +66,48 @@ def record_change(
 def record_text_changes(
     *,
     key: MsgKey,
-    old_entries: dict[LanguageCode, str],
-    new_entries: dict[LanguageCode, str],
-    defaults: dict[LanguageCode, str] | None = None,
+    old_entries: dict[LanguageCode, PluralForms],
+    new_entries: dict[LanguageCode, PluralForms],
+    defaults: dict[LanguageCode, PluralForms] | None = None,
 ) -> None:
     """Record CREATE/UPDATE history for each language where the text changed.
 
+    Creates one history row per form index that changed.
+
     Args:
-        old_entries: lang -> previous msgstr ("" means new/create).
-        new_entries: lang -> new msgstr being saved.
+        old_entries: lang -> previous PluralForms (empty dict means new/create).
+        new_entries: lang -> new PluralForms being saved.
         defaults: fallback old_value for CREATE actions (e.g. PO defaults).
     """
-    for lang, new_msgstr in new_entries.items():
-        old_msgstr = old_entries.get(lang, "")
-        if not old_msgstr:
-            record_change(
-                language=lang,
-                key=key,
-                action=models.TranslationHistory.Action.CREATE,
-                old_value=(defaults or {}).get(lang, ""),
-                new_value=new_msgstr,
-            )
-        elif old_msgstr != new_msgstr:
-            record_change(
-                language=lang,
-                key=key,
-                action=models.TranslationHistory.Action.UPDATE,
-                old_value=old_msgstr,
-                new_value=new_msgstr,
-            )
+    for lang, new_forms in new_entries.items():
+        old_forms = old_entries.get(lang, {})
+        default_forms = (defaults or {}).get(lang, {})
+
+        # Collect all form indices from both old and new
+        all_indices = sorted(set(new_forms.keys()) | set(old_forms.keys()))
+        for form_idx in all_indices:
+            new_val = new_forms.get(form_idx, "")
+            old_val = old_forms.get(form_idx, "")
+
+            if not old_val and not old_forms:
+                # CREATE: no existing entry at all
+                record_change(
+                    language=lang,
+                    key=key,
+                    action=models.TranslationHistory.Action.CREATE,
+                    old_value=default_forms.get(form_idx, ""),
+                    new_value=new_val,
+                    form_index=form_idx,
+                )
+            elif old_val != new_val:
+                record_change(
+                    language=lang,
+                    key=key,
+                    action=models.TranslationHistory.Action.UPDATE,
+                    old_value=old_val,
+                    new_value=new_val,
+                    form_index=form_idx,
+                )
 
 
 def record_active_changes(
@@ -142,6 +158,7 @@ def record_bulk_action(
                     language=lang,
                     msgid=key.msgid,
                     context=key.context,
+                    msgid_plural=key.msgid_plural,
                     action=action,
                     old_value=old_value,
                     new_value=new_value,

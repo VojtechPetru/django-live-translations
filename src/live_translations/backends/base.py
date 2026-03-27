@@ -8,7 +8,7 @@ import django.core.checks
 import polib
 
 from live_translations import conf
-from live_translations.types import LanguageCode, MsgKey, OverrideMap
+from live_translations.types import LanguageCode, MsgKey, OverrideMap, PluralForms
 
 __all__ = ["TranslationBackend", "TranslationEntry"]
 
@@ -19,8 +19,9 @@ class TranslationEntry:
 
     language: LanguageCode
     msgid: str
-    msgstr: str
+    msgstr_forms: PluralForms
     context: str  # "" if no msgctxt
+    msgid_plural: str = ""
     fuzzy: bool = False
     is_active: bool = True
     has_override: bool = False
@@ -52,7 +53,7 @@ class TranslationBackend(abc.ABC):
         """Fetch translations for a msgid across multiple languages.
 
         Returns dict mapping language code to TranslationEntry.
-        Missing entries should still appear with empty msgstr.
+        Missing entries should still appear with empty msgstr_forms.
         """
         ...
 
@@ -60,14 +61,14 @@ class TranslationBackend(abc.ABC):
     def save_translations(
         self,
         key: MsgKey,
-        translations: dict[LanguageCode, str],
+        translations: dict[LanguageCode, PluralForms],
         active_flags: dict[LanguageCode, bool] | None = None,
     ) -> None:
         """Save translations for a msgid.
 
         Args:
-            key: The (msgid, context) pair identifying the translatable string.
-            translations: Dict mapping language code to new msgstr.
+            key: The (msgid, context, msgid_plural) triple identifying the translatable string.
+            translations: Dict mapping language code to PluralForms ({form_index: msgstr}).
             active_flags: Optional dict mapping language code to is_active.
                 When provided, sets the active state per language.
                 When absent, uses the TRANSLATION_ACTIVE_BY_DEFAULT setting
@@ -112,7 +113,7 @@ class TranslationBackend(abc.ABC):
     def get_inactive_overrides(self, language: LanguageCode) -> OverrideMap:
         """Return inactive translations for preview mode.
 
-        Returns dict of (msgid, context) -> pending msgstr for the given language.
+        Returns dict of MsgKey -> PluralForms for the given language.
         """
         return {}
 
@@ -120,7 +121,7 @@ class TranslationBackend(abc.ABC):
         self,
         key: MsgKey,
         languages: list[LanguageCode],
-    ) -> dict[LanguageCode, str]:
+    ) -> dict[LanguageCode, PluralForms]:
         """Get baseline default translations for display alongside overrides.
 
         Returns empty dict by default. DatabaseBackend overrides this to read from .po files.

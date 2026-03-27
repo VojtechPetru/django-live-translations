@@ -68,10 +68,10 @@
         <td style="padding: 6px 8px;">{{ entry.context }}</td>
         <td style="padding: 6px 8px;">
           {% if entry.action == "update" %}
-            <del style="color: #999;">{{ entry.old_msgstr|truncatechars:40 }}</del><br>
-            {{ entry.msgstr|truncatechars:40 }}
+            <del style="color: #999;">{{ entry.old_msgstr_forms|truncatechars:40 }}</del><br>
+            {{ entry.msgstr_forms|truncatechars:40 }}
           {% else %}
-            {{ entry.msgstr|truncatechars:40 }}
+            {{ entry.msgstr_forms|truncatechars:40 }}
           {% endif %}
         </td>
         <td style="padding: 6px 8px;">

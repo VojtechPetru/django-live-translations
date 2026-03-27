@@ -14,7 +14,7 @@ class TestActiveToggle:
     def test_toggle_appears_when_text_differs_from_default(self, page_as_superuser: Page) -> None:
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         textarea.fill("Something completely different")
         toggle = page_as_superuser.locator(".lt-field__toggle").first
         expect(toggle).to_be_visible()
@@ -41,7 +41,7 @@ class TestActiveToggle:
     def test_toggle_default_state_matches_active_by_default_setting(self, page_as_superuser: Page) -> None:
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         textarea.fill("New text to trigger toggle")
         toggle_input = page_as_superuser.locator("#lt-active-en")
         # activeByDefault is false, so toggle should be unchecked
@@ -50,7 +50,7 @@ class TestActiveToggle:
     def test_toggle_label_shows_active_when_checked(self, page_as_superuser: Page) -> None:
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         textarea.fill("Text to show toggle")
         check_active_toggle(page_as_superuser)
         label = page_as_superuser.locator(".lt-field__toggle-label").first
@@ -59,7 +59,7 @@ class TestActiveToggle:
     def test_toggle_label_shows_inactive_when_unchecked(self, page_as_superuser: Page) -> None:
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         textarea.fill("Text to show toggle")
         toggle_input = page_as_superuser.locator("#lt-active-en")
         # activeByDefault is false, so it starts unchecked
@@ -70,7 +70,7 @@ class TestActiveToggle:
     def test_toggling_active_updates_tab_indicator(self, page_as_superuser: Page) -> None:
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         textarea.fill("Changed text")
         toggle_input = page_as_superuser.locator("#lt-active-en")
         # Toggle to inactive (uncheck) — should mark the tab as dirty/inactive-override
@@ -83,7 +83,7 @@ class TestActiveToggle:
     def test_toggle_resets_when_text_reverted_to_default(self, page_as_superuser: Page) -> None:
         open_modal(page_as_superuser, "demo.title")
         wait_for_fields_loaded(page_as_superuser)
-        textarea = page_as_superuser.locator("#lt-input-en")
+        textarea = page_as_superuser.locator("#lt-input-en-0")
         # Get the PO default value
         po_default = page_as_superuser.locator(".lt-field__po-default").first.text_content()
         assert po_default is not None

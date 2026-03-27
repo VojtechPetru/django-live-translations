@@ -54,7 +54,7 @@ class TestPermissionSystem:
             data={
                 "msgid": "test",
                 "context": "",
-                "translations": {"en": "Test"},
+                "translations": {"en": {"0": "Test"}},
                 "active_flags": {"en": True},
                 "page_language": "en",
             },

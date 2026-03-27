@@ -224,7 +224,7 @@ class TestMissingHistoryTable:
             history.record_text_changes(
                 key=MsgKey("hello", ""),
                 old_entries={},
-                new_entries={"en": "Hello"},
+                new_entries={"en": {0: "Hello"}},
             )
 
     def test_record_active_changes_is_noop(self):
@@ -291,7 +291,7 @@ class TestHistoryIntegrationWidget:
 
     def test_create_records_history(self):
         backend = self._make_backend()
-        backend.save_translations(MsgKey("hello", ""), {"en": "Hi"})
+        backend.save_translations(MsgKey("hello", ""), {"en": {0: "Hi"}})
 
         h = models.TranslationHistory.objects.get()
         assert h.action == "create"
@@ -301,7 +301,7 @@ class TestHistoryIntegrationWidget:
 
     def test_create_records_po_default_as_old_value(self):
         backend = self._make_backend(defaults={"en": {"hello": "Default hello"}})
-        backend.save_translations(MsgKey("hello", ""), {"en": "Override"})
+        backend.save_translations(MsgKey("hello", ""), {"en": {0: "Override"}})
 
         h = models.TranslationHistory.objects.get()
         assert h.action == "create"
@@ -312,11 +312,11 @@ class TestHistoryIntegrationWidget:
         models.TranslationEntry.objects.create(
             language="en",
             msgid="hello",
-            msgstr="Hi",
+            msgstr_forms={"0": "Hi"},
             context="",
         )
         backend = self._make_backend()
-        backend.save_translations(MsgKey("hello", ""), {"en": "Hello"})
+        backend.save_translations(MsgKey("hello", ""), {"en": {0: "Hello"}})
 
         h = models.TranslationHistory.objects.get()
         assert h.action == "update"
@@ -329,15 +329,15 @@ class TestHistoryIntegrationWidget:
         models.TranslationEntry.objects.create(
             language="en",
             msgid="hello",
-            msgstr="Hi",
+            msgstr_forms={"0": "Hi"},
             context="",
             is_active=True,
         )
         backend = self._make_backend(defaults={"en": {"hello": "Default"}})
-        backend.save_translations(MsgKey("hello", ""), {"en": "Default"}, active_flags={"en": True})
+        backend.save_translations(MsgKey("hello", ""), {"en": {0: "Default"}}, active_flags={"en": True})
 
         entry = models.TranslationEntry.objects.qs.get(language="en", msgid="hello")
-        assert entry.msgstr == "Default"
+        assert entry.msgstr_forms == {"0": "Default"}
         assert entry.is_active is True
         # History records the text change, not a delete
         h = models.TranslationHistory.objects.get()
@@ -351,26 +351,26 @@ class TestHistoryIntegrationWidget:
         models.TranslationEntry.objects.create(
             language="en",
             msgid="hello",
-            msgstr="Hi",
+            msgstr_forms={"0": "Hi"},
             context="",
             is_active=False,
         )
         backend = self._make_backend(defaults={"en": {"hello": "Default"}})
-        backend.save_translations(MsgKey("hello", ""), {"en": "Default"}, active_flags={"en": False})
+        backend.save_translations(MsgKey("hello", ""), {"en": {0: "Default"}}, active_flags={"en": False})
 
         entry = models.TranslationEntry.objects.qs.get(language="en", msgid="hello")
-        assert entry.msgstr == "Default"
+        assert entry.msgstr_forms == {"0": "Default"}
         assert entry.is_active is False
 
     def test_no_change_no_history(self):
         models.TranslationEntry.objects.create(
             language="en",
             msgid="hello",
-            msgstr="Hi",
+            msgstr_forms={"0": "Hi"},
             context="",
         )
         backend = self._make_backend()
-        backend.save_translations(MsgKey("hello", ""), {"en": "Hi"})
+        backend.save_translations(MsgKey("hello", ""), {"en": {0: "Hi"}})
 
         assert models.TranslationHistory.objects.count() == 0
 
@@ -378,12 +378,12 @@ class TestHistoryIntegrationWidget:
         models.TranslationEntry.objects.create(
             language="en",
             msgid="hello",
-            msgstr="Hi",
+            msgstr_forms={"0": "Hi"},
             context="",
             is_active=False,
         )
         backend = self._make_backend()
-        backend.save_translations(MsgKey("hello", ""), {"en": "Hi"}, active_flags={"en": True})
+        backend.save_translations(MsgKey("hello", ""), {"en": {0: "Hi"}}, active_flags={"en": True})
 
         h = models.TranslationHistory.objects.get()
         assert h.action == "activate"
@@ -394,12 +394,12 @@ class TestHistoryIntegrationWidget:
         models.TranslationEntry.objects.create(
             language="en",
             msgid="hello",
-            msgstr="Hi",
+            msgstr_forms={"0": "Hi"},
             context="",
             is_active=True,
         )
         backend = self._make_backend()
-        backend.save_translations(MsgKey("hello", ""), {"en": "Hi"}, active_flags={"en": False})
+        backend.save_translations(MsgKey("hello", ""), {"en": {0: "Hi"}}, active_flags={"en": False})
 
         h = models.TranslationHistory.objects.get()
         assert h.action == "deactivate"
@@ -410,12 +410,12 @@ class TestHistoryIntegrationWidget:
         models.TranslationEntry.objects.create(
             language="en",
             msgid="hello",
-            msgstr="Hi",
+            msgstr_forms={"0": "Hi"},
             context="",
             is_active=False,
         )
         backend = self._make_backend()
-        backend.save_translations(MsgKey("hello", ""), {"en": "Hello"}, active_flags={"en": True})
+        backend.save_translations(MsgKey("hello", ""), {"en": {0: "Hello"}}, active_flags={"en": True})
 
         entries = list(models.TranslationHistory.objects.order_by("created_at"))
         assert len(entries) == 2
@@ -427,12 +427,12 @@ class TestHistoryIntegrationWidget:
         models.TranslationEntry.objects.create(
             language="en",
             msgid="hello",
-            msgstr="Hi",
+            msgstr_forms={"0": "Hi"},
             context="",
             is_active=True,
         )
         backend = self._make_backend()
-        backend.save_translations(MsgKey("hello", ""), {"en": "Hello"}, active_flags={"en": True})
+        backend.save_translations(MsgKey("hello", ""), {"en": {0: "Hello"}}, active_flags={"en": True})
 
         # Only text change, no state change
         assert models.TranslationHistory.objects.count() == 1

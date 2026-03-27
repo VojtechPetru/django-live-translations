@@ -173,11 +173,12 @@ def api_get_translations(
     msgid: str,
     *,
     context: str = "",
+    msgid_plural: str = "",
 ) -> dict:
     """Fetch translation data for a msgid via the API."""
     response = page.request.get(
         f"{base_url}{API_PREFIX}/translations/",
-        params={"msgid": msgid, "context": context},
+        params={"msgid": msgid, "context": context, "msgid_plural": msgid_plural},
     )
     return response.json()
 
@@ -186,18 +187,27 @@ def api_save(
     page: Page,
     base_url: str,
     msgid: str,
-    translations: dict[str, str],
+    translations: dict[str, str | dict[str, str]],
     active_flags: dict[str, bool] | None = None,
     *,
     context: str = "",
+    msgid_plural: str = "",
     page_language: str = "en",
 ) -> dict:
-    """Save a translation via the API directly (for test setup)."""
+    """Save a translation via the API directly (for test setup).
+
+    Translations can be plain strings (auto-wrapped to ``{"0": value}``)
+    or already in PluralForms format (``{"0": "one", "1": "many"}``).
+    """
     csrf = page.evaluate("() => window.__LT_CONFIG__?.csrfToken || ''")
+    wrapped: dict[str, dict[str, str]] = {
+        lang: {"0": value} if isinstance(value, str) else value for lang, value in translations.items()
+    }
     body: dict = {
         "msgid": msgid,
         "context": context,
-        "translations": translations,
+        "msgid_plural": msgid_plural,
+        "translations": wrapped,
         "active_flags": active_flags or {lang: True for lang in translations},
         "page_language": page_language,
     }
@@ -219,6 +229,7 @@ def api_delete(
     languages: list[str] | None = None,
     *,
     context: str = "",
+    msgid_plural: str = "",
     page_language: str = "en",
 ) -> dict:
     """Delete a translation override via the API directly (for test setup)."""
@@ -226,6 +237,7 @@ def api_delete(
     body: dict = {
         "msgid": msgid,
         "context": context,
+        "msgid_plural": msgid_plural,
         "page_language": page_language,
     }
     if languages:

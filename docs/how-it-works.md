@@ -32,7 +32,7 @@ graph TD
 
 ## Gettext monkey-patching
 
-On `AppConfig.ready()`, the package replaces `_trans.gettext` and `_trans.pgettext` on Django's internal `django.utils.translation._trans` module.
+On `AppConfig.ready()`, the package replaces `_trans.gettext`, `_trans.pgettext`, `_trans.ngettext`, and `_trans.npgettext` on Django's internal `django.utils.translation._trans` module.
 
 The patched functions wrap the originals:
 
@@ -41,7 +41,7 @@ The patched functions wrap the originals:
 
 The middleware sets `lt_active` to `True` only when the request passes the permission check. For regular users, the gettext path is a near-zero-cost pass-through: no markers, no JavaScript, no DOM changes.
 
-Lazy variants (`gettext_lazy`, `pgettext_lazy`) are covered automatically because their proxies delegate to `_trans.gettext`/`_trans.pgettext` on evaluation.
+Lazy variants (`gettext_lazy`, `pgettext_lazy`, `ngettext_lazy`, `npgettext_lazy`) are covered automatically because their proxies delegate to the corresponding `_trans` functions on evaluation.
 
 !!! warning "Private API dependency"
     `django.utils.translation._trans` is not a public Django API. It has been stable across Django 4.2 through 5.x but could break in a future release. The package tests against all supported Django and Python versions in CI.
@@ -91,9 +91,14 @@ The middleware skips Django admin URLs (`/admin/`) entirely.
 The database backend writes overrides directly into Django's internal translation catalog objects (`DjangoTranslation._catalog`), a dict mapping msgid strings to translations:
 
 ```python
+# Singular entries:
 catalog[msgid] = override_msgstr
 # Context-based:
 catalog[f"{context}\x04{msgid}"] = override_msgstr
+
+# Plural entries use (key, form_index) tuple keys:
+catalog[(msgid, 0)] = "1 item"
+catalog[(msgid, 1)] = "%d items"
 ```
 
 !!! warning "Private API dependency"

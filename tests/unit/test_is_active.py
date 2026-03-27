@@ -22,17 +22,23 @@ if t.TYPE_CHECKING:
 @pytest.mark.django_db
 class TestTranslationEntryModel:
     def test_is_active_field_exists(self):
-        entry = models.TranslationEntry(language="en", msgid="hello", msgstr="Hello", context="")
+        entry = models.TranslationEntry(language="en", msgid="hello", msgstr_forms={"0": "Hello"}, context="")
         assert hasattr(entry, "is_active")
 
     def test_is_active_defaults_to_false(self):
-        entry = models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hello", context="")
+        entry = models.TranslationEntry.objects.create(
+            language="en", msgid="hello", msgstr_forms={"0": "Hello"}, context=""
+        )
         entry.refresh_from_db()
         assert entry.is_active is False
 
     def test_active_queryset_filter(self):
-        models.TranslationEntry.objects.create(language="en", msgid="active_msg", msgstr="Active", is_active=True)
-        models.TranslationEntry.objects.create(language="en", msgid="inactive_msg", msgstr="Inactive", is_active=False)
+        models.TranslationEntry.objects.create(
+            language="en", msgid="active_msg", msgstr_forms={"0": "Active"}, is_active=True
+        )
+        models.TranslationEntry.objects.create(
+            language="en", msgid="inactive_msg", msgstr_forms={"0": "Inactive"}, is_active=False
+        )
         active_qs = models.TranslationEntry.objects.qs.active()
         assert active_qs.count() == 1
         entry = active_qs.first()
@@ -40,29 +46,33 @@ class TestTranslationEntryModel:
         assert entry.msgid == "active_msg"
 
     def test_active_manager_method(self):
-        models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=True)
-        models.TranslationEntry.objects.create(language="en", msgid="msg2", msgstr="M2", is_active=False)
+        models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr_forms={"0": "M1"}, is_active=True)
+        models.TranslationEntry.objects.create(language="en", msgid="msg2", msgstr_forms={"0": "M2"}, is_active=False)
         assert models.TranslationEntry.objects.qs.active().count() == 1
 
 
 class TestBaseDataclass:
     def test_is_active_defaults_to_true(self):
-        entry = base.TranslationEntry(language="en", msgid="hello", msgstr="Hello", context="")
+        entry = base.TranslationEntry(language="en", msgid="hello", msgstr_forms={0: "Hello"}, context="")
         assert entry.is_active is True
 
     def test_is_active_can_be_set_false(self):
-        entry = base.TranslationEntry(language="en", msgid="hello", msgstr="Hello", context="", is_active=False)
+        entry = base.TranslationEntry(
+            language="en", msgid="hello", msgstr_forms={0: "Hello"}, context="", is_active=False
+        )
         assert entry.is_active is False
 
 
 @pytest.mark.django_db
 class TestInjectOverrides:
     def test_only_active_overrides_injected(self, tmp_path: pathlib.Path, settings: "SettingsWrapper"):
-        models.TranslationEntry.objects.create(language="en", msgid="active_key", msgstr="Active Value", is_active=True)
+        models.TranslationEntry.objects.create(
+            language="en", msgid="active_key", msgstr_forms={"0": "Active Value"}, is_active=True
+        )
         models.TranslationEntry.objects.create(
             language="en",
             msgid="inactive_key",
-            msgstr="Inactive Value",
+            msgstr_forms={"0": "Inactive Value"},
             is_active=False,
         )
 
@@ -96,7 +106,9 @@ class TestInjectOverrides:
 
     def test_survives_missing_catalog_attribute(self, tmp_path: pathlib.Path, settings: "SettingsWrapper"):
         """inject_overrides must not crash if the translation object has no entries to inject."""
-        models.TranslationEntry.objects.create(language="xx_missing", msgid="hello", msgstr="Hi", is_active=True)
+        models.TranslationEntry.objects.create(
+            language="xx_missing", msgid="hello", msgstr_forms={"0": "Hi"}, is_active=True
+        )
 
         locale_dir = tmp_path / "locale"
         locale_dir.mkdir(parents=True)
@@ -110,20 +122,22 @@ class TestInjectOverrides:
 @pytest.mark.django_db
 class TestGetTranslations:
     def test_returns_is_active_for_db_override(self, make_db_backend):
-        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="", is_active=False)
+        models.TranslationEntry.objects.create(
+            language="en", msgid="hello", msgstr_forms={"0": "Hi"}, context="", is_active=False
+        )
 
         backend = make_db_backend(defaults={"en": {"hello": "Hello"}})
         result = backend.get_translations(MsgKey("hello", ""), ["en"])
 
         assert result["en"].is_active is False
-        assert result["en"].msgstr == "Hi"
+        assert result["en"].msgstr_forms == {0: "Hi"}
 
     def test_po_only_entry_has_is_active_true(self, make_db_backend):
         backend = make_db_backend(defaults={"en": {"hello": "Hello"}})
         result = backend.get_translations(MsgKey("hello", ""), ["en"])
 
         assert result["en"].is_active is True
-        assert result["en"].msgstr == "Hello"
+        assert result["en"].msgstr_forms == {0: "Hello"}
 
 
 @pytest.mark.django_db
@@ -140,7 +154,7 @@ class TestSaveTranslations:
         conf.get_settings.cache_clear()
 
         backend = self._make_backend()
-        backend.save_translations(MsgKey("hello", ""), {"en": "Hi"})
+        backend.save_translations(MsgKey("hello", ""), {"en": {0: "Hi"}})
 
         entry = models.TranslationEntry.objects.qs.get(language="en", msgid="hello")
         assert entry.is_active is active_default
@@ -151,7 +165,7 @@ class TestSaveTranslations:
         conf.get_settings.cache_clear()
 
         backend = self._make_backend()
-        backend.save_translations(MsgKey("hello", ""), {"en": "Hi"}, active_flags={"en": True})
+        backend.save_translations(MsgKey("hello", ""), {"en": {0: "Hi"}}, active_flags={"en": True})
 
         entry = models.TranslationEntry.objects.qs.get(language="en", msgid="hello")
         assert entry.is_active is True
@@ -162,13 +176,15 @@ class TestSaveTranslations:
         conf.get_settings.cache_clear()
 
         # Pre-create an active entry
-        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Old", context="", is_active=True)
+        models.TranslationEntry.objects.create(
+            language="en", msgid="hello", msgstr_forms={"0": "Old"}, context="", is_active=True
+        )
 
         backend = self._make_backend()
-        backend.save_translations(MsgKey("hello", ""), {"en": "New"}, active_flags={"en": False})
+        backend.save_translations(MsgKey("hello", ""), {"en": {0: "New"}}, active_flags={"en": False})
 
         entry = models.TranslationEntry.objects.qs.get(language="en", msgid="hello")
-        assert entry.msgstr == "New"
+        assert entry.msgstr_forms == {"0": "New"}
         assert entry.is_active is False
 
     def test_no_flags_uses_fallback_on_update(self, settings: "SettingsWrapper"):
@@ -176,13 +192,15 @@ class TestSaveTranslations:
         settings.LIVE_TRANSLATIONS = {"TRANSLATION_ACTIVE_BY_DEFAULT": False}
         conf.get_settings.cache_clear()
 
-        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Old", context="", is_active=True)
+        models.TranslationEntry.objects.create(
+            language="en", msgid="hello", msgstr_forms={"0": "Old"}, context="", is_active=True
+        )
 
         backend = self._make_backend()
-        backend.save_translations(MsgKey("hello", ""), {"en": "New"})
+        backend.save_translations(MsgKey("hello", ""), {"en": {0: "New"}})
 
         entry = models.TranslationEntry.objects.qs.get(language="en", msgid="hello")
-        assert entry.msgstr == "New"
+        assert entry.msgstr_forms == {"0": "New"}
         # Without explicit flags, the setting fallback (False) is used in defaults
         assert entry.is_active is False
 
@@ -200,7 +218,7 @@ class TestSaveTranslationsView:
         request = make_request(
             "post",
             "/__live-translations__/translations/save/",
-            data={"msgid": "hello", "context": "", "translations": {"en": "Hi"}},
+            data={"msgid": "hello", "context": "", "translations": {"en": {"0": "Hi"}}},
             has_permission=False,
         )
 
@@ -233,8 +251,12 @@ class TestAdminActions:
     """
 
     def test_bulk_activate(self):
-        e1 = models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=False)
-        e2 = models.TranslationEntry.objects.create(language="en", msgid="msg2", msgstr="M2", is_active=False)
+        e1 = models.TranslationEntry.objects.create(
+            language="en", msgid="msg1", msgstr_forms={"0": "M1"}, is_active=False
+        )
+        e2 = models.TranslationEntry.objects.create(
+            language="en", msgid="msg2", msgstr_forms={"0": "M2"}, is_active=False
+        )
 
         qs = models.TranslationEntry.objects.qs.all()
         updated = qs.filter(is_active=False).update(is_active=True)
@@ -246,8 +268,12 @@ class TestAdminActions:
         assert e2.is_active is True
 
     def test_bulk_deactivate(self):
-        e1 = models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=True)
-        e2 = models.TranslationEntry.objects.create(language="en", msgid="msg2", msgstr="M2", is_active=True)
+        e1 = models.TranslationEntry.objects.create(
+            language="en", msgid="msg1", msgstr_forms={"0": "M1"}, is_active=True
+        )
+        e2 = models.TranslationEntry.objects.create(
+            language="en", msgid="msg2", msgstr_forms={"0": "M2"}, is_active=True
+        )
 
         qs = models.TranslationEntry.objects.qs.all()
         updated = qs.filter(is_active=True).update(is_active=False)
@@ -260,7 +286,7 @@ class TestAdminActions:
 
     def test_activate_noop_returns_zero(self):
         """If all selected translations are already active, update returns 0."""
-        models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr="M1", is_active=True)
+        models.TranslationEntry.objects.create(language="en", msgid="msg1", msgstr_forms={"0": "M1"}, is_active=True)
 
         qs = models.TranslationEntry.objects.qs.all()
         updated = qs.filter(is_active=False).update(is_active=True)
@@ -289,7 +315,9 @@ class TestGetTranslationsView:
         conf.get_permission_checker.cache_clear()
 
     def test_response_includes_is_active(self, make_request):
-        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="", is_active=False)
+        models.TranslationEntry.objects.create(
+            language="en", msgid="hello", msgstr_forms={"0": "Hi"}, context="", is_active=False
+        )
 
         request = make_request(
             "get",
@@ -322,7 +350,9 @@ class TestGetTranslationsView:
 @pytest.mark.django_db
 class TestHasOverride:
     def test_db_entry_has_override_true(self, make_db_backend):
-        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hello", context="", is_active=True)
+        models.TranslationEntry.objects.create(
+            language="en", msgid="hello", msgstr_forms={"0": "Hello"}, context="", is_active=True
+        )
         backend = make_db_backend(defaults={"en": {"hello": "Hello"}})
         result = backend.get_translations(MsgKey("hello", ""), ["en"])
         assert result["en"].has_override is True
@@ -354,8 +384,8 @@ class TestDeleteTranslationView:
     _URL = "/__live-translations__/translations/delete/"
 
     def test_deletes_all_languages(self, make_request):
-        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="")
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", msgstr="Ahoj", context="")
+        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr_forms={"0": "Hi"}, context="")
+        models.TranslationEntry.objects.create(language="cs", msgid="hello", msgstr_forms={"0": "Ahoj"}, context="")
 
         from live_translations import views
 
@@ -370,7 +400,7 @@ class TestDeleteTranslationView:
         assert backend._version > version_before
 
     def test_records_history(self, make_request):
-        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="")
+        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr_forms={"0": "Hi"}, context="")
 
         from live_translations import views
 
@@ -382,8 +412,8 @@ class TestDeleteTranslationView:
         assert h.new_value == ""
 
     def test_deletes_single_language(self, make_request):
-        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="")
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", msgstr="Ahoj", context="")
+        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr_forms={"0": "Hi"}, context="")
+        models.TranslationEntry.objects.create(language="cs", msgid="hello", msgstr_forms={"0": "Ahoj"}, context="")
 
         from live_translations import views
 
@@ -403,12 +433,12 @@ class TestDeleteTranslationView:
         assert models.TranslationEntry.objects.qs.get().language == "en"
 
     def test_deletes_multiple_languages(self, make_request):
-        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Hi", context="")
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", msgstr="Ahoj", context="")
+        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr_forms={"0": "Hi"}, context="")
+        models.TranslationEntry.objects.create(language="cs", msgid="hello", msgstr_forms={"0": "Ahoj"}, context="")
         models.TranslationEntry.objects.create(
             language="de",
             msgid="hello",
-            msgstr="Hallo",
+            msgstr_forms={"0": "Hallo"},
             context="",
         )
 
@@ -464,9 +494,11 @@ class TestBulkActivateView:
 
     def test_activates_only_given_language(self, make_request):
         models.TranslationEntry.objects.create(
-            language="en", msgid="hello", msgstr="Hello", context="", is_active=False
+            language="en", msgid="hello", msgstr_forms={"0": "Hello"}, context="", is_active=False
         )
-        models.TranslationEntry.objects.create(language="cs", msgid="hello", msgstr="Ahoj", context="", is_active=False)
+        models.TranslationEntry.objects.create(
+            language="cs", msgid="hello", msgstr_forms={"0": "Ahoj"}, context="", is_active=False
+        )
 
         from live_translations import views
 
@@ -551,14 +583,14 @@ class TestSaveNoPhantomEntries:
         backend = self._make_backend(defaults={"en": {"hello": "Hello"}, "cs": {"hello": "Ahoj"}})
         backend.save_translations(
             MsgKey("hello", ""),
-            {"en": "Hi there", "cs": "Ahoj"},  # cs unchanged
+            {"en": {0: "Hi there"}, "cs": {0: "Ahoj"}},  # cs unchanged
             active_flags={"en": True, "cs": False},  # cs flag matches default
         )
 
         assert models.TranslationEntry.objects.qs.count() == 1
         entry = models.TranslationEntry.objects.qs.get()
         assert entry.language == "en"
-        assert entry.msgstr == "Hi there"
+        assert entry.msgstr_forms == {"0": "Hi there"}
 
     def test_all_unchanged_creates_no_entries(self, settings: "SettingsWrapper"):
         """If every language matches its PO default and active flags match the setting, no rows are created."""
@@ -568,7 +600,7 @@ class TestSaveNoPhantomEntries:
         backend = self._make_backend(defaults={"en": {"hello": "Hello"}, "cs": {"hello": "Ahoj"}})
         backend.save_translations(
             MsgKey("hello", ""),
-            {"en": "Hello", "cs": "Ahoj"},
+            {"en": {0: "Hello"}, "cs": {0: "Ahoj"}},
             active_flags={"en": True, "cs": True},
         )
 
@@ -579,13 +611,15 @@ class TestSaveNoPhantomEntries:
         settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en"]}
         conf.get_settings.cache_clear()
 
-        models.TranslationEntry.objects.create(language="en", msgid="hello", msgstr="Old override", context="")
+        models.TranslationEntry.objects.create(
+            language="en", msgid="hello", msgstr_forms={"0": "Old override"}, context=""
+        )
 
         backend = self._make_backend(defaults={"en": {"hello": "Hello"}})
-        backend.save_translations(MsgKey("hello", ""), {"en": "Hello"}, active_flags={"en": True})
+        backend.save_translations(MsgKey("hello", ""), {"en": {0: "Hello"}}, active_flags={"en": True})
 
         entry = models.TranslationEntry.objects.qs.get()
-        assert entry.msgstr == "Hello"
+        assert entry.msgstr_forms == {"0": "Hello"}
         assert entry.is_active is True
 
     def test_non_default_active_flag_creates_entry(self, settings: "SettingsWrapper"):
@@ -595,7 +629,7 @@ class TestSaveNoPhantomEntries:
 
         backend = self._make_backend(defaults={"en": {"hello": "Hello"}})
         # Value matches PO default, but active flag (True) differs from setting (False)
-        backend.save_translations(MsgKey("hello", ""), {"en": "Hello"}, active_flags={"en": True})
+        backend.save_translations(MsgKey("hello", ""), {"en": {0: "Hello"}}, active_flags={"en": True})
 
         assert models.TranslationEntry.objects.qs.count() == 1
         entry = models.TranslationEntry.objects.qs.get()
@@ -610,7 +644,7 @@ class TestSaveNoPhantomEntries:
         backend = self._make_backend(defaults={"en": {"hello": "Hello"}})
         backend.save_translations(
             MsgKey("hello", ""),
-            {"en": "Hello", "de": ""},  # both match their defaults (en="Hello", de="")
+            {"en": {0: "Hello"}, "de": {0: ""}},  # both match their defaults (en="Hello", de="")
         )
 
         assert models.TranslationEntry.objects.qs.count() == 0

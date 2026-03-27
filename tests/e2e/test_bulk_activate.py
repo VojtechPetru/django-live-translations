@@ -231,7 +231,7 @@ class TestBulkActivate:
                 {
                     "msgid": "demo.title",
                     "context": "",
-                    "translations": {"cs": "CS Still Inactive"},
+                    "translations": {"cs": {"0": "CS Still Inactive"}},
                     "active_flags": {"cs": False},
                     "page_language": "cs",
                 }

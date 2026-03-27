@@ -17,10 +17,8 @@ django-live-translations hooks into Django's gettext system and adds an editing 
 
 It works with all standard Django translation APIs:
 
-- `{% translate %}` and `{% blocktranslate %}` template tags
-- `gettext()`, `pgettext()`, and their lazy variants
-
-Plural forms (`ngettext`, `{% blocktranslate count %}`) are not supported yet.
+- `{% translate %}` and `{% blocktranslate %}` template tags, including `{% blocktranslate count %}`
+- `gettext()`, `pgettext()`, `ngettext()`, `npgettext()`, and their lazy variants
 
 ## Features
 

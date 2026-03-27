@@ -5,6 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% trans "demo.title" %}</title>
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: system-ui, -apple-system, sans-serif; line-height: 1.6; color: #1a1a1a; max-width: 640px; margin: 0 auto; padding: 3rem 1.5rem; }
@@ -40,6 +41,10 @@
         .tab.active { color: #1a1a1a; border-bottom-color: #1a1a1a; }
         .tab-panel { display: none; }
         .tab-panel.active { display: block; }
+        .n-pills { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 1rem; }
+        .n-pill { padding: 0.3rem 0.7rem; font: inherit; font-size: 0.8rem; background: none; border: 1px solid #ddd; border-radius: 6px; color: #888; cursor: pointer; transition: all 0.15s; }
+        .n-pill:hover { border-color: #aaa; color: #444; }
+        .n-pill.active { border-color: #1a1a1a; color: #1a1a1a; font-weight: 500; }
     </style>
 </head>
 <body>
@@ -98,6 +103,8 @@
         <h2>{% trans "how_it_works.heading" %} {% verbatim %}<span class="via">{% trans %}</span>{% endverbatim %}</h2>
         <p><span class="via">&#123;% blocktrans %&#125;</span> {% blocktrans with key="Ctrl+Shift+E" %}edit_mode.toggle_hint {{ key }}{% endblocktrans %}</p>
     </div>
+
+    {% include "demo/_plurals.html" %}
 
     <div class="card">
         <h2>{% trans "features.heading" %} {% verbatim %}<span class="via">{% trans %}</span>{% endverbatim %}</h2>

@@ -116,7 +116,7 @@ The project enforces strict quality standards through pre-commit hooks and CI:
 - **Linting**: `ruff check`
 - **Type checking**: `pyrefly`
 - **Test coverage**: 90%+ required
-- **Test suite**: 550+ unit tests, 290+ Playwright e2e tests
+- **Test suite**: 650+ unit tests, 290+ Playwright e2e tests
 
 ### Pull requests
 

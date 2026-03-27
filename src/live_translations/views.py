@@ -10,7 +10,7 @@ import django.views.decorators.csrf
 import django.views.decorators.http
 
 from live_translations import conf, services
-from live_translations.types import LanguageCode, MsgKey
+from live_translations.types import LanguageCode, MsgKey, PluralForms, plural_forms_from_json
 
 __all__ = [
     "bulk_activate",
@@ -59,10 +59,11 @@ def _language_permission_error(forbidden: set[LanguageCode]) -> django.http.Json
 @require_translation_permission
 @django.views.decorators.http.require_GET
 def get_translations(request: django.http.HttpRequest) -> django.http.JsonResponse:
-    """GET /__live-translations__/translations/?msgid=hero-title&context="""
+    """GET /__live-translations__/translations/?msgid=hero-title&context=&msgid_plural="""
     key = MsgKey(
         msgid=request.GET.get("msgid", ""),
         context=request.GET.get("context", ""),
+        msgid_plural=request.GET.get("msgid_plural", ""),
     )
 
     try:
@@ -86,8 +87,18 @@ def save_translations(request: django.http.HttpRequest) -> django.http.JsonRespo
     except json.JSONDecodeError:
         return django.http.JsonResponse({"error": "Invalid JSON"}, status=400)
 
-    key = MsgKey(msgid=body.get("msgid", ""), context=body.get("context", ""))
-    translations: dict[LanguageCode, str] = body.get("translations", {})
+    key = MsgKey(
+        msgid=body.get("msgid", ""),
+        context=body.get("context", ""),
+        msgid_plural=body.get("msgid_plural", ""),
+    )
+
+    # Parse translations: always {lang: {"0": "text", ...}} format
+    raw_translations: dict[str, dict[str, str]] = body.get("translations", {})
+    translations: dict[LanguageCode, PluralForms] = {
+        lang: plural_forms_from_json(forms) for lang, forms in raw_translations.items()
+    }
+
     active_flags: dict[LanguageCode, bool] = body.get("active_flags", {})
     page_language: LanguageCode = body.get("page_language", "")
 
@@ -119,12 +130,16 @@ def save_translations(request: django.http.HttpRequest) -> django.http.JsonRespo
 @require_translation_permission
 @django.views.decorators.http.require_GET
 def get_history(request: django.http.HttpRequest) -> django.http.JsonResponse:
-    """GET /__live-translations__/translations/history/?msgid=hero-title&context=&limit=50"""
+    """GET /__live-translations__/translations/history/?msgid=hero-title&context=&msgid_plural="""
     msgid = request.GET.get("msgid", "")
     if not msgid:
         return django.http.JsonResponse({"error": "msgid is required"}, status=400)
 
-    key = MsgKey(msgid=msgid, context=request.GET.get("context", ""))
+    key = MsgKey(
+        msgid=msgid,
+        context=request.GET.get("context", ""),
+        msgid_plural=request.GET.get("msgid_plural", ""),
+    )
 
     try:
         limit = min(int(request.GET.get("limit", "50")), 200)
@@ -144,7 +159,11 @@ def delete_translation(request: django.http.HttpRequest) -> django.http.JsonResp
     except json.JSONDecodeError:
         return django.http.JsonResponse({"error": "Invalid JSON"}, status=400)
 
-    key = MsgKey(msgid=body.get("msgid", ""), context=body.get("context", ""))
+    key = MsgKey(
+        msgid=body.get("msgid", ""),
+        context=body.get("context", ""),
+        msgid_plural=body.get("msgid_plural", ""),
+    )
     languages_param: list[LanguageCode] = body.get("languages", [])
     language: LanguageCode = body.get("language", "")
     page_language: LanguageCode = body.get("page_language", "")
@@ -200,6 +219,13 @@ def bulk_activate(request: django.http.HttpRequest) -> django.http.JsonResponse:
     if forbidden:
         return _language_permission_error(forbidden)
 
-    keys = [MsgKey(msgid=item["msgid"], context=item.get("context", "")) for item in msgid_list]
+    keys = [
+        MsgKey(
+            msgid=item["msgid"],
+            context=item.get("context", ""),
+            msgid_plural=item.get("msgid_plural", ""),
+        )
+        for item in msgid_list
+    ]
     result = services.bulk_activate(language=language, keys=keys)
     return django.http.JsonResponse(result)

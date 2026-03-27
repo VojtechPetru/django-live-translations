@@ -4,6 +4,7 @@ Views and admin are thin adapters that call these functions.
 """
 
 import contextlib
+import json
 import logging
 import re
 import typing as t
@@ -22,9 +23,11 @@ from live_translations.types import (
     HistoryResult,
     LanguageCode,
     MsgKey,
+    PluralForms,
     SaveResult,
     TranslationInfo,
     TranslationsResult,
+    is_plural_key,
 )
 
 if t.TYPE_CHECKING:
@@ -68,28 +71,36 @@ def extract_placeholders(text: str) -> set[str]:
 
 
 def validate_placeholders(
-    msgid: str,
-    translations: dict[LanguageCode, str],
+    key: MsgKey,
+    translations: dict[LanguageCode, PluralForms],
 ) -> dict[LanguageCode, list[str]] | None:
-    """Return per-language error details if any translation has mismatched placeholders, else None."""
-    expected = extract_placeholders(msgid)
+    """Return per-language error details if any form has mismatched placeholders, else None.
+
+    For plural entries, validates each form against the union of placeholders
+    in both msgid and msgid_plural.
+    """
+    expected = extract_placeholders(key.msgid)
+    if key.msgid_plural:
+        expected |= extract_placeholders(key.msgid_plural)
     if not expected:
         return None
 
     errors: dict[LanguageCode, list[str]] = {}
-    for lang, msgstr in translations.items():
-        if not msgstr:
-            continue
-        actual = extract_placeholders(msgstr)
-        missing = expected - actual
-        extra = actual - expected
-        if missing or extra:
-            parts: list[str] = []
-            if missing:
-                parts.append(f"missing {', '.join(sorted(missing))}")
-            if extra:
-                parts.append(f"unexpected {', '.join(sorted(extra))}")
-            errors[lang] = parts
+    for lang, forms in translations.items():
+        for form_idx, msgstr in forms.items():
+            if not msgstr:
+                continue
+            actual = extract_placeholders(msgstr)
+            missing = expected - actual
+            extra = actual - expected
+            if missing or extra:
+                parts: list[str] = []
+                prefix = f"form {form_idx}: " if len(forms) > 1 else ""
+                if missing:
+                    parts.append(f"{prefix}missing {', '.join(sorted(missing))}")
+                if extra:
+                    parts.append(f"{prefix}unexpected {', '.join(sorted(extra))}")
+                errors.setdefault(lang, []).extend(parts)
 
     return errors or None
 
@@ -130,9 +141,10 @@ def get_translations(*, key: MsgKey) -> TranslationsResult:
     return {
         "msgid": key.msgid,
         "context": key.context,
+        "msgid_plural": key.msgid_plural,
         "translations": {
             lang: TranslationInfo(
-                msgstr=entry.msgstr,
+                msgstr_forms=entry.msgstr_forms,
                 fuzzy=entry.fuzzy,
                 is_active=entry.is_active,
                 has_override=entry.has_override,
@@ -147,7 +159,7 @@ def get_translations(*, key: MsgKey) -> TranslationsResult:
 def save_translations(
     *,
     key: MsgKey,
-    translations: dict[LanguageCode, str],
+    translations: dict[LanguageCode, PluralForms],
     active_flags: dict[LanguageCode, bool] | None = None,
     page_language: LanguageCode = "",
     is_preview: bool = False,
@@ -167,7 +179,7 @@ def save_translations(
     if invalid:
         raise ValueError(f"Invalid language codes: {', '.join(sorted(invalid))}")
 
-    placeholder_errors = validate_placeholders(key.msgid, translations)
+    placeholder_errors = validate_placeholders(key, translations)
     if placeholder_errors:
         raise PlaceholderValidationError(placeholder_errors)
 
@@ -211,16 +223,20 @@ def delete_translations(
         if languages:
             qs = qs.for_languages(languages)
 
-        entries = list(qs.values_list("language", "msgstr"))
+        entries = list(qs.values_list("language", "msgstr_forms"))
         deleted_count, _ = qs.delete()
 
         if deleted_count:
-            for lang, old_value in entries:
+            for lang, forms_json in entries:
+                # Record delete for form 0 (primary form)
+                old_val = ""
+                if forms_json:
+                    old_val = forms_json.get("0", "")
                 history.record_change(
                     language=lang,
                     key=key,
                     action=models.TranslationHistory.Action.DELETE,
-                    old_value=old_value,
+                    old_value=old_val,
                     new_value="",
                 )
             conf.get_backend_instance().bump_catalog_version()
@@ -239,11 +255,10 @@ def delete_translations(
 @django.db.transaction.atomic
 def delete_entries(*, queryset: django.db.models.QuerySet[models.TranslationEntry]) -> int:
     """Batch delete for admin's delete_queryset. Returns deleted count."""
-    affected = list(queryset.values_list("language", "msgid", "context", "msgstr"))
+    affected = list(queryset.values_list("language", "msgid", "context", "msgid_plural", "msgstr_forms"))
     deleted_count, _ = queryset.delete()
 
     if deleted_count:
-        # History table may not exist if migrations haven't been applied.
         with contextlib.suppress(django.db.OperationalError, django.db.ProgrammingError):
             user = history.get_user()
             models.TranslationHistory.objects.bulk_create(
@@ -252,12 +267,13 @@ def delete_entries(*, queryset: django.db.models.QuerySet[models.TranslationEntr
                         language=lang,
                         msgid=mid,
                         context=ctx,
+                        msgid_plural=msgid_plural,
                         action=models.TranslationHistory.Action.DELETE,
-                        old_value=msgstr,
+                        old_value=json.dumps(forms_json) if forms_json else "",
                         new_value="",
                         user=user,
                     )
-                    for lang, mid, ctx, msgstr in affected
+                    for lang, mid, ctx, msgid_plural, forms_json in affected
                 ]
             )
         conf.get_backend_instance().bump_catalog_version()
@@ -267,11 +283,14 @@ def delete_entries(*, queryset: django.db.models.QuerySet[models.TranslationEntr
 
 def get_history(*, key: MsgKey, limit: int = 50) -> HistoryResult:
     """Fetch edit history for a msgid, return JSON-ready dict."""
-    # History table may not exist if migrations haven't been applied.
     entries: list[models.TranslationHistory] = []
     with contextlib.suppress(django.db.OperationalError, django.db.ProgrammingError):
         entries = list(
-            models.TranslationHistory.objects.filter(msgid=key.msgid, context=key.context)
+            models.TranslationHistory.objects.filter(
+                msgid=key.msgid,
+                context=key.context,
+                msgid_plural=key.msgid_plural,
+            )
             .select_related("user")
             .order_by("-created_at")[:limit]
         )
@@ -286,6 +305,7 @@ def get_history(*, key: MsgKey, limit: int = 50) -> HistoryResult:
             "new_value": entry.new_value,
             "user": format_user(entry.user),
             "created_at": entry.created_at.isoformat(),
+            "form_index": entry.form_index,
         }
         if entry.action not in (
             models.TranslationHistory.Action.ACTIVATE,
@@ -327,7 +347,10 @@ def deactivate_entries(*, queryset: django.db.models.QuerySet[models.Translation
 @django.db.transaction.atomic
 def _toggle_entries(*, queryset: django.db.models.QuerySet[models.TranslationEntry], activate: bool) -> int:
     candidates = queryset.filter(is_active=not activate)
-    affected = [(lang, MsgKey(mid, ctx)) for lang, mid, ctx in candidates.values_list("language", "msgid", "context")]
+    affected = [
+        (lang, MsgKey(mid, ctx, msgid_plural))
+        for lang, mid, ctx, msgid_plural in candidates.values_list("language", "msgid", "context", "msgid_plural")
+    ]
     updated = candidates.update(is_active=activate)
     if updated:
         history.record_bulk_action(
@@ -353,22 +376,32 @@ def compute_display(
     current_lang: LanguageCode = page_language or django.utils.translation.get_language() or settings.languages[0]
     backend = conf.get_backend_instance()
 
+    # For plural entries, we can't determine which form is currently displayed
+    if is_plural_key(key):
+        return {
+            "text": "",
+            "is_preview_entry": False,
+            "reload_required": True,
+        }
+
     entries = backend.get_translations(key, [current_lang])
     entry = entries.get(current_lang)
 
     if entry and (entry.is_active or is_preview):
-        display_text = entry.msgstr
+        display_text = entry.msgstr_forms.get(0, "")
     else:
         defaults = backend.get_defaults(key, [current_lang])
-        display_text = defaults.get(current_lang, "")
+        default_forms = defaults.get(current_lang, {0: ""})
+        display_text = default_forms.get(0, "")
 
     return {
         "text": display_text,
         "is_preview_entry": bool(is_preview and entry and not entry.is_active),
+        "reload_required": False,
     }
 
 
-def get_default(*, key: MsgKey, language: LanguageCode) -> str:
+def get_default(*, key: MsgKey, language: LanguageCode) -> PluralForms:
     """Get baseline default translation for a single language."""
     backend = conf.get_backend_instance()
-    return backend.get_defaults(key, [language]).get(language, "")
+    return backend.get_defaults(key, [language]).get(language, {0: ""})

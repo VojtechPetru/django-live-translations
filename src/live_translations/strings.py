@@ -1,8 +1,8 @@
 """Zero-width character markers and gettext monkey-patching for live translation editing.
 
-Patched gettext/pgettext functions insert an invisible ZWC start flag and append
-an 18-character ZWC end marker (encoding a per-request string-table ID) to each
-translated string.  Both markers survive Django's autoescaping because ZWC
+Patched gettext/pgettext/ngettext/npgettext functions insert an invisible ZWC start
+flag and append an 18-character ZWC end marker (encoding a per-request string-table ID)
+to each translated string.  Both markers survive Django's autoescaping because ZWC
 characters are not HTML-special.
 
 Two distinct start-flag characters are used: ``\\u2060`` (WORD JOINER) at
@@ -27,7 +27,7 @@ import django.utils.translation
 if t.TYPE_CHECKING:
     import types
 
-from live_translations.types import MsgKey, OverrideMap, StringId
+from live_translations.types import MsgKey, OverrideMap, PluralForms, StringId
 
 __all__ = [
     "WJ",
@@ -82,7 +82,7 @@ lt_current_user: "contextvars.ContextVar[AbstractBaseUser | None]" = contextvars
     "lt_current_user", default=None
 )
 
-# Preview overrides: maps MsgKey → msgstr for inactive translations shown in preview mode.
+# Preview overrides: maps MsgKey → PluralForms for inactive translations shown in preview mode.
 lt_preview_overrides: contextvars.ContextVar[OverrideMap | None] = contextvars.ContextVar(
     "lt_preview_overrides", default=None
 )
@@ -133,42 +133,36 @@ def reset_string_registry() -> None:
 
 type _GettextFn = t.Callable[[str], str]
 type _PgettextFn = t.Callable[[str, str], str]
+type _NgettextFn = t.Callable[[str, str, int], str]
+type _NpgettextFn = t.Callable[[str, str, str, int], str]
 
 
 def _insert_markers(result: str, key: MsgKey) -> str:
     """Insert a ZWC start flag and append a ZWC end marker to a translated string.
+
+    This function is pure marker insertion -- no preview override logic.
+    Preview resolution is handled by each patched function individually
+    (ngettext needs the ``number`` arg to resolve the correct plural form).
 
     Two distinct start-flag characters are used so the client-side JS can apply
     the correct wrapping strategy for inline-HTML translations:
 
     * **Position-0 flag** (``\\uFEFF``): used when the translation starts with
       an HTML tag (``result[0] == '<'``).  The flag goes before the ``<`` to
-      avoid breaking tag names.  ``capfirst`` on ``<`` is a no-op anyway.
-      The JS splits at ``flagIdx`` — everything before is non-translation text.
+      avoid breaking tag names.
 
     * **Position-1 flag** (``\\u2060`` WORD JOINER): used for normal text.  The
       flag is placed at position 1 (after the first visible character) so that
       ``capfirst`` (``x[0].upper() + x[1:]``) still operates on the first
-      visible character.  The JS splits at ``flagIdx - 1`` to include that
-      character inside the ``<lt-t>`` wrapper.
+      visible character.
 
     **SafeString preservation**: Django's ``{% trans %}`` passes template
-    literals as ``SafeString`` through ``gettext``.  Slicing and concatenating
-    a ``SafeString`` loses the type (Python ``str.__getitem__`` returns plain
-    ``str``).  We must re-wrap the output with ``mark_safe`` when the input
-    was ``SafeData``, otherwise Django's ``conditional_escape`` will HTML-escape
-    the result and translations containing ``<strong>`` etc. will render as
-    literal text.
-
-    Also applies preview overrides when active.
+    literals as ``SafeString`` through ``gettext``.  We must re-wrap the output
+    with ``mark_safe`` when the input was ``SafeData``, otherwise Django's
+    ``conditional_escape`` will HTML-escape the result.
     """
     was_safe = isinstance(result, django.utils.safestring.SafeData)
 
-    preview = lt_preview_overrides.get(None)
-    if preview is not None:
-        pv = preview.get(key)
-        if pv is not None:
-            result = pv
     string_id = register_string(key)
     end_marker = encode_zwc(string_id)
 
@@ -177,11 +171,52 @@ def _insert_markers(result: str, key: MsgKey) -> str:
     elif result[0] == "<":
         # HTML at position 0: FEFF flag before the tag to avoid breaking tag names.
         output = ZWC_BOUNDARY + result + end_marker
+    elif result[0] == "%":
+        # Format specifier at start: FEFF flag before to avoid breaking %(name)s patterns.
+        # blocktranslate does `result % vars` after ngettext returns; a WJ between % and (
+        # would break the format specifier.
+        output = ZWC_BOUNDARY + result + end_marker
     else:
         # Normal case: WJ flag at position 1 (after first char, safe from capfirst).
         output = result[0] + WJ + result[1:] + end_marker
 
     return django.utils.safestring.mark_safe(output) if was_safe else output  # noqa: S308
+
+
+def _resolve_singular_preview(key: MsgKey) -> str | None:
+    """Resolve a singular preview override (form 0). Returns None if no override."""
+    preview = lt_preview_overrides.get(None)
+    if preview is None:
+        return None
+    pv = preview.get(key)
+    if pv is None:
+        return None
+    return pv.get(0, "")
+
+
+def _resolve_plural_preview(key: MsgKey, number: int) -> str | None:
+    """Resolve a plural preview override for the given number. Returns None if no override."""
+    preview = lt_preview_overrides.get(None)
+    if preview is None:
+        return None
+    pv: PluralForms | None = preview.get(key)
+    if pv is None:
+        return None
+    form_idx = _get_plural_index(number)
+    return pv.get(form_idx, pv.get(0, ""))
+
+
+def _get_plural_index(number: int) -> int:
+    """Get the plural form index for the current language and given number."""
+    from django.utils.translation import trans_real
+
+    lang = trans_real.get_language() or "en"
+    try:
+        trans = trans_real.translation(lang)
+        return trans.plural(number)  # type: ignore[attr-defined, no-any-return]
+    except Exception:  # noqa: BLE001
+        # Fallback: 0 for 1, 1 otherwise (English-style)
+        return 0 if number == 1 else 1
 
 
 # ---------------------------------------------------------------------------
@@ -192,13 +227,13 @@ def _insert_markers(result: str, key: MsgKey) -> str:
 def install_gettext_patch() -> None:
     """Monkey-patch Django's translation system to append ZWC markers.
 
-    Called once from ``AppConfig.ready()``.  Patches ``_trans.gettext`` and
-    ``_trans.pgettext``.  Lazy variants (``gettext_lazy``, ``pgettext_lazy``)
-    automatically pick up the patches because their proxies delegate to
-    ``_trans.gettext`` / ``_trans.pgettext`` on evaluation.
+    Called once from ``AppConfig.ready()``.  Patches ``_trans.gettext``,
+    ``_trans.pgettext``, ``_trans.ngettext``, and ``_trans.npgettext``.
+    Lazy variants automatically pick up the patches because their proxies
+    delegate to the ``_trans`` functions on evaluation.
 
     For regular users (``lt_active=False``), the patched functions are a
-    near-zero-cost pass-through.
+    near-zero-cost pass-through: one extra function call + one ContextVar.get().
     """
     _trans: types.ModuleType = django.utils.translation._trans  # type: ignore[attr-defined]
 
@@ -215,14 +250,29 @@ def install_gettext_patch() -> None:
     except AttributeError:
         _orig_pgettext = None
 
+    _orig_ngettext: _NgettextFn | None
+    try:
+        _orig_ngettext = _trans.ngettext  # type: ignore[union-attr]
+    except AttributeError:
+        _orig_ngettext = None
+
+    _orig_npgettext: _NpgettextFn | None
+    try:
+        _orig_npgettext = _trans.npgettext  # type: ignore[union-attr]
+    except AttributeError:
+        _orig_npgettext = None
+
     def _patched_gettext(message: str) -> str:
         result: str = _orig_gettext(message)
         if not lt_active.get(False):
             return result
-        # Django may pass lazy proxy objects; force to str once upfront.
         message = str(message)
+        key = MsgKey(message, "")
         try:
-            return _insert_markers(result, MsgKey(message, ""))
+            pv = _resolve_singular_preview(key)
+            if pv is not None:
+                result = pv
+            return _insert_markers(result, key)
         except Exception:
             logger.exception("Failed to append translation marker")
             return result
@@ -231,10 +281,47 @@ def install_gettext_patch() -> None:
         result: str = _orig_pgettext(context, message) if _orig_pgettext is not None else _orig_gettext(message)
         if not lt_active.get(False):
             return result
-        # Django may pass lazy proxy objects; force to str once upfront.
         message, context = str(message), str(context)
+        key = MsgKey(message, context)
         try:
-            return _insert_markers(result, MsgKey(message, context))
+            pv = _resolve_singular_preview(key)
+            if pv is not None:
+                result = pv
+            return _insert_markers(result, key)
+        except Exception:
+            logger.exception("Failed to append translation marker")
+            return result
+
+    def _patched_ngettext(singular: str, plural: str, number: int) -> str:
+        if _orig_ngettext is None:
+            return _orig_gettext(singular if number == 1 else plural)
+        result: str = _orig_ngettext(singular, plural, number)
+        if not lt_active.get(False):
+            return result
+        singular, plural = str(singular), str(plural)
+        key = MsgKey(singular, "", plural)
+        try:
+            pv = _resolve_plural_preview(key, number)
+            if pv is not None:
+                result = pv
+            return _insert_markers(result, key)
+        except Exception:
+            logger.exception("Failed to append translation marker")
+            return result
+
+    def _patched_npgettext(context: str, singular: str, plural: str, number: int) -> str:
+        if _orig_npgettext is None:
+            return _patched_ngettext(singular, plural, number)
+        result: str = _orig_npgettext(context, singular, plural, number)
+        if not lt_active.get(False):
+            return result
+        singular, plural, context = str(singular), str(plural), str(context)
+        key = MsgKey(singular, context, plural)
+        try:
+            pv = _resolve_plural_preview(key, number)
+            if pv is not None:
+                result = pv
+            return _insert_markers(result, key)
         except Exception:
             logger.exception("Failed to append translation marker")
             return result
@@ -242,3 +329,7 @@ def install_gettext_patch() -> None:
     _trans.gettext = _patched_gettext  # type: ignore[union-attr]
     if _orig_pgettext is not None:
         _trans.pgettext = _patched_pgettext  # type: ignore[union-attr]
+    if _orig_ngettext is not None:
+        _trans.ngettext = _patched_ngettext  # type: ignore[union-attr]
+    if _orig_npgettext is not None:
+        _trans.npgettext = _patched_npgettext  # type: ignore[union-attr]

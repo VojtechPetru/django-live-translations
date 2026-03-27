@@ -477,6 +477,28 @@
   resize: none;
 }
 
+.lt-field__input--modified {
+  border-left: 3px solid #60a5fa;
+}
+
+/* ── Plural Form Labels ─────────────────────────────── */
+
+.lt-field__form-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #71717a;
+  letter-spacing: 0.03em;
+  margin: 20px 0 2px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(113, 113, 122, 0.15);
+  text-transform: uppercase;
+}
+
+.lt-field__form-label:first-of-type {
+  margin-top: 4px;
+}
+
 /* ── Inline Error ────────────────────────────────────── */
 
 .lt-dialog__error {

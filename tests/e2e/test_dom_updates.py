@@ -22,7 +22,7 @@ class TestInPlaceDomUpdates:
     ) -> None:
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
-        textarea = page_as_superuser_for_backend.locator("#lt-input-en")
+        textarea = page_as_superuser_for_backend.locator("#lt-input-en-0")
         textarea.fill("Updated Title")
         check_active_toggle(page_as_superuser_for_backend)
         page_as_superuser_for_backend.locator(".lt-btn--save").click()
@@ -37,7 +37,7 @@ class TestInPlaceDomUpdates:
     ) -> None:
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
-        textarea = page_as_superuser_for_backend.locator("#lt-input-en")
+        textarea = page_as_superuser_for_backend.locator("#lt-input-en-0")
         textarea.fill("Inactive Text")
         toggle = page_as_superuser_for_backend.locator("#lt-active-en")
         expect(toggle).not_to_be_checked()
@@ -78,7 +78,7 @@ class TestInPlaceDomUpdates:
     ) -> None:
         open_modal(page_as_superuser_for_backend, "attrs.tooltip_trans", attr=True)
         wait_for_fields_loaded(page_as_superuser_for_backend)
-        textarea = page_as_superuser_for_backend.locator("#lt-input-en")
+        textarea = page_as_superuser_for_backend.locator("#lt-input-en-0")
         textarea.fill("Updated tooltip text")
         check_active_toggle(page_as_superuser_for_backend)
         page_as_superuser_for_backend.locator(".lt-btn--save").click()
@@ -96,7 +96,7 @@ class TestInPlaceDomUpdates:
         assert count >= 1, "Expected at least one element with demo.title msgid"
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
-        textarea = page_as_superuser_for_backend.locator("#lt-input-en")
+        textarea = page_as_superuser_for_backend.locator("#lt-input-en-0")
         textarea.fill("Broadcast Update")
         check_active_toggle(page_as_superuser_for_backend)
         page_as_superuser_for_backend.locator(".lt-btn--save").click()
@@ -112,7 +112,7 @@ class TestInPlaceDomUpdates:
         enable_preview(page_as_superuser_for_backend, base_url_for_backend)
         open_modal(page_as_superuser_for_backend, "demo.title")
         wait_for_fields_loaded(page_as_superuser_for_backend)
-        textarea = page_as_superuser_for_backend.locator("#lt-input-en")
+        textarea = page_as_superuser_for_backend.locator("#lt-input-en-0")
         textarea.fill("Preview Inactive Text")
         toggle = page_as_superuser_for_backend.locator("#lt-active-en")
         expect(toggle).not_to_be_checked()

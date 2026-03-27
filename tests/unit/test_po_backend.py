@@ -115,13 +115,13 @@ class TestGetPending:
         value = "Pending translation"
         encoded = base64.b64encode(value.encode()).decode()
         entry = _make_entry(comment=f"{LT_PENDING_PREFIX}{encoded}")
-        assert _get_pending(entry) == value
+        assert _get_pending(entry) == {0: value}
 
     def test_extracts_pending_after_existing_comment(self):
         value = "New value"
         encoded = base64.b64encode(value.encode()).decode()
         entry = _make_entry(comment=f"translator note\n{LT_PENDING_PREFIX}{encoded}")
-        assert _get_pending(entry) == value
+        assert _get_pending(entry) == {0: value}
 
     def test_handles_continuation_lines(self):
         # Simulate polib wrapping a long base64 string across lines
@@ -132,12 +132,12 @@ class TestGetPending:
         first = encoded[:split_at]
         rest = encoded[split_at:]
         entry = _make_entry(comment=f"{LT_PENDING_PREFIX}{first}\n{rest}")
-        assert _get_pending(entry) == value
+        assert _get_pending(entry) == {0: value}
 
     def test_returns_raw_on_invalid_base64(self):
         entry = _make_entry(comment=f"{LT_PENDING_PREFIX}!!!not-valid-base64!!!")
         result = _get_pending(entry)
-        assert result == "!!!not-valid-base64!!!"
+        assert result == {0: "!!!not-valid-base64!!!"}
 
     def test_returns_raw_on_unicode_decode_error(self):
         # Create invalid UTF-8 bytes encoded as base64
@@ -146,7 +146,7 @@ class TestGetPending:
         entry = _make_entry(comment=f"{LT_PENDING_PREFIX}{encoded}")
         # b64decode succeeds but .decode() fails -> returns raw
         result = _get_pending(entry)
-        assert result == encoded
+        assert result == {0: encoded}
 
     def test_returns_none_for_empty_string_comment(self):
         entry = _make_entry()
@@ -157,40 +157,40 @@ class TestGetPending:
         value = "Ahoj svetě! 🌍"
         encoded = base64.b64encode(value.encode()).decode()
         entry = _make_entry(comment=f"{LT_PENDING_PREFIX}{encoded}")
-        assert _get_pending(entry) == value
+        assert _get_pending(entry) == {0: value}
 
 
 class TestSetPending:
     def test_sets_pending_on_empty_comment(self):
         entry = _make_entry(comment="")
-        _set_pending(entry, "New value")
-        encoded = base64.b64encode(b"New value").decode()
+        _set_pending(entry, {0: "New value"})
+        encoded = base64.b64encode(b'{"0":"New value"}').decode()
         assert entry.comment == f"{LT_PENDING_PREFIX}{encoded}"
 
     def test_appends_pending_to_existing_comment(self):
         entry = _make_entry(comment="translator note")
-        _set_pending(entry, "New value")
-        encoded = base64.b64encode(b"New value").decode()
+        _set_pending(entry, {0: "New value"})
+        encoded = base64.b64encode(b'{"0":"New value"}').decode()
         assert entry.comment == f"translator note\n{LT_PENDING_PREFIX}{encoded}"
 
     def test_replaces_existing_pending(self):
-        old_encoded = base64.b64encode(b"Old").decode()
+        old_encoded = base64.b64encode(b'{"0":"Old"}').decode()
         entry = _make_entry(comment=f"note\n{LT_PENDING_PREFIX}{old_encoded}")
-        _set_pending(entry, "New")
-        new_encoded = base64.b64encode(b"New").decode()
+        _set_pending(entry, {0: "New"})
+        new_encoded = base64.b64encode(b'{"0":"New"}').decode()
         assert entry.comment == f"note\n{LT_PENDING_PREFIX}{new_encoded}"
         # Only one pending line should exist
         assert entry.comment.count(LT_PENDING_PREFIX) == 1
 
     def test_roundtrip_with_get_pending(self):
         entry = _make_entry(comment="some note")
-        _set_pending(entry, "Round trip value")
-        assert _get_pending(entry) == "Round trip value"
+        _set_pending(entry, {0: "Round trip value"})
+        assert _get_pending(entry) == {0: "Round trip value"}
 
     def test_unicode_value(self):
         entry = _make_entry(comment="")
-        _set_pending(entry, "Přeložený text")
-        assert _get_pending(entry) == "Přeložený text"
+        _set_pending(entry, {0: "Přeložený text"})
+        assert _get_pending(entry) == {0: "Přeložený text"}
 
 
 class TestClearPending:
@@ -342,7 +342,7 @@ class TestGetTranslations:
     def test_returns_existing_entry(self, po_backend: POFileBackend):
         result = po_backend.get_translations(MsgKey("hello", ""), ["en"])
         assert "en" in result
-        assert result["en"].msgstr == "Hello"
+        assert result["en"].msgstr_forms == {0: "Hello"}
         assert result["en"].is_active is True
         assert result["en"].fuzzy is False
         assert result["en"].language == "en"
@@ -351,23 +351,23 @@ class TestGetTranslations:
 
     def test_returns_empty_msgstr_for_missing_entry(self, po_backend: POFileBackend):
         result = po_backend.get_translations(MsgKey("nonexistent", ""), ["en"])
-        assert result["en"].msgstr == ""
+        assert result["en"].msgstr_forms == {0: ""}
         assert result["en"].is_active is True
 
     def test_returns_empty_msgstr_for_missing_language(self, po_backend: POFileBackend):
         result = po_backend.get_translations(MsgKey("hello", ""), ["fr"])
-        assert result["fr"].msgstr == ""
+        assert result["fr"].msgstr_forms == {0: ""}
 
     def test_returns_pending_value_when_present(self, locale_dir: pathlib.Path, settings):
         entry = polib.POEntry(msgid="hello", msgstr="Active Value")
-        _set_pending(entry, "Pending Value")
+        _set_pending(entry, {0: "Pending Value"})
         _make_po_file(locale_dir, "en", [entry])
         settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en"], "LOCALE_DIR": str(locale_dir)}
         conf.get_settings.cache_clear()
 
         backend = POFileBackend(locale_dir=locale_dir, domain="django")
         result = backend.get_translations(MsgKey("hello", ""), ["en"])
-        assert result["en"].msgstr == "Pending Value"
+        assert result["en"].msgstr_forms == {0: "Pending Value"}
         assert result["en"].is_active is False
 
     def test_fuzzy_flag_detected(self, locale_dir: pathlib.Path, settings):
@@ -389,13 +389,13 @@ class TestGetTranslations:
 
         backend = POFileBackend(locale_dir=locale_dir, domain="django")
         result = backend.get_translations(MsgKey("hello", ""), ["en", "cs"])
-        assert result["en"].msgstr == "Hello"
-        assert result["cs"].msgstr == "Ahoj"
+        assert result["en"].msgstr_forms == {0: "Hello"}
+        assert result["cs"].msgstr_forms == {0: "Ahoj"}
 
     def test_mixed_existing_and_missing_languages(self, po_backend: POFileBackend):
         result = po_backend.get_translations(MsgKey("hello", ""), ["en", "fr"])
-        assert result["en"].msgstr == "Hello"
-        assert result["fr"].msgstr == ""
+        assert result["en"].msgstr_forms == {0: "Hello"}
+        assert result["fr"].msgstr_forms == {0: ""}
 
     def test_context_preserved_in_result(self, locale_dir: pathlib.Path, settings):
         _make_po_file(locale_dir, "en", [polib.POEntry(msgid="hello", msgstr="Hello", msgctxt="greeting")])
@@ -405,7 +405,7 @@ class TestGetTranslations:
         backend = POFileBackend(locale_dir=locale_dir, domain="django")
         result = backend.get_translations(MsgKey("hello", "greeting"), ["en"])
         assert result["en"].context == "greeting"
-        assert result["en"].msgstr == "Hello"
+        assert result["en"].msgstr_forms == {0: "Hello"}
 
 
 # ===========================================================================
@@ -420,7 +420,7 @@ class TestGetInactiveOverrides:
 
     def test_returns_pending_entries(self, locale_dir: pathlib.Path, settings):
         entry = polib.POEntry(msgid="hello", msgstr="Active")
-        _set_pending(entry, "Pending")
+        _set_pending(entry, {0: "Pending"})
         _make_po_file(locale_dir, "en", [entry])
         settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en"], "LOCALE_DIR": str(locale_dir)}
         conf.get_settings.cache_clear()
@@ -428,7 +428,7 @@ class TestGetInactiveOverrides:
         backend = POFileBackend(locale_dir=locale_dir, domain="django")
         result = backend.get_inactive_overrides("en")
         assert MsgKey("hello", "") in result
-        assert result[MsgKey("hello", "")] == "Pending"
+        assert result[MsgKey("hello", "")] == {0: "Pending"}
 
     def test_returns_empty_for_missing_language(self, po_backend: POFileBackend):
         result = po_backend.get_inactive_overrides("fr")
@@ -439,7 +439,7 @@ class TestGetInactiveOverrides:
             polib.POEntry(msgid="active_one", msgstr="Active"),
             polib.POEntry(msgid="pending_one", msgstr="Old"),
         ]
-        _set_pending(entries[1], "New Pending")
+        _set_pending(entries[1], {0: "New Pending"})
         _make_po_file(locale_dir, "en", entries)
         settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en"], "LOCALE_DIR": str(locale_dir)}
         conf.get_settings.cache_clear()
@@ -452,7 +452,7 @@ class TestGetInactiveOverrides:
 
     def test_preserves_msgctxt_in_key(self, locale_dir: pathlib.Path, settings):
         entry = polib.POEntry(msgid="hello", msgstr="Active", msgctxt="ctx")
-        _set_pending(entry, "Pending")
+        _set_pending(entry, {0: "Pending"})
         _make_po_file(locale_dir, "en", [entry])
         settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en"], "LOCALE_DIR": str(locale_dir)}
         conf.get_settings.cache_clear()
@@ -477,7 +477,7 @@ class TestSaveTranslations:
         }
         conf.get_settings.cache_clear()
 
-        po_backend.save_translations(MsgKey("new_key", ""), {"en": "New Value"})
+        po_backend.save_translations(MsgKey("new_key", ""), {"en": {0: "New Value"}})
 
         # Verify the entry was written to disk
         po = polib.pofile(str(po_backend._po_path("en")))
@@ -494,14 +494,14 @@ class TestSaveTranslations:
         }
         conf.get_settings.cache_clear()
 
-        po_backend.save_translations(MsgKey("new_key", ""), {"en": "New Value"})
+        po_backend.save_translations(MsgKey("new_key", ""), {"en": {0: "New Value"}})
 
         po = polib.pofile(str(po_backend._po_path("en")))
         entry = po.find("new_key")
         assert entry is not None
         # msgstr should be empty for inactive new entries
         assert entry.msgstr == ""
-        assert _get_pending(entry) == "New Value"
+        assert _get_pending(entry) == {0: "New Value"}
 
     def test_save_updates_existing_entry_active(self, po_backend: POFileBackend, settings):
         settings.LIVE_TRANSLATIONS = {
@@ -511,7 +511,7 @@ class TestSaveTranslations:
         }
         conf.get_settings.cache_clear()
 
-        po_backend.save_translations(MsgKey("hello", ""), {"en": "Updated Hello"})
+        po_backend.save_translations(MsgKey("hello", ""), {"en": {0: "Updated Hello"}})
 
         po = polib.pofile(str(po_backend._po_path("en")))
         entry = po.find("hello")
@@ -528,7 +528,7 @@ class TestSaveTranslations:
 
         po_backend.save_translations(
             MsgKey("hello", ""),
-            {"en": "Pending Hello"},
+            {"en": {0: "Pending Hello"}},
             active_flags={"en": False},
         )
 
@@ -537,7 +537,7 @@ class TestSaveTranslations:
         assert entry is not None
         # Original msgstr preserved
         assert entry.msgstr == "Hello"
-        assert _get_pending(entry) == "Pending Hello"
+        assert _get_pending(entry) == {0: "Pending Hello"}
 
     def test_save_inactive_matching_msgstr_clears_pending(self, po_backend: POFileBackend, settings):
         """When saving inactive with value matching current msgstr, pending is cleared."""
@@ -549,7 +549,7 @@ class TestSaveTranslations:
 
         po_backend.save_translations(
             MsgKey("hello", ""),
-            {"en": "Hello"},  # Same as existing msgstr
+            {"en": {0: "Hello"}},  # Same as existing msgstr
             active_flags={"en": False},
         )
 
@@ -571,7 +571,7 @@ class TestSaveTranslations:
         conf.get_settings.cache_clear()
 
         backend = POFileBackend(locale_dir=locale_dir, domain="django")
-        backend.save_translations(MsgKey("hello", ""), {"en": "Updated"})
+        backend.save_translations(MsgKey("hello", ""), {"en": {0: "Updated"}})
 
         po = polib.pofile(str(backend._po_path("en")))
         entry = po.find("hello")
@@ -589,7 +589,7 @@ class TestSaveTranslations:
         conf.get_settings.cache_clear()
 
         backend = POFileBackend(locale_dir=locale_dir, domain="django")
-        backend.save_translations(MsgKey("hello", ""), {"en": "Pending"}, active_flags={"en": False})
+        backend.save_translations(MsgKey("hello", ""), {"en": {0: "Pending"}}, active_flags={"en": False})
 
         po = polib.pofile(str(backend._po_path("en")))
         entry = po.find("hello")
@@ -604,7 +604,7 @@ class TestSaveTranslations:
         }
         conf.get_settings.cache_clear()
 
-        po_backend.save_translations(MsgKey("hello", ""), {"en": "Updated"})
+        po_backend.save_translations(MsgKey("hello", ""), {"en": {0: "Updated"}})
 
         mo_path = po_backend._mo_path("en")
         assert mo_path.exists()
@@ -623,7 +623,7 @@ class TestSaveTranslations:
         # Seed the translations cache so we can detect it being cleared
         trans_real._translations["_sentinel"] = object()  # type: ignore[assignment]
 
-        po_backend.save_translations(MsgKey("hello", ""), {"en": "Updated"})
+        po_backend.save_translations(MsgKey("hello", ""), {"en": {0: "Updated"}})
 
         # translation_file_changed clears _translations
         assert "_sentinel" not in trans_real._translations  # type: ignore[missing-attribute]
@@ -640,7 +640,7 @@ class TestSaveTranslations:
         po_backend._load_po("en")
         assert po_backend._po_path("en") in po_backend._po_cache
 
-        po_backend.save_translations(MsgKey("hello", ""), {"en": "Updated"})
+        po_backend.save_translations(MsgKey("hello", ""), {"en": {0: "Updated"}})
 
         assert po_backend._po_path("en") not in po_backend._po_cache
 
@@ -653,7 +653,7 @@ class TestSaveTranslations:
         conf.get_settings.cache_clear()
 
         # active_flags override the fallback
-        po_backend.save_translations(MsgKey("hello", ""), {"en": "Active!"}, active_flags={"en": True})
+        po_backend.save_translations(MsgKey("hello", ""), {"en": {0: "Active!"}}, active_flags={"en": True})
 
         po = polib.pofile(str(po_backend._po_path("en")))
         entry = po.find("hello")
@@ -664,7 +664,7 @@ class TestSaveTranslations:
     def test_save_active_clears_existing_pending(self, locale_dir: pathlib.Path, settings):
         """Saving as active should clear any existing pending value."""
         entry = polib.POEntry(msgid="hello", msgstr="Original")
-        _set_pending(entry, "Was Pending")
+        _set_pending(entry, {0: "Was Pending"})
         _make_po_file(locale_dir, "en", [entry])
         settings.LIVE_TRANSLATIONS = {
             "LANGUAGES": ["en"],
@@ -673,7 +673,7 @@ class TestSaveTranslations:
         conf.get_settings.cache_clear()
 
         backend = POFileBackend(locale_dir=locale_dir, domain="django")
-        backend.save_translations(MsgKey("hello", ""), {"en": "Now Active"}, active_flags={"en": True})
+        backend.save_translations(MsgKey("hello", ""), {"en": {0: "Now Active"}}, active_flags={"en": True})
 
         po = polib.pofile(str(backend._po_path("en")))
         entry = po.find("hello")
@@ -692,7 +692,7 @@ class TestSaveTranslations:
         conf.get_settings.cache_clear()
 
         backend = POFileBackend(locale_dir=locale_dir, domain="django")
-        backend.save_translations(MsgKey("hello", ""), {"en": "Hi", "cs": "Cau"})
+        backend.save_translations(MsgKey("hello", ""), {"en": {0: "Hi"}, "cs": {0: "Cau"}})
 
         po_en = polib.pofile(str(backend._po_path("en")))
         po_cs = polib.pofile(str(backend._po_path("cs")))
@@ -711,7 +711,7 @@ class TestSaveTranslations:
         }
         conf.get_settings.cache_clear()
 
-        po_backend.save_translations(MsgKey("hello", "greeting"), {"en": "Hi there"})
+        po_backend.save_translations(MsgKey("hello", "greeting"), {"en": {0: "Hi there"}})
 
         po = polib.pofile(str(po_backend._po_path("en")))
         entry = po.find("hello", msgctxt="greeting")
@@ -729,7 +729,7 @@ class TestSaveTranslations:
         }
         conf.get_settings.cache_clear()
 
-        po_backend.save_translations(MsgKey("hello", ""), {"en": "Updated"})
+        po_backend.save_translations(MsgKey("hello", ""), {"en": {0: "Updated"}})
 
         history_entries = models.TranslationHistory.objects.all()
         assert history_entries.count() >= 1
@@ -739,7 +739,7 @@ class TestSaveTranslations:
         from live_translations import models
 
         entry = polib.POEntry(msgid="hello", msgstr="Original")
-        _set_pending(entry, "Pending Old")
+        _set_pending(entry, {0: "Pending Old"})
         _make_po_file(locale_dir, "en", [entry])
         settings.LIVE_TRANSLATIONS = {
             "LANGUAGES": ["en"],
@@ -749,7 +749,7 @@ class TestSaveTranslations:
         conf.get_settings.cache_clear()
 
         backend = POFileBackend(locale_dir=locale_dir, domain="django")
-        backend.save_translations(MsgKey("hello", ""), {"en": "Brand New"})
+        backend.save_translations(MsgKey("hello", ""), {"en": {0: "Brand New"}})
 
         h = models.TranslationHistory.objects.filter(action="update").first()
         assert h is not None
@@ -765,7 +765,7 @@ class TestSaveTranslations:
 class TestBulkActivate:
     def test_activates_pending_entries(self, locale_dir: pathlib.Path, settings):
         entry = polib.POEntry(msgid="hello", msgstr="Original")
-        _set_pending(entry, "Pending Value")
+        _set_pending(entry, {0: "Pending Value"})
         _make_po_file(locale_dir, "en", [entry])
         settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en"], "LOCALE_DIR": str(locale_dir)}
         conf.get_settings.cache_clear()
@@ -799,7 +799,7 @@ class TestBulkActivate:
     def test_clears_fuzzy_on_activate(self, locale_dir: pathlib.Path, settings):
         entry = polib.POEntry(msgid="hello", msgstr="Original")
         entry.flags = ["fuzzy"]
-        _set_pending(entry, "Pending")
+        _set_pending(entry, {0: "Pending"})
         _make_po_file(locale_dir, "en", [entry])
         settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en"], "LOCALE_DIR": str(locale_dir)}
         conf.get_settings.cache_clear()
@@ -814,7 +814,7 @@ class TestBulkActivate:
 
     def test_creates_mo_file(self, locale_dir: pathlib.Path, settings):
         entry = polib.POEntry(msgid="hello", msgstr="Original")
-        _set_pending(entry, "Pending")
+        _set_pending(entry, {0: "Pending"})
         _make_po_file(locale_dir, "en", [entry])
         settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en"], "LOCALE_DIR": str(locale_dir)}
         conf.get_settings.cache_clear()
@@ -829,7 +829,7 @@ class TestBulkActivate:
         from django.utils.translation import trans_real
 
         entry = polib.POEntry(msgid="hello", msgstr="Original")
-        _set_pending(entry, "Pending")
+        _set_pending(entry, {0: "Pending"})
         _make_po_file(locale_dir, "en", [entry])
         settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en"], "LOCALE_DIR": str(locale_dir)}
         conf.get_settings.cache_clear()
@@ -845,7 +845,7 @@ class TestBulkActivate:
 
     def test_invalidates_cache(self, locale_dir: pathlib.Path, settings):
         entry = polib.POEntry(msgid="hello", msgstr="Original")
-        _set_pending(entry, "Pending")
+        _set_pending(entry, {0: "Pending"})
         _make_po_file(locale_dir, "en", [entry])
         settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en"], "LOCALE_DIR": str(locale_dir)}
         conf.get_settings.cache_clear()
@@ -864,8 +864,8 @@ class TestBulkActivate:
             polib.POEntry(msgid="world", msgstr="World"),
             polib.POEntry(msgid="no_pending", msgstr="Unchanged"),
         ]
-        _set_pending(entries[0], "Pending Hello")
-        _set_pending(entries[1], "Pending World")
+        _set_pending(entries[0], {0: "Pending Hello"})
+        _set_pending(entries[1], {0: "Pending World"})
         _make_po_file(locale_dir, "en", entries)
         settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en"], "LOCALE_DIR": str(locale_dir)}
         conf.get_settings.cache_clear()
@@ -905,7 +905,7 @@ class TestBulkActivate:
 class TestGetDefaults:
     def test_returns_existing_msgstr(self, po_backend: POFileBackend):
         result = po_backend.get_defaults(MsgKey("hello", ""), ["en"])
-        assert result == {"en": "Hello"}
+        assert result == {"en": {0: "Hello"}}
 
     def test_skips_missing_entry(self, po_backend: POFileBackend):
         result = po_backend.get_defaults(MsgKey("nonexistent", ""), ["en"])
@@ -923,7 +923,7 @@ class TestGetDefaults:
 
         backend = POFileBackend(locale_dir=locale_dir, domain="django")
         result = backend.get_defaults(MsgKey("hello", ""), ["en", "cs"])
-        assert result == {"en": "Hello", "cs": "Ahoj"}
+        assert result == {"en": {0: "Hello"}, "cs": {0: "Ahoj"}}
 
     def test_with_context(self, locale_dir: pathlib.Path, settings):
         _make_po_file(locale_dir, "en", [polib.POEntry(msgid="hello", msgstr="Hi", msgctxt="ctx")])
@@ -932,7 +932,7 @@ class TestGetDefaults:
 
         backend = POFileBackend(locale_dir=locale_dir, domain="django")
         result = backend.get_defaults(MsgKey("hello", "ctx"), ["en"])
-        assert result == {"en": "Hi"}
+        assert result == {"en": {0: "Hi"}}
 
     def test_empty_msgstr_included(self, locale_dir: pathlib.Path, settings):
         """An entry with empty msgstr still has the entry; empty strings are falsy but entry exists."""
@@ -944,7 +944,7 @@ class TestGetDefaults:
         result = backend.get_defaults(MsgKey("hello", ""), ["en"])
         # Entry exists but msgstr is falsy — the code checks `if entry:` which is truthy for POEntry
         # even with empty msgstr. But polib.POEntry with empty msgstr is still truthy.
-        assert result == {"en": ""}
+        assert result == {"en": {0: ""}}
 
 
 # ===========================================================================
@@ -969,7 +969,7 @@ class TestGetHint:
     def test_strips_pending_from_hint(self, locale_dir: pathlib.Path, settings):
         entry = polib.POEntry(msgid="hello", msgstr="Hello")
         entry.comment = "Translator note"
-        _set_pending(entry, "Pending value")
+        _set_pending(entry, {0: "Pending value"})
         _make_po_file(locale_dir, "en", [entry])
         settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en"], "LOCALE_DIR": str(locale_dir)}
         conf.get_settings.cache_clear()
@@ -984,7 +984,7 @@ class TestGetHint:
 
     def test_returns_empty_when_only_pending_in_comment(self, locale_dir: pathlib.Path, settings):
         entry = polib.POEntry(msgid="hello", msgstr="Hello")
-        _set_pending(entry, "Pending")
+        _set_pending(entry, {0: "Pending"})
         _make_po_file(locale_dir, "en", [entry])
         settings.LIVE_TRANSLATIONS = {"LANGUAGES": ["en"], "LOCALE_DIR": str(locale_dir)}
         conf.get_settings.cache_clear()
@@ -1015,7 +1015,7 @@ class TestEdgeCases:
     def test_empty_context_treated_as_no_context(self, po_backend: POFileBackend):
         """MsgKey with empty string context should match entries without msgctxt."""
         result = po_backend.get_translations(MsgKey("hello", ""), ["en"])
-        assert result["en"].msgstr == "Hello"
+        assert result["en"].msgstr_forms == {0: "Hello"}
 
     def test_po_cache_dict_type(self, po_backend: POFileBackend):
         assert isinstance(po_backend._po_cache, dict)
@@ -1032,10 +1032,10 @@ class TestEdgeCases:
         conf.get_settings.cache_clear()
 
         backend = POFileBackend(locale_dir=locale_dir, domain="django")
-        backend.save_translations(MsgKey("hello", ""), {"en": "Updated Hello"})
+        backend.save_translations(MsgKey("hello", ""), {"en": {0: "Updated Hello"}})
 
         result = backend.get_translations(MsgKey("hello", ""), ["en"])
-        assert result["en"].msgstr == "Updated Hello"
+        assert result["en"].msgstr_forms == {0: "Updated Hello"}
         assert result["en"].is_active is True
 
     @pytest.mark.django_db
@@ -1053,13 +1053,13 @@ class TestEdgeCases:
         # Save as inactive
         backend.save_translations(
             MsgKey("hello", ""),
-            {"en": "Pending Hello"},
+            {"en": {0: "Pending Hello"}},
             active_flags={"en": False},
         )
 
         # Verify pending
         result = backend.get_translations(MsgKey("hello", ""), ["en"])
-        assert result["en"].msgstr == "Pending Hello"
+        assert result["en"].msgstr_forms == {0: "Pending Hello"}
         assert result["en"].is_active is False
 
         # Activate
@@ -1068,7 +1068,7 @@ class TestEdgeCases:
 
         # Verify active
         result = backend.get_translations(MsgKey("hello", ""), ["en"])
-        assert result["en"].msgstr == "Pending Hello"
+        assert result["en"].msgstr_forms == {0: "Pending Hello"}
         assert result["en"].is_active is True
 
     @pytest.mark.django_db
@@ -1084,7 +1084,7 @@ class TestEdgeCases:
         backend = POFileBackend(locale_dir=locale_dir, domain="django")
         backend.save_translations(
             MsgKey("hello", "greeting"),
-            {"en": "Hi greeting"},
+            {"en": {0: "Hi greeting"}},
             active_flags={"en": False},
         )
 
@@ -1093,7 +1093,7 @@ class TestEdgeCases:
         assert entry is not None
         assert entry.msgctxt == "greeting"
         assert entry.msgstr == ""
-        assert _get_pending(entry) == "Hi greeting"
+        assert _get_pending(entry) == {0: "Hi greeting"}
 
 
 class TestEnsurePo:
@@ -1145,7 +1145,7 @@ class TestEnsurePo:
         backend = POFileBackend(locale_dir=locale_dir, domain="django")
         key = MsgKey(msgid="greeting", context="")
 
-        backend.save_translations(key, {"fr": "Bonjour"}, {"fr": True})
+        backend.save_translations(key, {"fr": {0: "Bonjour"}}, {"fr": True})
 
         po = backend._load_po("fr")
         entry = po.find("greeting")
