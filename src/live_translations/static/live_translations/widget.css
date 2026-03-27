@@ -477,6 +477,10 @@
   resize: none;
 }
 
+.lt-field__input--modified {
+  border-left: 3px solid #60a5fa;
+}
+
 /* ── Plural Form Labels ─────────────────────────────── */
 
 .lt-field__form-label {

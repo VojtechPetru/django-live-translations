@@ -1804,6 +1804,15 @@
         });
       })(textarea);
 
+      // Modified-from-default indicator
+      (function (ta, defVal) {
+        function syncModified() {
+          ta.classList.toggle("lt-field__input--modified", ta.value !== defVal);
+        }
+        syncModified();
+        ta.addEventListener("input", syncModified);
+      })(textarea, poDefault[String(formIdx)] || "");
+
       container.appendChild(textarea);
     }
 
