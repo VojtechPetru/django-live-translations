@@ -10,7 +10,7 @@
 Edit translations directly on any page of your Django application. Toggle edit mode, click any translatable string, and save changes that take effect immediately - no deployment, no restarts, no context switching to `.po` file editors.
 
 <div align="center">
-  <img src="docs/assets/screenshots/edit-mode.png" alt="Edit mode - translatable strings highlighted with dashed outlines" width="540">
+  <img src="docs/assets/screenshots/demo_short.gif" alt="Live translation editing demo" width="640">
 </div>
 
 ## Features
