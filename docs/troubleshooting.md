@@ -71,7 +71,7 @@ LIVE_TRANSLATIONS = {
 
 **Cause**: `LIVE_TRANSLATIONS` contains keys that aren't recognized. Usually a typo.
 
-**Fix**: check the key name against the [configuration reference](configuration.md#settings-reference).
+**Fix**: check the key name against the [configuration reference](configuration.md#settings-reference){ data-preview }.
 
 ## Common issues
 
@@ -109,6 +109,15 @@ python manage.py migrate live_translations
 ```
 
 If the table doesn't exist, history is silently skipped (no errors, but no records either).
+
+### Translations not highlighted on dynamically loaded content
+
+If strings loaded via htmx or `fetch` are not highlighted in edit mode:
+
+- Verify the request for the partial HTML goes through `LiveTranslationsMiddleware`. If the view returns a `TemplateResponse` or `HttpResponse` with `text/html` content type, the middleware will inject a `<template data-lt-strings>` element automatically.
+- For htmx, no extra setup is needed. The widget listens for `htmx:load` events.
+- For non-htmx dynamic content, call `window.__LT_RESCAN__()` after inserting the HTML into the DOM.
+- If the partial response is served by a different Django app or a non-Django backend, the middleware cannot inject string tables. Translations in that content will not be editable.
 
 ### Permission check not working
 

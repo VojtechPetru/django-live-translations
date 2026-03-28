@@ -109,7 +109,7 @@ Imports use upsert logic. Rows are grouped by `(language, msgid, context, msgid_
 - If no matching entry exists, a new one is created
 - If a matching entry exists, its translation and `is_active` fields are updated
 - All changes happen in a single database transaction
-- [Edit history](admin.md#translation-history) is recorded for the import
+- [Edit history](admin.md#translation-history){ data-preview } is recorded for the import
 
 ## Round-trip workflow
 

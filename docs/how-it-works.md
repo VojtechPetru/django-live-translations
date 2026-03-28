@@ -110,12 +110,31 @@ catalog[(msgid, 1)] = "%d items"
 
 The widget is a single vanilla JavaScript file (~2500 lines, zero dependencies) served as a Django static file. It:
 
-1. Walks the DOM looking for ZWC boundary characters (`U+FEFF`)
-2. Decodes the 16-bit ID from the marker sequence
-3. Looks up the msgid and context in the string table (read from `<template data-lt-strings>`)
-4. Strips markers and wraps text nodes in `<lt-t>` custom elements
+1. Reads config and string table from the `<template>` element's `data-lt-config` and `data-lt-strings` attributes
+2. Walks the DOM looking for ZWC boundary characters (`U+FEFF`)
+3. Decodes the 16-bit ID from the marker sequence
+4. Looks up the msgid and context in the string table
+5. Strips markers and wraps text nodes in `<lt-t>` custom elements
 
 `<lt-t>` is an unknown HTML element that browsers treat as an inline span, with no default styling or shadow DOM. All widget CSS classes are prefixed `.lt-` to avoid conflicts with the host page.
+
+### Dynamic content support
+
+When new HTML is inserted into the page after initial load (via htmx, `fetch`, or any other mechanism), the middleware appends a `<template data-lt-strings>` element to the partial response. The widget then needs to merge those new string-table entries and resolve the ZWC markers in the new content.
+
+This happens automatically for **htmx**: the widget listens for the `htmx:load` event and rescans the swapped-in subtree.
+
+For **non-htmx dynamic content** (e.g. `fetch` + `innerHTML`), call the public API after inserting the HTML:
+
+```javascript
+// Rescan the whole body
+window.__LT_RESCAN__();
+
+// Or rescan a specific subtree
+window.__LT_RESCAN__(document.getElementById("my-container"));
+```
+
+Rescanning is idempotent. Calling it multiple times or on already-processed content is harmless.
 
 ## Performance
 

@@ -37,10 +37,10 @@ LIVE_TRANSLATIONS = {
 
     Default: `"live_translations.backends.po.POFileBackend"`
 
-    See [Backends](backends.md) for setup and comparison.
+    See [Backends](backends.md){ data-preview } for setup and comparison.
 
 `CACHE`
-:   Django cache alias for cross-process invalidation. Only used by the [database backend](backends.md#database-backend).
+:   Django cache alias for cross-process invalidation. Only used by the [database backend](backends.md#database-backend){ data-preview }.
 
     Default: `"default"`
 
@@ -78,7 +78,7 @@ LIVE_TRANSLATIONS = {
 
     Default: authenticated superusers only
 
-    Accepts a dotted import path or function reference. See [Permissions](permissions.md) for examples.
+    Accepts a dotted import path or function reference. See [Permissions](permissions.md){ data-preview } for examples.
 
 `TRANSLATION_ACTIVE_BY_DEFAULT`
 :   Whether newly saved translations are immediately active.

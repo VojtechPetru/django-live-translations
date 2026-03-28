@@ -9,7 +9,7 @@ This page covers the full editing workflow: toggling edit mode, using the modal 
 
 ## Edit mode
 
-Press ++ctrl+shift+e++ (or your [configured shortcut](configuration.md)) to toggle edit mode. All translatable strings on the page get highlighted with blue dashed outlines.
+Press ++ctrl+shift+e++ (or your [configured shortcut](configuration.md){ data-preview }) to toggle edit mode. All translatable strings on the page get highlighted with blue dashed outlines.
 
 ![Edit mode](assets/screenshots/edit-mode.png){ loading=lazy }
 /// caption
@@ -40,7 +40,7 @@ The modal header displays the original `msgid` with a copy button.
 
 Click **Save** to persist changes across all tabs. On save:
 
-1. The backend stores the translations (to `.po` files or database, depending on your [backend](backends.md))
+1. The backend stores the translations (to `.po` files or database, depending on your [backend](backends.md){ data-preview })
 2. The page updates in real-time to reflect the new translation, no reload needed
 3. The action is recorded in [edit history](#edit-history)
 
@@ -84,7 +84,7 @@ Press ++ctrl+shift+p++ to toggle preview mode. This overlays inactive translatio
 Inactive translations shown with amber borders in preview mode.
 ///
 
-Preview mode is gated by the same [permission check](permissions.md) as edit mode.
+Preview mode is gated by the same [permission check](permissions.md){ data-preview } as edit mode.
 
 ## Bulk activation
 
@@ -141,7 +141,13 @@ Switching behavior depends on the language type:
 - **Published languages**: navigates to the language-prefixed URL (e.g. `/de/about/`) if `i18n_patterns` is detected, or sets the `django_language` cookie and reloads
 - **Draft languages**: sets a cookie override (`lt_lang`) and reloads. The middleware renders the page in the draft locale without URL changes.
 
-[Draft languages](configuration.md#draft-languages) are marked with an amber "Draft" badge.
+[Draft languages](configuration.md#draft-languages){ data-preview } are marked with an amber "Draft" badge.
+
+## Dynamic content (htmx)
+
+Translations in dynamically loaded content work automatically with [htmx](https://htmx.org/). When htmx swaps in new HTML, the widget detects the swap and processes any translatable strings in the new content. Edit mode highlights, click-to-edit, and preview mode all work on dynamically loaded content the same as on the initial page.
+
+For other dynamic content mechanisms (`fetch` + `innerHTML`, web components, etc.), call `window.__LT_RESCAN__()` after inserting the HTML. See [How It Works](how-it-works.md#dynamic-content-support){ data-preview } for details.
 
 ## Keyboard shortcuts
 

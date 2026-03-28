@@ -8,7 +8,7 @@ description: Managing translation overrides from the Django admin panel
 django-live-translations registers two models in Django's admin: `TranslationEntry` for managing overrides and `TranslationHistory` as a read-only audit log.
 
 !!! note
-    The admin interface is most useful with the [database backend](backends.md#database-backend). With the PO backend, overrides live in `.po` files and these tables remain empty.
+    The admin interface is most useful with the [database backend](backends.md#database-backend){ data-preview }. With the PO backend, overrides live in `.po` files and these tables remain empty.
 
 ## Translation entries
 
