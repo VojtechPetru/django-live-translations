@@ -1052,6 +1052,7 @@
         });
       }
       _updateActionBar();
+      _updateHintActiveState();
     }
   }
 
@@ -3169,11 +3170,31 @@
     });
     bar.appendChild(previewBtn);
 
-    // Preview tip (visible only in preview mode)
+    // "Select all" button (visible only in preview+edit mode)
     const tip = document.createElement("span");
     tip.className = "lt-hint__tip";
-    tip.title = "Hold Shift and click translated text to select multiple entries";
-    tip.innerHTML = '<kbd class="lt-hint__kbd">Shift</kbd><span class="lt-hint__label">click to select</span>';
+    tip.innerHTML = '<span class="lt-hint__label lt-hint__select-all">Select all</span>';
+    tip.addEventListener("click", function (e) {
+      if (_hintDidDrag) return;
+      e.stopPropagation();
+      var previewEls = document.querySelectorAll(".lt-preview");
+      // If all preview elements are already selected, deselect all
+      var allSelected = previewEls.length > 0;
+      for (var i = 0; i < previewEls.length; i++) {
+        if (selectedElements.indexOf(previewEls[i]) === -1) { allSelected = false; break; }
+      }
+      if (allSelected) {
+        _clearSelection();
+      } else {
+        for (var j = 0; j < previewEls.length; j++) {
+          if (selectedElements.indexOf(previewEls[j]) === -1) {
+            selectedElements.push(previewEls[j]);
+            previewEls[j].classList.add("lt-selected");
+          }
+        }
+        _updateActionBar();
+      }
+    });
     bar.appendChild(tip);
 
     document.body.appendChild(bar);
@@ -3294,7 +3315,7 @@
     const tipEl = _hintBar.querySelector(".lt-hint__tip");
     if (editEl) editEl.classList.toggle("lt-hint__action--active", state === "active" || state === "editing");
     if (previewEl) previewEl.classList.toggle("lt-hint__action--active", PREVIEW);
-    if (tipEl) tipEl.classList.toggle("lt-hint__tip--visible", PREVIEW);
+    if (tipEl) tipEl.classList.toggle("lt-hint__tip--visible", PREVIEW && state !== "inactive" && PREVIEW_ENTRIES.length > 0);
   }
 
   _showShortcutHint();

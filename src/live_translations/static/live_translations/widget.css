@@ -1296,6 +1296,15 @@
   display: inline-flex;
 }
 
+.lt-hint__select-all {
+  cursor: pointer;
+  color: rgba(245, 158, 11, 0.8);
+}
+
+.lt-hint__select-all:hover {
+  color: rgba(245, 158, 11, 1);
+}
+
 /* ── Language Switcher (in hint bar) ─────────────────── */
 
 .lt-hint__lang {

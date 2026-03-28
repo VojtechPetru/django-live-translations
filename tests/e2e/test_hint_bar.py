@@ -3,7 +3,14 @@
 import json
 import re
 
-from helpers import activate_edit_mode, deactivate_edit_mode
+from helpers import (
+    activate_edit_mode,
+    api_delete,
+    api_restore_po_default,
+    api_save,
+    deactivate_edit_mode,
+    disable_preview,
+)
 from playwright.sync_api import Page, expect
 
 
@@ -132,13 +139,22 @@ class TestHintBar:
         # Edit mode should NOT have been toggled
         expect(page_as_superuser.locator("body")).not_to_have_class(re.compile(r"lt-edit-mode"))
 
-    def test_hint_bar_shift_click_tip_visible_only_in_preview(self, page_as_superuser: Page) -> None:
+    def test_hint_bar_select_all_visible_only_in_preview_and_edit(self, page_as_superuser: Page, base_url: str) -> None:
+        # Create an inactive translation so PREVIEW_ENTRIES is non-empty
+        api_save(page_as_superuser, base_url, "demo.title", {"en": "Inactive Title"}, {"en": False})
         tip = page_as_superuser.locator(".lt-hint__tip")
         # Not in preview mode — tip should not be visible
         expect(tip).not_to_have_class(re.compile(r"lt-hint__tip--visible"))
-        # Enter preview mode
+        # Enter preview mode only — tip still hidden (requires edit mode too)
         preview_btn = page_as_superuser.locator('.lt-hint__action[data-mode="preview"]')
         preview_btn.click()
         page_as_superuser.wait_for_load_state("domcontentloaded")
         tip_after = page_as_superuser.locator(".lt-hint__tip")
+        expect(tip_after).not_to_have_class(re.compile(r"lt-hint__tip--visible"))
+        # Activate edit mode — now tip should be visible
+        activate_edit_mode(page_as_superuser)
         expect(tip_after).to_have_class(re.compile(r"lt-hint__tip--visible"))
+        # Cleanup
+        disable_preview(page_as_superuser, base_url)
+        api_delete(page_as_superuser, base_url, "demo.title", ["en"])
+        api_restore_po_default(page_as_superuser, base_url, "demo.title", ["en"])

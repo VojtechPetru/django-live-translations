@@ -89,6 +89,7 @@ class TestToastNotifications:
         page.context.add_cookies([{"name": "lt_preview", "value": "1", "url": base_url}])
         page.reload()
         page.wait_for_load_state("domcontentloaded")
+        activate_edit_mode(page)
 
         span = page.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span).to_have_class(re.compile(r"lt-preview"))

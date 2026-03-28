@@ -31,7 +31,7 @@ class TestPersistence:
         cookies_after = page_as_superuser.context.cookies()
         assert any(c["name"] == "lt_preview" and c["value"] == "1" for c in cookies_after)
         body = page_as_superuser.locator("body")
-        expect(body).to_have_class(re.compile(r"lt-edit-mode"))
+        expect(body).to_have_class(re.compile(r"lt-preview-mode"))
         disable_preview(page_as_superuser, base_url)
 
     def test_preview_cookie_clears_on_toggle_off(self, page_as_superuser: Page, base_url: str) -> None:

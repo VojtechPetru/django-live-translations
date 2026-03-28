@@ -1,4 +1,4 @@
-"""E2E tests for preview mode — cookie, amber/blue outlines, auto-edit-mode, and text display."""
+"""E2E tests for preview mode — cookie, amber/blue outlines, and text display."""
 
 import re
 
@@ -19,7 +19,9 @@ class TestPreviewMode:
         assert preview_cookie is not None
         assert preview_cookie["value"] == "1"
         body = page_as_superuser_for_backend.locator("body")
-        expect(body).to_have_class(re.compile(r"lt-edit-mode"))
+        expect(body).to_have_class(re.compile(r"lt-preview-mode"))
+        # Preview should NOT auto-activate edit mode
+        expect(body).not_to_have_class(re.compile(r"lt-edit-mode"))
         # Cleanup
         disable_preview(page_as_superuser_for_backend, base_url_for_backend)
 
@@ -56,12 +58,13 @@ class TestPreviewMode:
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
 
-    def test_preview_auto_activates_edit_mode(
+    def test_preview_does_not_activate_edit_mode(
         self, page_as_superuser_for_backend: Page, backend_id: str, base_url_for_backend: str
     ) -> None:
         enable_preview(page_as_superuser_for_backend, base_url_for_backend)
         body = page_as_superuser_for_backend.locator("body")
-        expect(body).to_have_class(re.compile(r"lt-edit-mode"))
+        expect(body).to_have_class(re.compile(r"lt-preview-mode"))
+        expect(body).not_to_have_class(re.compile(r"lt-edit-mode"))
         # Cleanup
         disable_preview(page_as_superuser_for_backend, base_url_for_backend)
 

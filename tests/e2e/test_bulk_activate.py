@@ -4,7 +4,15 @@ import json
 import re
 
 import pytest
-from helpers import api_delete, api_restore_po_default, api_save, disable_preview, enable_preview, get_csrf_token
+from helpers import (
+    activate_edit_mode,
+    api_delete,
+    api_restore_po_default,
+    api_save,
+    disable_preview,
+    enable_preview,
+    get_csrf_token,
+)
 from playwright.sync_api import Page, expect
 
 
@@ -20,6 +28,7 @@ class TestBulkActivate:
             {"en": False},
         )
         enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        activate_edit_mode(page_as_superuser_for_backend)
         span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span).to_have_class(re.compile(r"lt-preview"))
         span.click(modifiers=["Shift"])
@@ -40,6 +49,7 @@ class TestBulkActivate:
             {"en": False},
         )
         enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        activate_edit_mode(page_as_superuser_for_backend)
         span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         span.click(modifiers=["Shift"])
         expect(span).to_have_class(re.compile(r"lt-selected"))
@@ -61,6 +71,7 @@ class TestBulkActivate:
             {"en": False},
         )
         enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        activate_edit_mode(page_as_superuser_for_backend)
         span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         span.click(modifiers=["Shift"])
         action_bar = page_as_superuser_for_backend.locator(".lt-action-bar")
@@ -88,6 +99,7 @@ class TestBulkActivate:
             {"en": False},
         )
         enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        activate_edit_mode(page_as_superuser_for_backend)
         page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first.click(modifiers=["Shift"])
         page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="about.heading"]').first.click(modifiers=["Shift"])
         count_el = page_as_superuser_for_backend.locator(".lt-action-bar__count")
@@ -110,6 +122,7 @@ class TestBulkActivate:
             {"en": False},
         )
         enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        activate_edit_mode(page_as_superuser_for_backend)
         span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         span.click(modifiers=["Shift"])
         expect(span).to_have_class(re.compile(r"lt-selected"))
@@ -134,6 +147,7 @@ class TestBulkActivate:
             {"en": False},
         )
         enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        activate_edit_mode(page_as_superuser_for_backend)
         page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first.click(modifiers=["Shift"])
         page_as_superuser_for_backend.locator(".lt-action-bar__activate").click()
         confirm_btn = page_as_superuser_for_backend.locator(".lt-action-bar__confirm")
@@ -158,6 +172,7 @@ class TestBulkActivate:
             {"en": False},
         )
         enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        activate_edit_mode(page_as_superuser_for_backend)
         page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first.click(modifiers=["Shift"])
         page_as_superuser_for_backend.locator(".lt-action-bar__activate").click()
         expect(page_as_superuser_for_backend.locator(".lt-action-bar__confirm")).to_be_visible()
@@ -183,6 +198,7 @@ class TestBulkActivate:
             {"en": False},
         )
         enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        activate_edit_mode(page_as_superuser_for_backend)
         span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         expect(span).to_have_class(re.compile(r"lt-preview"))
         span.click(modifiers=["Shift"])
@@ -214,6 +230,7 @@ class TestBulkActivate:
             {"en": False, "cs": False},
         )
         enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        activate_edit_mode(page_as_superuser_for_backend)
         page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first.click(modifiers=["Shift"])
         page_as_superuser_for_backend.locator(".lt-action-bar__activate").click()
         page_as_superuser_for_backend.locator(".lt-action-bar__confirm").click()
@@ -257,6 +274,7 @@ class TestBulkActivate:
             {"en": False},
         )
         enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        activate_edit_mode(page_as_superuser_for_backend)
         # about.heading has no inactive override — shift+click should open modal
         non_preview_span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="about.heading"]').first
         expect(non_preview_span).not_to_have_class(re.compile(r"lt-preview"))
@@ -282,6 +300,7 @@ class TestBulkActivate:
             {"en": False},
         )
         enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        activate_edit_mode(page_as_superuser_for_backend)
         span = page_as_superuser_for_backend.locator('lt-t[data-lt-msgid="demo.title"]').first
         span.click(modifiers=["Shift"])
         action_bar = page_as_superuser_for_backend.locator(".lt-action-bar")
@@ -306,6 +325,7 @@ class TestBulkActivate:
             {"en": False},
         )
         enable_preview(page_as_superuser_for_backend, base_url_for_backend)
+        activate_edit_mode(page_as_superuser_for_backend)
         attr_el = page_as_superuser_for_backend.locator('[data-lt-attrs*="attrs.tooltip_trans"]').first
         expect(attr_el).to_have_class(re.compile(r"lt-preview"))
         attr_el.click(modifiers=["Shift"])
