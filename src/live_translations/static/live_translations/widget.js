@@ -1474,6 +1474,7 @@
 
     _renderEditorTabs();
     _renderEditorPanels();
+    _updateTabIndicators();
   }
 
   /**
