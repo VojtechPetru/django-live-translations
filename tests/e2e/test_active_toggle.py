@@ -1,5 +1,7 @@
 """E2E tests for the active toggle — visibility, state, labels, and tab indicators."""
 
+import re
+
 from helpers import api_restore_po_default, api_save, check_active_toggle, open_modal, wait_for_fields_loaded
 from playwright.sync_api import Page, expect
 
@@ -76,9 +78,8 @@ class TestActiveToggle:
         # Toggle to inactive (uncheck) — should mark the tab as dirty/inactive-override
         expect(toggle_input).not_to_be_checked()
         en_tab = page_as_superuser.locator('.lt-editor__tab[data-lang="en"]')
-        # The dirty dot inside the tab should be visible since text differs from loaded value
-        dirty_dot = en_tab.locator('[data-role="dirty"]')
-        expect(dirty_dot).to_be_visible()
+        # The tab should have a dirty indicator (left border) since text differs from loaded value
+        expect(en_tab).to_have_class(re.compile(r"lt-editor__tab--status-dirty"))
 
     def test_toggle_resets_when_text_reverted_to_default(self, page_as_superuser: Page) -> None:
         open_modal(page_as_superuser, "demo.title")

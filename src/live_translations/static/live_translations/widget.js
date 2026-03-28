@@ -1499,19 +1499,6 @@
         pill.type = "button";
         pill.className = "lt-editor__tab" + (_editLang === lang ? " lt-editor__tab--active" : "") + (!_isEditable(lang) ? " lt-editor__tab--readonly" : "");
 
-        // Leading dot (inactive override / marked for deletion)
-        const leadDot = document.createElement("span");
-        leadDot.className = "lt-editor__dot";
-        leadDot.dataset.role = "status";
-        if (entry.has_override && entry.is_active === false) {
-          leadDot.classList.add("lt-editor__dot--inactive");
-          leadDot.dataset.tip = "Inactive override";
-        } else {
-          leadDot.style.display = "none";
-        }
-        pill.appendChild(leadDot);
-
-        // Label text
         const label = document.createTextNode(langLabel(lang));
         pill.appendChild(label);
 
@@ -1522,13 +1509,6 @@
           draftBadge.textContent = "Draft";
           pill.appendChild(draftBadge);
         }
-
-        // Trailing dot (unsaved changes)
-        const trailDot = document.createElement("span");
-        trailDot.className = "lt-editor__dot";
-        trailDot.dataset.role = "dirty";
-        trailDot.style.display = "none";
-        pill.appendChild(trailDot);
 
         pill.dataset.lang = lang;
         pill.addEventListener("click", function () {
@@ -1561,7 +1541,7 @@
     }
 
     _renderEditorPanels();
-    _updateTabDirtyDots();
+    _updateTabIndicators();
   }
 
   /**
@@ -1610,11 +1590,11 @@
   }
 
   /**
-   * Update the dirty-dot and inactive-override indicators on each language tab.
+   * Update left-border status indicators and tooltips on each language tab.
    * Reads the current textarea/toggle for `_editLang` live (without persisting).
    * @returns {void}
    */
-  function _updateTabDirtyDots() {
+  function _updateTabIndicators() {
     if (!dialog || LANGUAGES.length <= 1) return;
     const tabs = dialog.querySelectorAll(".lt-editor__tab");
     for (let i = 0; i < tabs.length; i++) {
@@ -1641,37 +1621,20 @@
         dirty = _isLangDirty(lang);
         activeNow = _editedActiveFlags[lang] !== undefined ? _editedActiveFlags[lang] : ACTIVE_BY_DEFAULT;
       }
-      // Trailing dot: unsaved changes
-      const trailDot = tabs[i].querySelector('[data-role="dirty"]');
-      if (trailDot) {
-        if (dirty) {
-          trailDot.classList.add("lt-editor__dot--dirty");
-          trailDot.dataset.tip = "Unsaved changes";
-          trailDot.style.display = "";
-        } else {
-          trailDot.classList.remove("lt-editor__dot--dirty");
-          delete trailDot.dataset.tip;
-          trailDot.style.display = "none";
-        }
-      }
-      // Leading dot: deletion (red) supersedes inactive override (amber)
-      const leadDot = tabs[i].querySelector('[data-role="status"]');
-      if (leadDot) {
-        leadDot.classList.remove("lt-editor__dot--delete", "lt-editor__dot--inactive");
-        if (markedForDelete) {
-          leadDot.classList.add("lt-editor__dot--delete");
-          leadDot.dataset.tip = "Marked for deletion";
-          leadDot.style.display = "";
-        } else {
-          const entry = (_editData && _editData.translations[lang]) || {};
-          if (entry.has_override && !activeNow) {
-            leadDot.classList.add("lt-editor__dot--inactive");
-            leadDot.dataset.tip = "Inactive override";
-            leadDot.style.display = "";
-          } else {
-            delete leadDot.dataset.tip;
-            leadDot.style.display = "none";
-          }
+      // Priority: delete > dirty > inactive
+      tabs[i].classList.remove("lt-editor__tab--status-dirty", "lt-editor__tab--status-inactive", "lt-editor__tab--status-delete");
+      delete tabs[i].dataset.tooltip;
+      if (markedForDelete) {
+        tabs[i].classList.add("lt-editor__tab--status-delete");
+        tabs[i].dataset.tooltip = "Marked for deletion";
+      } else if (dirty) {
+        tabs[i].classList.add("lt-editor__tab--status-dirty");
+        tabs[i].dataset.tooltip = "Unsaved changes";
+      } else {
+        const entry = (_editData && _editData.translations[lang]) || {};
+        if (entry.has_override && !activeNow) {
+          tabs[i].classList.add("lt-editor__tab--status-inactive");
+          tabs[i].dataset.tooltip = "Inactive override";
         }
       }
     }
@@ -1842,7 +1805,7 @@
         ta.addEventListener("input", function () {
           this.style.height = "auto";
           this.style.height = this.scrollHeight + "px";
-          _updateTabDirtyDots();
+          _updateTabIndicators();
           // Reset HTML warning override so the next Save re-validates
           if (_htmlWarningAcked) {
             _htmlWarningAcked = false;
@@ -1901,7 +1864,7 @@
 
     checkbox.addEventListener("change", function () {
       toggleLabelEl.textContent = checkbox.checked ? "Active" : "Inactive";
-      _updateTabDirtyDots();
+      _updateTabIndicators();
     });
 
     toggleWrap.title = "Inactive overrides are saved but won\u2019t take effect until activated.";
@@ -2016,7 +1979,7 @@
       _deletionsMarked[lang] = true;
     }
     _renderEditorPanels();
-    _updateTabDirtyDots();
+    _updateTabIndicators();
   }
 
   /**

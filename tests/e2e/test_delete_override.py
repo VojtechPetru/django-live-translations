@@ -123,7 +123,7 @@ class TestDeleteOverride:
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
 
-    def test_marked_deletion_shows_red_dot_on_tab(
+    def test_marked_deletion_shows_delete_indicator_on_tab(
         self, page_as_superuser_for_backend: Page, backend_id: str, base_url_for_backend: str
     ) -> None:
         api_save(
@@ -140,9 +140,7 @@ class TestDeleteOverride:
         delete_btn = page_as_superuser_for_backend.locator(".lt-btn--delete-override")
         delete_btn.click()
         en_tab = page_as_superuser_for_backend.locator('.lt-editor__tab[data-lang="en"]')
-        status_dot = en_tab.locator('[data-role="status"]')
-        expect(status_dot).to_be_visible()
-        expect(status_dot).to_have_class(re.compile(r"lt-editor__dot--delete"))
+        expect(en_tab).to_have_class(re.compile(r"lt-editor__tab--status-delete"))
         api_delete(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
         api_restore_po_default(page_as_superuser_for_backend, base_url_for_backend, "demo.title", ["en"])
 
