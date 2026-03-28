@@ -2922,7 +2922,7 @@
     } else {
       document.cookie = "lt_preview=1; path=/; max-age=86400; SameSite=Lax";
     }
-    window.location.reload();
+    _reloadPage();
   }
 
   // ─── Keyboard Handler ───────────────────────────────
@@ -3016,11 +3016,9 @@
       }
     } catch (e) { /* private browsing / quota */ }
 
-    // Preview mode auto-activation
+    // Preview mode initialization (independent of edit mode)
     if (PREVIEW) {
-      if (state === "inactive") {
-        activateEditMode();
-      }
+      document.body.classList.add("lt-preview-mode");
       _initPreviewMode();
     }
   });

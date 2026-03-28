@@ -1047,28 +1047,28 @@
 
 /* ── Preview Mode: Inactive Translation Indicators ───── */
 
-.lt-edit-mode lt-t.lt-preview {
+.lt-edit-mode.lt-preview-mode lt-t.lt-preview {
   outline: 2px dashed rgba(245, 158, 11, 0.6);
 }
 
-.lt-edit-mode lt-t.lt-preview:hover {
+.lt-edit-mode.lt-preview-mode lt-t.lt-preview:hover {
   outline-color: rgba(245, 158, 11, 1);
   background-color: rgba(245, 158, 11, 0.08);
 }
 
-.lt-edit-mode [data-lt-attrs].lt-preview {
+.lt-edit-mode.lt-preview-mode [data-lt-attrs].lt-preview {
   outline: 2px solid rgba(245, 158, 11, 0.5);
 }
 
-.lt-edit-mode [data-lt-attrs].lt-preview:hover {
+.lt-edit-mode.lt-preview-mode [data-lt-attrs].lt-preview:hover {
   outline-color: rgba(245, 158, 11, 1);
   background-color: rgba(245, 158, 11, 0.08);
 }
 
 /* ── Preview Mode: Selected State ────────────────────── */
 
-.lt-edit-mode lt-t.lt-selected,
-.lt-edit-mode [data-lt-attrs].lt-selected {
+.lt-edit-mode.lt-preview-mode lt-t.lt-selected,
+.lt-edit-mode.lt-preview-mode [data-lt-attrs].lt-selected {
   outline: 2px solid rgba(245, 158, 11, 1);
   background-color: rgba(245, 158, 11, 0.12);
 }
