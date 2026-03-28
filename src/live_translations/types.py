@@ -7,6 +7,7 @@ if t.TYPE_CHECKING:
 
 __all__ = [
     "BulkActivateResult",
+    "ClientConfig",
     "DbOverride",
     "DeleteResult",
     "DiffSegment",
@@ -19,9 +20,11 @@ __all__ = [
     "PermissionCheck",
     "PermissionResult",
     "PluralForms",
+    "PreviewItem",
     "SaveResult",
     "StringId",
     "StringTable",
+    "StringTableEntry",
     "TranslationInfo",
     "TranslationsResult",
     "is_plural_key",
@@ -62,13 +65,42 @@ class _StringTableEntryRequired(t.TypedDict):
 
 
 class StringTableEntry(_StringTableEntryRequired, total=False):
-    """Single entry in the JSON string table injected as ``window.__LT_STRINGS__``."""
+    """Single entry in the string table delivered via ``<template data-lt-strings>``."""
 
     p: str  # msgid_plural, only present for plural entries
 
 
-type StringTable = dict[int, StringTableEntry]
+type StringTable = dict[StringId, StringTableEntry]
 """Maps StringId to {m, c[, p]}. Serialized to JSON for the frontend."""
+
+
+class PreviewItem(t.TypedDict, total=False):
+    """A preview entry identifying a translation by msgid, context, and optional plural."""
+
+    m: t.Required[str]
+    c: t.Required[str]
+    p: str
+
+
+class _ClientConfigRequired(t.TypedDict):
+    apiBase: str
+    languages: list[LanguageCode]
+    draftLanguages: list[LanguageCode]
+    currentLanguage: str
+    csrfToken: str
+    activeByDefault: bool
+    shortcutEdit: str
+    shortcutPreview: str
+    nplurals: dict[str, int]
+    pluralHints: dict[str, list[list[str]]]
+
+
+class ClientConfig(_ClientConfigRequired, total=False):
+    """Configuration object delivered to the frontend via ``<template data-lt-config>``."""
+
+    editableLanguages: list[LanguageCode]
+    preview: bool
+    previewEntries: list[PreviewItem]
 
 
 class DbOverride(t.NamedTuple):

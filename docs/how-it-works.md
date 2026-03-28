@@ -79,8 +79,10 @@ These characters are invisible in rendered HTML and survive Django's autoescapin
 **Asset injection**: for HTML responses from authorized users, the middleware injects before `</body>`:
 
 - A `<link>` tag for the widget CSS
-- An inline `<script>` containing `window.__LT_CONFIG__` (API base URL, CSRF token, languages, shortcuts) and `window.__LT_STRINGS__` (the per-request string registry mapping marker IDs to msgid/context)
+- A `<template>` element carrying `data-lt-config` (API base URL, CSRF token, languages, shortcuts) and `data-lt-strings` (the per-request string registry mapping marker IDs to msgid/context) as HTML-escaped JSON attributes
 - A `<script>` tag for the widget JavaScript
+
+For partial HTML responses (no `</body>`, e.g. htmx partials), only a `<template data-lt-strings>` element is appended so the client can resolve markers in dynamically swapped content.
 
 **Marker stripping**: for non-HTML responses, ZWC markers are removed to prevent leaking into API consumers.
 
@@ -110,7 +112,7 @@ The widget is a single vanilla JavaScript file (~2500 lines, zero dependencies) 
 
 1. Walks the DOM looking for ZWC boundary characters (`U+FEFF`)
 2. Decodes the 16-bit ID from the marker sequence
-3. Looks up the msgid and context in `window.__LT_STRINGS__`
+3. Looks up the msgid and context in the string table (read from `<template data-lt-strings>`)
 4. Strips markers and wraps text nodes in `<lt-t>` custom elements
 
 `<lt-t>` is an unknown HTML element that browsers treat as an inline span, with no default styling or shadow DOM. All widget CSS classes are prefixed `.lt-` to avoid conflicts with the host page.

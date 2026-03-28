@@ -7,6 +7,7 @@ Responsibilities:
 4. Strip ZWC markers from non-HTML responses (JSON APIs, etc.).
 """
 
+import html as html_mod
 import json
 import re
 import typing as t
@@ -18,11 +19,20 @@ import django.urls
 import django.utils.translation
 
 from live_translations import conf, plurals, strings, views
-from live_translations.types import LanguageCode, OverrideMap, StringTable, StringTableEntry
+from live_translations.types import ClientConfig, LanguageCode, OverrideMap, PreviewItem, StringTable, StringTableEntry
 
 __all__ = ["LiveTranslationsMiddleware"]
 
 _ZWC_RE: t.Final[re.Pattern[str]] = re.compile(r"\uFEFF[\u200B\u200C]{16}\uFEFF")
+
+
+def _json_attr(obj: t.Any) -> str:
+    """Serialize *obj* to compact JSON and HTML-escape for use in an attribute value."""
+    return html_mod.escape(json.dumps(obj, separators=(",", ":")), quote=True)
+
+
+_ATTR_CONFIG: t.Final[str] = "data-lt-config"
+_ATTR_STRINGS: t.Final[str] = "data-lt-strings"
 
 _DRAFT_LANG_COOKIE: t.Final[str] = "lt_lang"
 _DRAFT_LANG_ATTR: t.Final[str] = "_lt_draft_lang"
@@ -184,6 +194,28 @@ class LiveTranslationsMiddleware:
         if "Content-Length" in response:
             response["Content-Length"] = len(response.content)
 
+    @staticmethod
+    def _build_string_table() -> StringTable:
+        """Serialize the per-request string registry into a client-side string table."""
+        registry = strings.get_string_registry()
+        table: StringTable = {}
+        for i, key in enumerate(registry):
+            entry: StringTableEntry = {"m": key.msgid, "c": key.context}
+            if key.msgid_plural:
+                entry["p"] = key.msgid_plural
+            table[i] = entry
+        return table
+
+    def _build_string_table_tag(self) -> str:
+        """Build a ``<template data-lt-strings="...">`` tag for the current request's strings.
+
+        Returns an empty string when no translations were registered.
+        """
+        table = self._build_string_table()
+        if not table:
+            return ""
+        return f'<template {_ATTR_STRINGS}="{_json_attr(table)}"></template>'
+
     def _inject_assets(
         self,
         request: django.http.HttpRequest,
@@ -196,78 +228,58 @@ class LiveTranslationsMiddleware:
 
         body_close_idx = content.rfind("</body>")
         if body_close_idx == -1:
+            # Partial HTML response (no </body>) — inject only the string table
+            # so client-side JS can resolve ZWC markers after dynamic content swaps.
+            tag = self._build_string_table_tag()
+            if tag:
+                response.content = (content + tag).encode(response.charset)
+                if "Content-Length" in response:
+                    response["Content-Length"] = len(response.content)
             return
 
         settings = conf.get_settings()
-        languages_json = ",".join(f'"{lang}"' for lang in settings.languages)
-        draft_languages_json = ",".join(f'"{lang}"' for lang in settings.draft_languages)
         current_language = django.utils.translation.get_language() or ""
         csrf_token = django.middleware.csrf.get_token(request)
 
-        css_url = django.templatetags.static.static("live_translations/widget.css")
-        js_url = django.templatetags.static.static("live_translations/widget.js")
+        config: ClientConfig = {
+            "apiBase": conf.API_PREFIX,
+            "languages": list(settings.languages),
+            "draftLanguages": list(settings.draft_languages),
+            "currentLanguage": current_language,
+            "csrfToken": csrf_token,
+            "activeByDefault": settings.translation_active_by_default,
+            "shortcutEdit": settings.shortcut_edit,
+            "shortcutPreview": settings.shortcut_preview,
+            "nplurals": conf.get_nplurals(),
+            "pluralHints": {
+                lang: [list(h) for h in lang_hints] for lang, lang_hints in plurals.get_plural_hints().items()
+            },
+        }
 
-        active_by_default = "true" if settings.translation_active_by_default else "false"
+        if editable_languages is not None and editable_languages != set(settings.languages):
+            config["editableLanguages"] = [lang for lang in settings.languages if lang in editable_languages]
 
-        # nplurals per language for plural editing UI
-        nplurals = conf.get_nplurals()
-        nplurals_json = json.dumps(nplurals, separators=(",", ":"))
-
-        # Plural form hints (CLDR category names + example numbers)
-        plural_hints = plurals.get_plural_hints()
-        plural_hints_json = json.dumps(
-            {lang: [list(h) for h in lang_hints] for lang, lang_hints in plural_hints.items()},
-            separators=(",", ":"),
-        )
-
-        preview_config = ""
         if preview_entries is not None:
-            preview_items = []
+            config["preview"] = True
+            preview_items: list[PreviewItem] = []
             for key in preview_entries:
-                item: dict[str, str] = {"m": key.msgid, "c": key.context}
+                item = PreviewItem(m=key.msgid, c=key.context)
                 if key.msgid_plural:
                     item["p"] = key.msgid_plural
                 preview_items.append(item)
-            entries_json = json.dumps(preview_items, separators=(",", ":"))
-            preview_config = f",preview:true,previewEntries:{entries_json}"
+            config["previewEntries"] = preview_items
 
-        editable_config = ""
-        if editable_languages is not None and editable_languages != set(settings.languages):
-            # Emit in the same order as settings.languages for deterministic output
-            ordered = [lang for lang in settings.languages if lang in editable_languages]
-            editable_json = ",".join(f'"{lang}"' for lang in ordered)
-            editable_config = f",editableLanguages:[{editable_json}]"
+        # Build single <template> with config and (optionally) strings
+        template_attrs = f'{_ATTR_CONFIG}="{_json_attr(config)}"'
+        table = self._build_string_table()
+        if table:
+            template_attrs += f' {_ATTR_STRINGS}="{_json_attr(table)}"'
 
-        shortcut_edit_js = json.dumps(settings.shortcut_edit)
-        shortcut_preview_js = json.dumps(settings.shortcut_preview)
-
-        # Serialize the per-request string registry for client-side marker resolution
-        registry = strings.get_string_registry()
-        table: StringTable = {}
-        for i, key in enumerate(registry):
-            entry: StringTableEntry = {"m": key.msgid, "c": key.context}
-            if key.msgid_plural:
-                entry["p"] = key.msgid_plural
-            table[i] = entry
-        strings_json = json.dumps(table, separators=(",", ":"))
-
+        css_url = django.templatetags.static.static("live_translations/widget.css")
+        js_url = django.templatetags.static.static("live_translations/widget.js")
         snippet = (
             f'<link rel="stylesheet" href="{css_url}">'
-            "<script>"
-            f"window.__LT_CONFIG__={{apiBase:'{conf.API_PREFIX}',"
-            f"languages:[{languages_json}],"
-            f"draftLanguages:[{draft_languages_json}],"
-            f"currentLanguage:'{current_language}',"
-            f"csrfToken:'{csrf_token}',"
-            f"activeByDefault:{active_by_default},"
-            f"shortcutEdit:{shortcut_edit_js},"
-            f"shortcutPreview:{shortcut_preview_js},"
-            f"nplurals:{nplurals_json},"
-            f"pluralHints:{plural_hints_json}"
-            f"{editable_config}"
-            f"{preview_config}}};"
-            f"window.__LT_STRINGS__={strings_json};"
-            "</script>"
+            f"<template {template_attrs}></template>"
             f'<script src="{js_url}"></script>'
         )
 

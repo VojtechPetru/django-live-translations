@@ -163,6 +163,16 @@ def uncheck_active_toggle(page: Page, lang: str = "en") -> None:
 
 
 # ---------------------------------------------------------------------------
+# CSRF
+# ---------------------------------------------------------------------------
+
+
+def get_csrf_token(page: Page) -> str:
+    """Read the CSRF token from the browser's ``csrftoken`` cookie."""
+    return page.evaluate("() => (document.cookie.match(/csrftoken=([^;]+)/)||[])[1] || ''")
+
+
+# ---------------------------------------------------------------------------
 # API wrappers
 # ---------------------------------------------------------------------------
 
@@ -199,7 +209,7 @@ def api_save(
     Translations can be plain strings (auto-wrapped to ``{"0": value}``)
     or already in PluralForms format (``{"0": "one", "1": "many"}``).
     """
-    csrf = page.evaluate("() => window.__LT_CONFIG__?.csrfToken || ''")
+    csrf = get_csrf_token(page)
     wrapped: dict[str, dict[str, str]] = {
         lang: {"0": value} if isinstance(value, str) else value for lang, value in translations.items()
     }
@@ -233,7 +243,7 @@ def api_delete(
     page_language: str = "en",
 ) -> dict:
     """Delete a translation override via the API directly (for test setup)."""
-    csrf = page.evaluate("() => window.__LT_CONFIG__?.csrfToken || ''")
+    csrf = get_csrf_token(page)
     body: dict = {
         "msgid": msgid,
         "context": context,
@@ -251,6 +261,27 @@ def api_delete(
         },
     )
     return response.json()
+
+
+def wait_for_htmx_swap(page: Page, target_selector: str, *, timeout: int = 5000) -> None:
+    """Wait for an htmx outerHTML swap to complete and markers to be resolved.
+
+    Marks the current element with a data attribute, then waits for a new element
+    (without the mark) that has resolved ``<lt-t>`` children.  This avoids the race
+    condition where ``wait_for_selector`` can match pre-swap elements.
+    """
+    page.evaluate(
+        "(sel) => { const el = document.querySelector(sel); if (el) el.dataset.ltPreSwap = '1'; }",
+        target_selector,
+    )
+    page.wait_for_function(
+        """(sel) => {
+            const el = document.querySelector(sel);
+            return el && !el.dataset.ltPreSwap && el.querySelectorAll('lt-t').length > 0;
+        }""",
+        arg=target_selector,
+        timeout=timeout,
+    )
 
 
 def api_restore_po_default(

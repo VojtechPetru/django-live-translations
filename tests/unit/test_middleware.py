@@ -1,6 +1,8 @@
 """Tests for the LiveTranslationsMiddleware."""
 
+import html as html_mod
 import json
+import re
 import typing as t
 import unittest.mock
 
@@ -11,6 +13,14 @@ import pytest
 from live_translations import conf, strings
 from live_translations.middleware import _DRAFT_LANG_ATTR, _DRAFT_LANG_COOKIE, _ZWC_RE, LiveTranslationsMiddleware
 from live_translations.types import LanguageCode, MsgKey, OverrideMap
+
+
+def _extract_template_attr(content: str, attr_name: str) -> dict[str, t.Any]:
+    """Extract and parse a JSON data attribute from a <template> element in HTML content."""
+    pattern = rf'{attr_name}="([^"]*)"'
+    match = re.search(pattern, content)
+    assert match is not None, f"Attribute {attr_name} not found in content"
+    return json.loads(html_mod.unescape(match.group(1)))
 
 
 def _html_response(
@@ -168,7 +178,7 @@ class TestHandleRequest:
 
         assert response is inner_response
         # No snippet injected into admin responses
-        assert b"__LT_CONFIG__" not in response.content
+        assert b"data-lt-config" not in response.content
 
     def test_inactive_user_returns_unmodified_response(self, make_request, settings):
         inner_response = _html_response("<html><body>Page</body></html>")
@@ -181,7 +191,7 @@ class TestHandleRequest:
         response = mw(request)
 
         assert response is inner_response
-        assert b"__LT_CONFIG__" not in response.content
+        assert b"data-lt-config" not in response.content
 
     def test_active_user_html_gets_assets_injected(self, make_request, settings):
         inner_response = _html_response("<html><body>Page</body></html>")
@@ -193,7 +203,7 @@ class TestHandleRequest:
         request = make_request("get", "/page/")
         response = mw(request)
 
-        assert b"__LT_CONFIG__" in response.content
+        assert b"data-lt-config" in response.content
         assert b"</body>" in response.content
 
     def test_json_response_strips_zwc_when_active(self, make_request, settings):
@@ -222,10 +232,10 @@ class TestHandleRequest:
         request = make_request("get", "/page/")
         response = mw(request)
 
-        # Streaming responses should NOT have assets injected (no __LT_CONFIG__)
+        # Streaming responses should NOT have assets injected (no data-lt-config)
         assert isinstance(response, django.http.StreamingHttpResponse)
         content = b"".join(response.streaming_content).decode()  # type: ignore[bad-argument-type]
-        assert "__LT_CONFIG__" not in content
+        assert "data-lt-config" not in content
         assert isinstance(response, django.http.StreamingHttpResponse)
 
     def test_resets_string_registry_after_response(self, make_request, settings):
@@ -297,9 +307,9 @@ class TestHandleRequest:
             request.COOKIES["lt_preview"] = "1"
             response = mw(request)
 
-        content = response.content.decode()
-        assert "preview:true" in content
-        assert "previewEntries:" in content
+        config = _extract_template_attr(response.content.decode(), "data-lt-config")
+        assert config["preview"] is True
+        assert isinstance(config["previewEntries"], list)
 
     def test_preview_mode_resets_contextvar(self, make_request, settings):
         inner = lambda r: _html_response()  # noqa: E731
@@ -474,7 +484,7 @@ class TestInjectAssets:
         content = response.content.decode()
         # Snippet should appear before </body>
         body_idx = content.rfind("</body>")
-        config_idx = content.find("__LT_CONFIG__")
+        config_idx = content.find("data-lt-config")
         assert config_idx != -1
         assert config_idx < body_idx
 
@@ -495,8 +505,9 @@ class TestInjectAssets:
         _clear_caches()
         mw._inject_assets(make_request("get", "/page/"), response)
 
-        content = response.content.decode()
-        assert "csrfToken:'" in content
+        config = _extract_template_attr(response.content.decode(), "data-lt-config")
+        assert "csrfToken" in config
+        assert isinstance(config["csrfToken"], str)
 
     def test_includes_languages(self, make_request, settings):
         response = _html_response("<html><body>X</body></html>")
@@ -506,8 +517,8 @@ class TestInjectAssets:
         _clear_caches()
         mw._inject_assets(make_request("get", "/page/"), response)
 
-        content = response.content.decode()
-        assert 'languages:["en","de","fr"]' in content
+        config = _extract_template_attr(response.content.decode(), "data-lt-config")
+        assert config["languages"] == ["en", "de", "fr"]
 
     def test_includes_api_base(self, make_request, settings):
         response = _html_response("<html><body>X</body></html>")
@@ -517,8 +528,8 @@ class TestInjectAssets:
         _clear_caches()
         mw._inject_assets(make_request("get", "/page/"), response)
 
-        content = response.content.decode()
-        assert "apiBase:'/__live-translations__'" in content
+        config = _extract_template_attr(response.content.decode(), "data-lt-config")
+        assert config["apiBase"] == "/__live-translations__"
 
     def test_includes_static_urls(self, make_request, settings):
         response = _html_response("<html><body>X</body></html>")
@@ -540,8 +551,8 @@ class TestInjectAssets:
         _clear_caches()
         mw._inject_assets(make_request("get", "/page/"), response)
 
-        content = response.content.decode()
-        assert "activeByDefault:true" in content
+        config = _extract_template_attr(response.content.decode(), "data-lt-config")
+        assert config["activeByDefault"] is True
 
     def test_active_by_default_false(self, make_request, settings):
         response = _html_response("<html><body>X</body></html>")
@@ -551,8 +562,8 @@ class TestInjectAssets:
         _clear_caches()
         mw._inject_assets(make_request("get", "/page/"), response)
 
-        content = response.content.decode()
-        assert "activeByDefault:false" in content
+        config = _extract_template_attr(response.content.decode(), "data-lt-config")
+        assert config["activeByDefault"] is False
 
     def test_preview_entries_included(self, make_request, settings):
         response = _html_response("<html><body>X</body></html>")
@@ -563,9 +574,9 @@ class TestInjectAssets:
         _clear_caches()
         mw._inject_assets(make_request("get", "/page/"), response, preview_entries=preview)
 
-        content = response.content.decode()
-        assert "preview:true" in content
-        assert "previewEntries:" in content
+        config = _extract_template_attr(response.content.decode(), "data-lt-config")
+        assert config["preview"] is True
+        assert isinstance(config["previewEntries"], list)
 
     def test_no_preview_entries_when_none(self, make_request, settings):
         response = _html_response("<html><body>X</body></html>")
@@ -616,11 +627,8 @@ class TestInjectAssets:
         mw._inject_assets(make_request("get", "/page/"), response)
 
         content = response.content.decode()
-        assert "__LT_STRINGS__=" in content
-        # Extract the JSON portion
-        start = content.index("__LT_STRINGS__=") + len("__LT_STRINGS__=")
-        end = content.index(";", start)
-        table = json.loads(content[start:end])
+        assert "data-lt-strings=" in content
+        table = _extract_template_attr(content, "data-lt-strings")
         assert table["0"]["m"] == "hello"
         assert table["0"]["c"] == ""
         assert table["1"]["m"] == "bye"
@@ -634,9 +642,91 @@ class TestInjectAssets:
         _clear_caches()
         mw._inject_assets(make_request("get", "/page/"), response)
 
+        config = _extract_template_attr(response.content.decode(), "data-lt-config")
+        assert config["shortcutEdit"] == "ctrl+e"
+        assert config["shortcutPreview"] == "ctrl+p"
+
+
+class TestInjectPartialStrings:
+    """Tests for partial HTML responses (no </body> tag)."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self) -> t.Generator[None, None, None]:
+        strings.reset_string_registry()
+        yield
+        strings.reset_string_registry()
+
+    def test_partial_injects_template_when_strings_present(self, make_request: t.Any, settings: t.Any) -> None:
+        strings.register_string(MsgKey("hello", ""))
+        response = django.http.HttpResponse("<div>Partial</div>", content_type="text/html")
+        mw = LiveTranslationsMiddleware(lambda r: response)
+
+        settings.LIVE_TRANSLATIONS = _middleware_settings()
+        _clear_caches()
+        mw._inject_assets(make_request("get", "/page/"), response)
+
         content = response.content.decode()
-        assert 'shortcutEdit:"ctrl+e"' in content
-        assert 'shortcutPreview:"ctrl+p"' in content
+        assert "<template data-lt-strings=" in content
+        table = _extract_template_attr(content, "data-lt-strings")
+        assert table["0"]["m"] == "hello"
+
+    def test_partial_no_template_when_empty_registry(self, make_request: t.Any) -> None:
+        response = django.http.HttpResponse("<div>Partial</div>", content_type="text/html")
+        original_content = response.content
+        mw = LiveTranslationsMiddleware(lambda r: response)
+
+        mw._inject_assets(make_request("get", "/page/"), response)
+
+        assert response.content == original_content
+
+    def test_partial_updates_content_length(self, make_request: t.Any, settings: t.Any) -> None:
+        strings.register_string(MsgKey("test", ""))
+        response = django.http.HttpResponse("<div>X</div>", content_type="text/html")
+        response["Content-Length"] = len(response.content)
+        original_length = int(response["Content-Length"])
+        mw = LiveTranslationsMiddleware(lambda r: response)
+
+        settings.LIVE_TRANSLATIONS = _middleware_settings()
+        _clear_caches()
+        mw._inject_assets(make_request("get", "/page/"), response)
+
+        assert int(response["Content-Length"]) > original_length
+
+    def test_partial_preserves_original_content(self, make_request: t.Any, settings: t.Any) -> None:
+        strings.register_string(MsgKey("hello", ""))
+        response = django.http.HttpResponse("<div>Original</div>", content_type="text/html")
+        mw = LiveTranslationsMiddleware(lambda r: response)
+
+        settings.LIVE_TRANSLATIONS = _middleware_settings()
+        _clear_caches()
+        mw._inject_assets(make_request("get", "/page/"), response)
+
+        content = response.content.decode()
+        assert content.startswith("<div>Original</div>")
+
+    def test_partial_includes_plural_entries(self, make_request: t.Any, settings: t.Any) -> None:
+        strings.register_string(MsgKey("one item", "", "many items"))
+        response = django.http.HttpResponse("<p>Content</p>", content_type="text/html")
+        mw = LiveTranslationsMiddleware(lambda r: response)
+
+        settings.LIVE_TRANSLATIONS = _middleware_settings()
+        _clear_caches()
+        mw._inject_assets(make_request("get", "/page/"), response)
+
+        table = _extract_template_attr(response.content.decode(), "data-lt-strings")
+        assert table["0"]["p"] == "many items"
+
+    def test_partial_has_no_config(self, make_request: t.Any, settings: t.Any) -> None:
+        strings.register_string(MsgKey("hello", ""))
+        response = django.http.HttpResponse("<div>Partial</div>", content_type="text/html")
+        mw = LiveTranslationsMiddleware(lambda r: response)
+
+        settings.LIVE_TRANSLATIONS = _middleware_settings()
+        _clear_caches()
+        mw._inject_assets(make_request("get", "/page/"), response)
+
+        content = response.content.decode()
+        assert "data-lt-config" not in content
 
 
 @pytest.mark.django_db
@@ -980,8 +1070,8 @@ class TestDraftLanguageOverride:
         _clear_caches()
         mw._inject_assets(make_request("get", "/page/"), response)
 
-        content = response.content.decode()
-        assert 'draftLanguages:["xx"]' in content
+        config = _extract_template_attr(response.content.decode(), "data-lt-config")
+        assert config["draftLanguages"] == ["xx"]
 
     def test_config_empty_draft_languages(self, make_request, settings):
         response = _html_response("<html><body>X</body></html>")
@@ -992,8 +1082,8 @@ class TestDraftLanguageOverride:
         _clear_caches()
         mw._inject_assets(make_request("get", "/page/"), response)
 
-        content = response.content.decode()
-        assert "draftLanguages:[]" in content
+        config = _extract_template_attr(response.content.decode(), "data-lt-config")
+        assert config["draftLanguages"] == []
 
     def test_config_includes_current_language(self, make_request, settings):
         response = _html_response("<html><body>X</body></html>")
@@ -1005,8 +1095,8 @@ class TestDraftLanguageOverride:
         with django.utils.translation.override("cs"):
             mw._inject_assets(make_request("get", "/page/"), response)
 
-        content = response.content.decode()
-        assert "currentLanguage:'cs'" in content
+        config = _extract_template_attr(response.content.decode(), "data-lt-config")
+        assert config["currentLanguage"] == "cs"
 
     def test_current_language_reflects_draft_after_process_view(self, make_request, settings):
         """After process_view activates draft language, _inject_assets uses it for currentLanguage."""
@@ -1020,13 +1110,13 @@ class TestDraftLanguageOverride:
         django.utils.translation.activate("xx")
         mw._inject_assets(make_request("get", "/page/"), response)
 
-        content = response.content.decode()
-        assert "currentLanguage:'xx'" in content
+        config = _extract_template_attr(response.content.decode(), "data-lt-config")
+        assert config["currentLanguage"] == "xx"
 
 
 @pytest.mark.django_db
 class TestPerLanguageConfig:
-    """editableLanguages in __LT_CONFIG__."""
+    """editableLanguages in data-lt-config."""
 
     def test_full_permission_omits_editable_languages(self, make_request, settings):
         response = _html_response("<html><body>X</body></html>")
@@ -1036,8 +1126,8 @@ class TestPerLanguageConfig:
         _clear_caches()
         mw._inject_assets(make_request("get", "/page/"), response, editable_languages={"en", "cs"})
 
-        content = response.content.decode()
-        assert "editableLanguages" not in content
+        config = _extract_template_attr(response.content.decode(), "data-lt-config")
+        assert "editableLanguages" not in config
 
     def test_partial_permission_includes_editable_languages(self, make_request, settings):
         response = _html_response("<html><body>X</body></html>")
@@ -1047,8 +1137,8 @@ class TestPerLanguageConfig:
         _clear_caches()
         mw._inject_assets(make_request("get", "/page/"), response, editable_languages={"en"})
 
-        content = response.content.decode()
-        assert 'editableLanguages:["en"]' in content
+        config = _extract_template_attr(response.content.decode(), "data-lt-config")
+        assert config["editableLanguages"] == ["en"]
 
     def test_no_permission_does_not_inject(self, make_request, settings):
         """When checker returns False, middleware doesn't inject assets at all."""
@@ -1061,7 +1151,7 @@ class TestPerLanguageConfig:
         request = make_request("get", "/page/", has_permission=False)
         response = mw(request)
 
-        assert b"__LT_CONFIG__" not in response.content
+        assert b"data-lt-config" not in response.content
 
     def test_partial_permission_preserves_language_order(self, make_request, settings):
         """editableLanguages should maintain the same order as settings.languages."""
@@ -1072,5 +1162,5 @@ class TestPerLanguageConfig:
         _clear_caches()
         mw._inject_assets(make_request("get", "/page/"), response, editable_languages={"de", "en"})
 
-        content = response.content.decode()
-        assert 'editableLanguages:["en","de"]' in content
+        config = _extract_template_attr(response.content.decode(), "data-lt-config")
+        assert config["editableLanguages"] == ["en", "de"]
