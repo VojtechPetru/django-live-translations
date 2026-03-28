@@ -651,7 +651,7 @@ class TestInjectPartialStrings:
     """Tests for partial HTML responses (no </body> tag)."""
 
     @pytest.fixture(autouse=True)
-    def _setup(self) -> t.Generator[None]:
+    def _setup(self) -> t.Generator[None, None, None]:
         strings.reset_string_registry()
         yield
         strings.reset_string_registry()
